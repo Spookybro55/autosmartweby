@@ -1,0 +1,549 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { format, parseISO } from "date-fns";
+import { cs } from "date-fns/locale";
+import { toast } from "sonner";
+import {
+  ExternalLink,
+  Globe,
+  Mail,
+  Phone,
+  Save,
+  User,
+  Building2,
+  Loader2,
+} from "lucide-react";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { PriorityBadge } from "@/components/leads/priority-badge";
+import { StatusBadge } from "@/components/leads/status-badge";
+
+const OUTREACH_STAGES: Record<string, string> = {
+  NOT_CONTACTED: "Neosloveno",
+  DRAFT_READY: "Připraveno",
+  CONTACTED: "Osloveno",
+  RESPONDED: "Reagoval",
+  WON: "Zájem",
+  LOST: "Nezájem",
+};
+
+const NEXT_ACTIONS = [
+  "Oslovit",
+  "Zavolat",
+  "Poslat e-mail",
+  "Čekat na odpověď",
+  "Follow-up",
+  "Naplánovat schůzku",
+];
+
+interface Lead {
+  id: string;
+  rowNumber: number;
+  businessName: string;
+  ico: string;
+  city: string;
+  area: string;
+  phone: string;
+  email: string;
+  websiteUrl: string;
+  hasWebsite: boolean;
+  contactName: string;
+  segment: string;
+  serviceType: string;
+  painPoint: string;
+  rating: number | null;
+  reviewsCount: number | null;
+  source: string;
+  createdAt: string;
+  contactReady: boolean;
+  contactReason: string;
+  contactPriority: "HIGH" | "MEDIUM" | "LOW";
+  previewUrl: string;
+  previewScreenshotUrl: string;
+  previewHeadline: string;
+  emailSubjectDraft: string;
+  emailBodyDraft: string;
+  emailSyncStatus: string;
+  emailReplyType: string;
+  lastEmailSentAt: string;
+  lastEmailReceivedAt: string;
+  outreachStage: string;
+  nextAction: string;
+  lastContactAt: string;
+  nextFollowupAt: string;
+  salesNote: string;
+  personalizationLevel: string;
+}
+
+interface LeadEditableFields {
+  outreachStage: string;
+  nextAction: string;
+  lastContactAt: string;
+  nextFollowupAt: string;
+  salesNote: string;
+}
+
+interface LeadDetailDrawerProps {
+  leadId: string | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSaved: () => void;
+}
+
+function formatDateForInput(dateStr: string | null | undefined): string {
+  if (!dateStr) return "";
+  try {
+    return format(parseISO(dateStr), "yyyy-MM-dd");
+  } catch {
+    return "";
+  }
+}
+
+function DetailRow({
+  icon,
+  label,
+  value,
+  href,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string | null | undefined;
+  href?: string;
+}) {
+  if (!value) return null;
+  return (
+    <div className="flex items-start gap-3 py-1.5">
+      <span className="mt-0.5 text-muted-foreground">{icon}</span>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs text-muted-foreground">{label}</p>
+        {href ? (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-primary hover:underline inline-flex items-center gap-1"
+          >
+            {value}
+            <ExternalLink className="size-3" />
+          </a>
+        ) : (
+          <p className="text-sm text-foreground">{value}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+      {children}
+    </h3>
+  );
+}
+
+function DrawerSkeleton() {
+  return (
+    <div className="space-y-6 p-4 pt-0">
+      <div className="space-y-2">
+        <Skeleton className="h-6 w-48" />
+        <Skeleton className="h-4 w-24" />
+      </div>
+      <Separator />
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="space-y-3">
+          <Skeleton className="h-3 w-20" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-3/4" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function LeadDetailDrawer({
+  leadId,
+  open,
+  onOpenChange,
+  onSaved,
+}: LeadDetailDrawerProps) {
+  const [lead, setLead] = useState<Lead | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState<LeadEditableFields>({
+    outreachStage: "",
+    nextAction: "",
+    lastContactAt: "",
+    nextFollowupAt: "",
+    salesNote: "",
+  });
+
+  const abortRef = useRef<AbortController | null>(null);
+
+  const fetchLead = useCallback(async (id: string) => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    setLoading(true);
+    setLead(null);
+
+    try {
+      const res = await fetch(`/api/leads/${id}`, {
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error("Nepodařilo se načíst detail leadu");
+      const data: Lead = await res.json();
+      setLead(data);
+      setForm({
+        outreachStage: data.outreachStage ?? "",
+        nextAction: data.nextAction ?? "",
+        lastContactAt: formatDateForInput(data.lastContactAt),
+        nextFollowupAt: formatDateForInput(data.nextFollowupAt),
+        salesNote: data.salesNote ?? "",
+      });
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        toast.error("Chyba při načítání leadu");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open && leadId) {
+      fetchLead(leadId);
+    }
+    if (!open) {
+      setLead(null);
+    }
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, [open, leadId, fetchLead]);
+
+  async function handleSave() {
+    if (!leadId || saving) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/leads/${leadId}/update`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) throw new Error("Nepodařilo se uložit změny");
+      toast.success("Změny uloženy");
+      onSaved();
+    } catch {
+      toast.error("Chyba při ukládání");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function updateForm(patch: Partial<LeadEditableFields>) {
+    setForm((prev) => ({ ...prev, ...patch }));
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="right"
+        className="w-full sm:max-w-[520px] p-0 flex flex-col"
+        showCloseButton
+      >
+        {loading || !lead ? (
+          <>
+            <SheetHeader className="p-4 pb-0">
+              <SheetTitle>
+                <Skeleton className="h-6 w-48" />
+              </SheetTitle>
+              <SheetDescription>
+                <Skeleton className="h-4 w-24" />
+              </SheetDescription>
+            </SheetHeader>
+            <DrawerSkeleton />
+          </>
+        ) : (
+          <>
+            <SheetHeader className="p-4 pb-2">
+              <div className="flex items-start justify-between gap-3 pr-8">
+                <div className="min-w-0">
+                  <SheetTitle className="text-lg leading-tight">
+                    {lead.businessName}
+                  </SheetTitle>
+                  <SheetDescription className="mt-1">
+                    {lead.city}
+                    {lead.area ? ` / ${lead.area}` : ""}
+                  </SheetDescription>
+                </div>
+                <PriorityBadge priority={lead.contactPriority} />
+              </div>
+            </SheetHeader>
+
+            <ScrollArea className="flex-1 overflow-y-auto">
+              <div className="px-4 pb-4 space-y-5">
+                {/* Kontaktni udaje */}
+                <section>
+                  <SectionTitle>Kontaktní údaje</SectionTitle>
+                  <div className="space-y-0.5">
+                    <DetailRow
+                      icon={<Phone className="size-3.5" />}
+                      label="Telefon"
+                      value={lead.phone}
+                      href={lead.phone ? `tel:${lead.phone}` : undefined}
+                    />
+                    <DetailRow
+                      icon={<Mail className="size-3.5" />}
+                      label="E-mail"
+                      value={lead.email}
+                      href={lead.email ? `mailto:${lead.email}` : undefined}
+                    />
+                    <DetailRow
+                      icon={<Globe className="size-3.5" />}
+                      label="Web"
+                      value={lead.websiteUrl}
+                      href={lead.websiteUrl || undefined}
+                    />
+                    <DetailRow
+                      icon={<User className="size-3.5" />}
+                      label="Kontaktní osoba"
+                      value={lead.contactName}
+                    />
+                    <DetailRow
+                      icon={<Building2 className="size-3.5" />}
+                      label="ICO"
+                      value={lead.ico}
+                    />
+                  </div>
+                </section>
+
+                <Separator />
+
+                {/* Shrnutí */}
+                <section>
+                  <SectionTitle>Shrnutí</SectionTitle>
+                  <div className="space-y-2 text-sm">
+                    {lead.painPoint && (
+                      <div>
+                        <span className="text-muted-foreground">Problém: </span>
+                        <span className="text-foreground">{lead.painPoint}</span>
+                      </div>
+                    )}
+                    {lead.serviceType && (
+                      <div>
+                        <span className="text-muted-foreground">Služba: </span>
+                        <span className="text-foreground">{lead.serviceType}</span>
+                      </div>
+                    )}
+                    {lead.segment && (
+                      <div>
+                        <span className="text-muted-foreground">Segment: </span>
+                        <span className="text-foreground">{lead.segment}</span>
+                      </div>
+                    )}
+                    {lead.contactReason && (
+                      <div>
+                        <span className="text-muted-foreground">Důvod kontaktu: </span>
+                        <span className="text-foreground">{lead.contactReason}</span>
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                <Separator />
+
+                {/* Preview */}
+                {(lead.previewUrl || lead.previewHeadline) && (
+                  <>
+                    <section>
+                      <SectionTitle>Preview</SectionTitle>
+                      {lead.previewHeadline && (
+                        <p className="text-sm text-foreground mb-1.5">
+                          {lead.previewHeadline}
+                        </p>
+                      )}
+                      {lead.previewUrl && (
+                        <a
+                          href={lead.previewUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                        >
+                          Zobrazit preview
+                          <ExternalLink className="size-3" />
+                        </a>
+                      )}
+                    </section>
+                    <Separator />
+                  </>
+                )}
+
+                {/* E-mail draft */}
+                {(lead.emailSubjectDraft || lead.emailBodyDraft) && (
+                  <>
+                    <section>
+                      <SectionTitle>E-mail draft</SectionTitle>
+                      {lead.emailSubjectDraft && (
+                        <div className="mb-2">
+                          <p className="text-xs text-muted-foreground mb-0.5">
+                            Předmět
+                          </p>
+                          <p className="text-sm text-foreground font-medium">
+                            {lead.emailSubjectDraft}
+                          </p>
+                        </div>
+                      )}
+                      {lead.emailBodyDraft && (
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-0.5">
+                            Tělo e-mailu
+                          </p>
+                          <Textarea
+                            readOnly
+                            value={lead.emailBodyDraft}
+                            className="min-h-24 text-sm bg-muted/30 resize-none"
+                          />
+                        </div>
+                      )}
+                    </section>
+                    <Separator />
+                  </>
+                )}
+
+                {/* Editovatelna pole */}
+                <section>
+                  <SectionTitle>Editovatelná pole</SectionTitle>
+                  <div className="space-y-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="drawer-stage">Stav</Label>
+                      <Select
+                        value={form.outreachStage}
+                        onValueChange={(val) =>
+                          val != null && updateForm({ outreachStage: val })
+                        }
+                      >
+                        <SelectTrigger id="drawer-stage" className="w-full">
+                          <SelectValue placeholder="Zvolte stav" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.entries(OUTREACH_STAGES).map(
+                            ([key, label]) => (
+                              <SelectItem key={key} value={key}>
+                                {label}
+                              </SelectItem>
+                            )
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="drawer-action">Další krok</Label>
+                      <Select
+                        value={form.nextAction}
+                        onValueChange={(val) =>
+                          val != null && updateForm({ nextAction: val })
+                        }
+                      >
+                        <SelectTrigger id="drawer-action" className="w-full">
+                          <SelectValue placeholder="Zvolte akci" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {NEXT_ACTIONS.map((action) => (
+                            <SelectItem key={action} value={action}>
+                              {action}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="drawer-last-contact">
+                          Poslední kontakt
+                        </Label>
+                        <Input
+                          id="drawer-last-contact"
+                          type="date"
+                          value={form.lastContactAt}
+                          onChange={(e) =>
+                            updateForm({ lastContactAt: e.target.value })
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="drawer-followup">Follow-up</Label>
+                        <Input
+                          id="drawer-followup"
+                          type="date"
+                          value={form.nextFollowupAt}
+                          onChange={(e) =>
+                            updateForm({ nextFollowupAt: e.target.value })
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="drawer-note">Poznámka</Label>
+                      <Textarea
+                        id="drawer-note"
+                        value={form.salesNote}
+                        onChange={(e) =>
+                          updateForm({ salesNote: e.target.value })
+                        }
+                        placeholder="Poznámka k leadu..."
+                        className="min-h-20"
+                      />
+                    </div>
+
+                    <Button
+                      onClick={handleSave}
+                      disabled={saving}
+                      className="w-full"
+                    >
+                      {saving ? (
+                        <>
+                          <Loader2 className="size-4 mr-1.5 animate-spin" />
+                          Ukládám...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="size-4 mr-1.5" />
+                          Uložit změny
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </section>
+              </div>
+            </ScrollArea>
+          </>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}

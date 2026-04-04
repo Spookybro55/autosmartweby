@@ -1,0 +1,98 @@
+/**
+ * Apps Script Web App endpoint for CRM Frontend write-back.
+ *
+ * Deploy as: Web App → Execute as: Me → Access: Anyone (with token verification)
+ *
+ * Add this to your existing Apps Script project alongside the current code.
+ * It reuses the existing write-back logic from ContactSheet.gs.
+ */
+
+var FRONTEND_SECRET = PropertiesService.getScriptProperties().getProperty('FRONTEND_API_SECRET');
+
+function doPost(e) {
+  try {
+    var payload = JSON.parse(e.postData.contents);
+
+    // Verify token
+    if (payload.token !== FRONTEND_SECRET) {
+      return ContentService.createTextOutput(JSON.stringify({
+        success: false, error: 'Unauthorized'
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (payload.action === 'updateLead') {
+      return handleUpdateLead_(payload);
+    }
+
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false, error: 'Unknown action'
+    })).setMimeType(ContentService.MimeType.JSON);
+
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false, error: err.message
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function handleUpdateLead_(payload) {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var leadsSheet = ss.getSheetByName(MAIN_SHEET_NAME);
+  var rowNumber = payload.rowNumber;
+  var fields = payload.fields;
+
+  // Validate row number
+  if (!rowNumber || rowNumber < 2) {
+    return jsonResponse_({ success: false, error: 'Invalid row number' });
+  }
+
+  // Identity verification — same as onContactSheetEdit
+  var headers = leadsSheet.getRange(1, 1, 1, leadsSheet.getLastColumn()).getValues()[0];
+  var rowData = leadsSheet.getRange(rowNumber, 1, 1, leadsSheet.getLastColumn()).getValues()[0];
+
+  var nameIdx = headers.indexOf('business_name');
+  var cityIdx = headers.indexOf('city');
+
+  if (rowData[nameIdx] !== payload.businessName || rowData[cityIdx] !== payload.city) {
+    return jsonResponse_({ success: false, error: 'Identity verification failed' });
+  }
+
+  // Lock to prevent concurrent writes
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) {
+    return jsonResponse_({ success: false, error: 'Could not acquire lock' });
+  }
+
+  try {
+    // Write each field to its corresponding LEADS column
+    var fieldMap = {
+      'outreach_stage': 'outreach_stage',
+      'next_action': 'next_action',
+      'last_contact_at': 'last_contact_at',
+      'next_followup_at': 'next_followup_at',
+      'sales_note': 'sales_note'
+    };
+
+    for (var fieldKey in fields) {
+      if (!fieldMap[fieldKey]) continue;
+
+      var colHeader = fieldMap[fieldKey];
+      var colIdx = headers.indexOf(colHeader);
+      if (colIdx === -1) continue;
+
+      var value = fields[fieldKey];
+      leadsSheet.getRange(rowNumber, colIdx + 1).setValue(value);
+    }
+
+    aswLog_('FRONTEND_WRITE', 'Updated row ' + rowNumber + ': ' + JSON.stringify(Object.keys(fields)));
+
+    return jsonResponse_({ success: true });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function jsonResponse_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}

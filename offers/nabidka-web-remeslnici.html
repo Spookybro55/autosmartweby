@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tvorba webů pro řemeslníky — Sebastián Fridrich</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            color: #1a1a2e;
+            background: #fff;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .page {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 28px 40px;
+        }
+
+        /* --- Header --- */
+        .header {
+            margin-bottom: 20px;
+        }
+
+        .header-name {
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: #64748b;
+            margin-bottom: 12px;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            font-weight: 800;
+            line-height: 1.2;
+            color: #0f172a;
+            margin-bottom: 14px;
+        }
+
+        .hook {
+            font-size: 17px;
+            color: #334155;
+            line-height: 1.5;
+            max-width: 620px;
+        }
+
+        /* --- Objection buster --- */
+        .objection {
+            background: #f8fafc;
+            border-left: 3px solid #0f172a;
+            padding: 16px 20px;
+            margin: 20px 0;
+            font-size: 14px;
+            color: #334155;
+            font-weight: 500;
+        }
+
+        /* --- USP boxes --- */
+        .usp-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin: 20px 0;
+        }
+
+        .usp-box {
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 14px 16px;
+        }
+
+        .usp-box h3 {
+            font-size: 15px;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 6px;
+        }
+
+        .usp-box p {
+            font-size: 13px;
+            color: #64748b;
+            line-height: 1.5;
+        }
+
+        /* --- Price --- */
+        .price-section {
+            background: #0f172a;
+            color: #fff;
+            border-radius: 10px;
+            padding: 20px 28px;
+            margin: 20px 0;
+        }
+
+        .price-section h2 {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+
+        .price-options {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .price-option {
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 8px;
+            padding: 14px 18px;
+        }
+
+        .price-option .label {
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: #94a3b8;
+            margin-bottom: 8px;
+        }
+
+        .price-option .amount {
+            font-size: 24px;
+            font-weight: 800;
+            color: #fff;
+            margin-bottom: 4px;
+        }
+
+        .price-option .detail {
+            font-size: 13px;
+            color: #94a3b8;
+            line-height: 1.5;
+        }
+
+        .price-note {
+            font-size: 12px;
+            color: #64748b;
+            margin-top: 12px;
+        }
+
+        /* --- Two columns --- */
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 28px;
+            margin: 20px 0;
+        }
+
+        .two-col h2 {
+            font-size: 17px;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 14px;
+        }
+
+        .checklist {
+            list-style: none;
+        }
+
+        .checklist li {
+            font-size: 14px;
+            color: #334155;
+            padding: 5px 0;
+            padding-left: 22px;
+            position: relative;
+        }
+
+        .checklist li::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 10px;
+            width: 8px;
+            height: 8px;
+            background: #0f172a;
+            border-radius: 50%;
+        }
+
+        /* --- Steps --- */
+        .steps {
+            list-style: none;
+            counter-reset: step;
+        }
+
+        .steps li {
+            font-size: 14px;
+            color: #334155;
+            padding: 6px 0;
+            padding-left: 28px;
+            position: relative;
+        }
+
+        .steps li::before {
+            counter-increment: step;
+            content: counter(step);
+            position: absolute;
+            left: 0;
+            top: 6px;
+            width: 20px;
+            height: 20px;
+            background: #f1f5f9;
+            border-radius: 50%;
+            font-size: 11px;
+            font-weight: 700;
+            color: #0f172a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+            text-align: center;
+        }
+
+        /* --- CTA --- */
+        .cta {
+            background: #f8fafc;
+            border-radius: 10px;
+            padding: 20px 28px;
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        .cta h2 {
+            font-size: 20px;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 6px;
+        }
+
+        .cta p {
+            font-size: 14px;
+            color: #64748b;
+            margin-bottom: 18px;
+        }
+
+        .cta-contact {
+            display: flex;
+            justify-content: center;
+            gap: 28px;
+            flex-wrap: wrap;
+        }
+
+        .cta-contact a {
+            font-size: 16px;
+            font-weight: 700;
+            color: #0f172a;
+            text-decoration: none;
+            padding: 10px 24px;
+            border: 2px solid #0f172a;
+            border-radius: 6px;
+            transition: all 0.15s;
+        }
+
+        .cta-contact a:hover {
+            background: #0f172a;
+            color: #fff;
+        }
+
+        /* --- Footer --- */
+        .footer {
+            border-top: 1px solid #e2e8f0;
+            padding-top: 14px;
+            margin-top: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .footer-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: #0f172a;
+        }
+
+        .footer-note {
+            font-size: 12px;
+            color: #94a3b8;
+        }
+
+        /* --- Print --- */
+        @media print {
+            body { background: #fff; }
+            .page { padding: 24px; max-width: 100%; }
+            .cta-contact a { border: 1px solid #000; }
+        }
+
+        @media (max-width: 600px) {
+            .page { padding: 28px 20px; }
+            .usp-grid { grid-template-columns: 1fr; }
+            .price-options { grid-template-columns: 1fr; }
+            .two-col { grid-template-columns: 1fr; }
+            .header h1 { font-size: 26px; }
+            .cta-contact { flex-direction: column; align-items: center; }
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+
+        <!-- Header -->
+        <div class="header">
+            <div class="header-name">Sebastián Fridrich</div>
+            <h1>Profesionální web pro řemeslníky a&nbsp;lokální služby</h1>
+            <p class="hook">Čistý web na míru, který funguje na mobilu, vysvětlí vaše služby a přivede vám nové zákazníky.</p>
+        </div>
+
+        <!-- Objection buster -->
+        <div class="objection">
+            Zákazník, který vás nenajde na Googlu, zavolá konkurenci. Jednoduchý web to změní.
+        </div>
+
+        <!-- USP -->
+        <div class="usp-grid">
+            <div class="usp-box">
+                <h3>Hotovo do 7 dnů</h3>
+                <p>Rychlá realizace bez zbytečného protahování.</p>
+            </div>
+            <div class="usp-box">
+                <h3>Platba až po spokojenosti</h3>
+                <p>Platíte až ve chvíli, kdy jste s&nbsp;výsledkem spokojený.</p>
+            </div>
+            <div class="usp-box">
+                <h3>Na míru, ne šablona</h3>
+                <p>Web stavím podle vašich potřeb, ne z&nbsp;univerzální šablony.</p>
+            </div>
+        </div>
+
+        <!-- Price -->
+        <div class="price-section">
+            <h2>Kolik to stojí</h2>
+            <div class="price-options">
+                <div class="price-option">
+                    <div class="label">Jednorázově</div>
+                    <div class="amount">8 900 Kč</div>
+                    <div class="detail">Web na klíč. Žádné měsíční poplatky.</div>
+                </div>
+                <div class="price-option">
+                    <div class="label">Měsíční paušál</div>
+                    <div class="amount">990 Kč/měs.</div>
+                    <div class="detail">Web, doména, hosting i drobné úpravy v&nbsp;jednom.</div>
+                </div>
+            </div>
+            <div class="price-note">Doména a hosting se řeší podle potřeby projektu. Profesionální focení na vyžádání.</div>
+        </div>
+
+        <!-- Two columns -->
+        <div class="two-col">
+            <div>
+                <h2>Co v ceně dostanete</h2>
+                <ul class="checklist">
+                    <li>Doména, hosting a kompletní nastavení</li>
+                    <li>Web na míru včetně textů</li>
+                    <li>Optimalizace pro mobil, tablet i PC</li>
+                    <li>SEO a dohledatelnost v Googlu i AI</li>
+                    <li>Drobné úpravy do budoucna v ceně</li>
+                </ul>
+            </div>
+            <div>
+                <h2>Jak to probíhá</h2>
+                <ol class="steps">
+                    <li>Krátký call nebo schůzka — zjistím, co potřebujete</li>
+                    <li>Navrhnu strukturu a vzhled webu</li>
+                    <li>Připravím web a zapracuji připomínky</li>
+                    <li>Spustím, předám přístupy, postarám se o doladění</li>
+                </ol>
+            </div>
+        </div>
+
+        <!-- CTA -->
+        <div class="cta">
+            <h2>Zavolejte nebo napište</h2>
+            <p>Ozvu se do 24 hodin s návrhem zdarma a bez závazků.</p>
+            <div class="cta-contact">
+                <a href="tel:+420601557018">601 557 018</a>
+                <a href="mailto:sebastian@autosmartweb.cz">sebastian@autosmartweb.cz</a>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <span class="footer-name">Sebastián Fridrich</span>
+            <span class="footer-note">Tvorba webů pro řemeslníky a lokální služby</span>
+        </div>
+
+    </div>
+</body>
+</html>

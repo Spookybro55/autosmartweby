@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Automatizace pro firmy — Sebastián Fridrich</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            color: #1a1a2e;
+            background: #fff;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .page {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 28px 40px;
+        }
+
+        .header { margin-bottom: 20px; }
+
+        .header-name {
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: #64748b;
+            margin-bottom: 12px;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            font-weight: 800;
+            line-height: 1.2;
+            color: #0f172a;
+            margin-bottom: 14px;
+        }
+
+        .hook {
+            font-size: 17px;
+            color: #334155;
+            line-height: 1.5;
+            max-width: 640px;
+        }
+
+        .objection {
+            background: #f8fafc;
+            border-left: 3px solid #0f172a;
+            padding: 14px 20px;
+            margin: 20px 0;
+            font-size: 14px;
+            color: #334155;
+            font-weight: 500;
+        }
+
+        .usp-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin: 20px 0;
+        }
+
+        .usp-box {
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 14px 16px;
+        }
+
+        .usp-box h3 {
+            font-size: 15px;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 6px;
+        }
+
+        .usp-box p {
+            font-size: 13px;
+            color: #64748b;
+            line-height: 1.5;
+        }
+
+        /* Services */
+        .services {
+            margin: 20px 0;
+        }
+
+        .services h2 {
+            font-size: 17px;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 12px;
+        }
+
+        .services-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .service-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 10px 14px;
+            background: #f8fafc;
+            border-radius: 6px;
+        }
+
+        .service-icon {
+            width: 28px;
+            height: 28px;
+            background: #0f172a;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            color: #fff;
+            font-size: 14px;
+        }
+
+        .service-item h4 {
+            font-size: 13px;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 2px;
+        }
+
+        .service-item p {
+            font-size: 12px;
+            color: #64748b;
+            line-height: 1.4;
+        }
+
+        /* Price */
+        .price-section {
+            background: #0f172a;
+            color: #fff;
+            border-radius: 10px;
+            padding: 20px 28px;
+            margin: 20px 0;
+        }
+
+        .price-section h2 {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+
+        .price-options {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 14px;
+        }
+
+        .price-option {
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 8px;
+            padding: 14px 16px;
+        }
+
+        .price-option .label {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: #94a3b8;
+            margin-bottom: 6px;
+        }
+
+        .price-option .amount {
+            font-size: 22px;
+            font-weight: 800;
+            color: #fff;
+            margin-bottom: 4px;
+        }
+
+        .price-option .detail {
+            font-size: 12px;
+            color: #94a3b8;
+            line-height: 1.4;
+        }
+
+        .price-note {
+            font-size: 12px;
+            color: #64748b;
+            margin-top: 10px;
+        }
+
+        /* Two columns */
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 28px;
+            margin: 20px 0;
+        }
+
+        .two-col h2 {
+            font-size: 17px;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 12px;
+        }
+
+        .checklist { list-style: none; }
+
+        .checklist li {
+            font-size: 13px;
+            color: #334155;
+            padding: 4px 0;
+            padding-left: 22px;
+            position: relative;
+        }
+
+        .checklist li::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 9px;
+            width: 8px;
+            height: 8px;
+            background: #0f172a;
+            border-radius: 50%;
+        }
+
+        .steps { list-style: none; counter-reset: step; }
+
+        .steps li {
+            font-size: 13px;
+            color: #334155;
+            padding: 4px 0;
+            padding-left: 28px;
+            position: relative;
+        }
+
+        .steps li::before {
+            counter-increment: step;
+            content: counter(step);
+            position: absolute;
+            left: 0;
+            top: 5px;
+            width: 20px;
+            height: 20px;
+            background: #f1f5f9;
+            border-radius: 50%;
+            font-size: 11px;
+            font-weight: 700;
+            color: #0f172a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+            text-align: center;
+        }
+
+        /* CTA */
+        .cta {
+            background: #f8fafc;
+            border-radius: 10px;
+            padding: 20px 28px;
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        .cta h2 {
+            font-size: 20px;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 4px;
+        }
+
+        .cta p {
+            font-size: 13px;
+            color: #64748b;
+            margin-bottom: 14px;
+        }
+
+        .cta-contact {
+            display: flex;
+            justify-content: center;
+            gap: 28px;
+            flex-wrap: wrap;
+        }
+
+        .cta-contact a {
+            font-size: 16px;
+            font-weight: 700;
+            color: #0f172a;
+            text-decoration: none;
+            padding: 8px 22px;
+            border: 2px solid #0f172a;
+            border-radius: 6px;
+        }
+
+        /* Footer */
+        .footer {
+            border-top: 1px solid #e2e8f0;
+            padding-top: 14px;
+            margin-top: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .footer-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: #0f172a;
+        }
+
+        .footer-note {
+            font-size: 12px;
+            color: #94a3b8;
+        }
+
+        @media print {
+            body { background: #fff; }
+            .page { padding: 24px; max-width: 100%; }
+            .cta-contact a { border: 1px solid #000; }
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+
+        <div class="header">
+            <div class="header-name">Sebastián Fridrich</div>
+            <h1>Automatizace a&nbsp;AI řešení pro malé firmy</h1>
+            <p class="hook">Propojím vaše nástroje, zautomatizuji rutinu a&nbsp;nasadím AI tam, kde vám ušetří čas i&nbsp;peníze.</p>
+        </div>
+
+        <div class="objection">
+            Kolik hodin týdně trávíte přepisováním dat, odpovídáním na stejné dotazy nebo ruční správou objednávek? To všechno může jet samo.
+        </div>
+
+        <div class="usp-grid">
+            <div class="usp-box">
+                <h3>Hotovo za dny, ne měsíce</h3>
+                <p>Většinu automatizací dodám do&nbsp;týdne.</p>
+            </div>
+            <div class="usp-box">
+                <h3>Platba až po spokojenosti</h3>
+                <p>Platíte až ve chvíli, kdy řešení funguje podle dohody.</p>
+            </div>
+            <div class="usp-box">
+                <h3>Bez zbytečné složitosti</h3>
+                <p>Žádný overengineering. Jednoduché, funkční, spolehlivé.</p>
+            </div>
+        </div>
+
+        <div class="services">
+            <h2>Co umím vyřešit</h2>
+            <div class="services-grid">
+                <div class="service-item">
+                    <div class="service-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg></div>
+                    <div>
+                        <h4>Automatizace procesů</h4>
+                        <p>Propojení e-shopu, CRM, fakturace, e-mailů a tabulek. Objednávka přijde — vše se zpracuje samo.</p>
+                    </div>
+                </div>
+                <div class="service-item">
+                    <div class="service-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+                    <div>
+                        <h4>AI chatbot na web</h4>
+                        <p>Odpoví na dotazy 24/7, sbírá kontakty, kvalifikuje poptávky. Naučím ho vaše služby a ceník.</p>
+                    </div>
+                </div>
+                <div class="service-item">
+                    <div class="service-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+                    <div>
+                        <h4>Formuláře a kalendáře</h4>
+                        <p>Online rezervace, poptávkové formuláře s auto-odpovědí a zápisem do kalendáře nebo tabulky.</p>
+                    </div>
+                </div>
+                <div class="service-item">
+                    <div class="service-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></div>
+                    <div>
+                        <h4>Data a reporting</h4>
+                        <p>Automatický sběr dat, monitoring recenzí, konkurence nebo cen. Výstup přímo do tabulky.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="price-section">
+            <h2>Orientační ceník</h2>
+            <div class="price-options">
+                <div class="price-option">
+                    <div class="label">Jednoduchá automatizace</div>
+                    <div class="amount">3–8 tis. Kč</div>
+                    <div class="detail">Propojení 2–3 nástrojů, notifikace, zápisy do tabulek.</div>
+                </div>
+                <div class="price-option">
+                    <div class="label">Komplexní automatizace</div>
+                    <div class="amount">8–15 tis. Kč</div>
+                    <div class="detail">Více kroků, AI zpracování, podmínky, napojení na API.</div>
+                </div>
+                <div class="price-option">
+                    <div class="label">AI chatbot</div>
+                    <div class="amount">10–25 tis. Kč</div>
+                    <div class="detail">Setup + trénink na vaše data. Údržba od 2 tis. Kč/měs.</div>
+                </div>
+            </div>
+            <div class="price-note">Konečná cena závisí na rozsahu. První konzultace je zdarma.</div>
+        </div>
+
+        <div class="two-col">
+            <div>
+                <h2>Nástroje, se kterými pracuji</h2>
+                <ul class="checklist">
+                    <li>Make (Integromat), n8n, Zapier</li>
+                    <li>OpenAI API, Botpress, Voiceflow</li>
+                    <li>Google Workspace, Notion, Airtable</li>
+                    <li>Shoptet, WooCommerce, Fakturoid</li>
+                    <li>Slack, WhatsApp, e-mail, kalendáře</li>
+                </ul>
+            </div>
+            <div>
+                <h2>Jak spolupráce probíhá</h2>
+                <ol class="steps">
+                    <li>Krátký call — zjistím, co vás brzdí a kde ztrácíte čas</li>
+                    <li>Navrhnu řešení a odhad ceny</li>
+                    <li>Postavím automatizaci a otestuji</li>
+                    <li>Předám, zaškolím a postarám se o údržbu</li>
+                </ol>
+            </div>
+        </div>
+
+        <div class="cta">
+            <h2>Zavolejte nebo napište</h2>
+            <p>Řeknete mi, co vás brzdí — do 24 hodin navrhnu řešení. Zdarma, bez závazků.</p>
+            <div class="cta-contact">
+                <a href="tel:+420601557018">601 557 018</a>
+                <a href="mailto:sebastian@autosmartweb.cz">sebastian@autosmartweb.cz</a>
+            </div>
+        </div>
+
+        <div class="footer">
+            <span class="footer-name">Sebastián Fridrich</span>
+            <span class="footer-note">Automatizace a AI řešení pro malé firmy</span>
+        </div>
+
+    </div>
+</body>
+</html>

@@ -1,0 +1,115 @@
+commit f0bce257521285a1c7693e449095158bfcb22250
+Author: Spookybro55 <159467555+Spookybro55@users.noreply.github.com>
+Date:   Sat Apr 4 11:41:53 2026 +0200
+
+    snapshot: full CRM frontend before monorepo migration
+    
+    All components, API routes, hooks, lib, and config.
+    This is the last commit before removing crm-frontend/.git
+    and migrating to root monorepo.
+
+ README.md                                          | 100 ++-
+ package-lock.json                                  | 917 ++++++++++++++++++++-
+ package.json                                       |   5 +
+ src/app/api/auth/login/route.ts                    |  62 ++
+ src/app/api/leads/[id]/route.ts                    |  32 +
+ src/app/api/leads/[id]/update/route.ts             | 115 +++
+ src/app/api/leads/route.ts                         |  23 +
+ src/app/api/stats/route.ts                         |  25 +
+ src/app/dashboard/page.tsx                         | 170 ++++
+ src/app/follow-ups/page.tsx                        | 226 +++++
+ src/app/globals.css                                |   8 +
+ src/app/layout.tsx                                 |  32 +-
+ src/app/leads/page.tsx                             | 245 ++++++
+ src/app/login/page.tsx                             |  95 +++
+ src/app/page.tsx                                   |  66 +-
+ src/app/pipeline/page.tsx                          |  26 +
+ src/components/dashboard/follow-up-widget.tsx      | 174 ++++
+ src/components/dashboard/priority-leads-widget.tsx |  84 ++
+ src/components/dashboard/stat-card.tsx             | 122 +++
+ src/components/layout/app-shell.tsx                |  30 +
+ src/components/layout/header.tsx                   |  57 ++
+ src/components/layout/sidebar.tsx                  | 173 ++++
+ src/components/leads/lead-detail-drawer.tsx        | 549 ++++++++++++
+ src/components/leads/lead-filters.tsx              | 156 ++++
+ src/components/leads/leads-table.tsx               | 235 ++++++
+ src/components/leads/priority-badge.tsx            |  35 +
+ src/components/leads/status-badge.tsx              |  52 ++
+ src/components/pipeline/kanban-board.tsx           |  92 +++
+ src/components/pipeline/kanban-column.tsx          |  80 ++
+ src/components/ui/avatar.tsx                       | 109 +++
+ src/components/ui/badge.tsx                        |  52 ++
+ src/components/ui/card.tsx                         | 103 +++
+ src/components/ui/command.tsx                      | 196 +++++
+ src/components/ui/dialog.tsx                       | 160 ++++
+ src/components/ui/dropdown-menu.tsx                | 268 ++++++
+ src/components/ui/input-group.tsx                  | 158 ++++
+ src/components/ui/input.tsx                        |  20 +
+ src/components/ui/label.tsx                        |  20 +
+ src/components/ui/popover.tsx                      |  90 ++
+ src/components/ui/scroll-area.tsx                  |  55 ++
+ src/components/ui/select.tsx                       | 201 +++++
+ src/components/ui/separator.tsx                    |  25 +
+ src/components/ui/sheet.tsx                        | 138 ++++
+ src/components/ui/skeleton.tsx                     |  13 +
+ src/components/ui/table.tsx                        | 116 +++
+ src/components/ui/tabs.tsx                         |  82 ++
+ src/components/ui/textarea.tsx                     |  18 +
+ src/components/ui/tooltip.tsx                      |  66 ++
+ src/hooks/use-dashboard-stats.ts                   |  31 +
+ src/hooks/use-lead-detail.ts                       |  33 +
+ src/hooks/use-lead-update.ts                       |  51 ++
+ src/hooks/use-leads.ts                             |  31 +
+ src/lib/config.ts                                  |  78 ++
+ src/lib/domain/filters.ts                          |  27 +
+ src/lib/domain/lead.ts                             |  98 +++
+ src/lib/domain/stats.ts                            |  13 +
+ src/lib/google/apps-script-endpoint.gs.example     |  98 +++
+ src/lib/google/apps-script-writer.ts               |  83 ++
+ src/lib/google/sheets-reader.ts                    |  77 ++
+ src/lib/mappers/sheet-to-domain.ts                 | 147 ++++
+ src/lib/mock/leads-data.ts                         | 509 ++++++++++++
+ src/lib/mock/mock-service.ts                       |  94 +++
+ src/middleware.ts                                  |  95 +++
+ 63 files changed, 7232 insertions(+), 109 deletions(-)
+
+commit a606bc0a01e29299b83aa77ee822c6430322fef9
+Author: Spookybro55 <159467555+Spookybro55@users.noreply.github.com>
+Date:   Sat Apr 4 03:48:24 2026 +0200
+
+    feat: initial commit
+
+ components.json              |   25 +
+ package-lock.json            | 3393 ++++++++++++++++++++++++++++++++++++++++--
+ package.json                 |    9 +-
+ src/app/globals.css          |  132 +-
+ src/components/ui/button.tsx |   60 +
+ src/lib/utils.ts             |    6 +
+ 6 files changed, 3506 insertions(+), 119 deletions(-)
+
+commit 39d29667b97339cead0bc522a17cfeb00a6d3fb7
+Author: Spookybro55 <159467555+Spookybro55@users.noreply.github.com>
+Date:   Sat Apr 4 03:47:49 2026 +0200
+
+    Initial commit from Create Next App
+
+ .gitignore          |   41 +
+ AGENTS.md           |    5 +
+ CLAUDE.md           |    1 +
+ README.md           |   36 +
+ eslint.config.mjs   |   18 +
+ next.config.ts      |    7 +
+ package-lock.json   | 6680 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ package.json        |   26 +
+ postcss.config.mjs  |    7 +
+ public/file.svg     |    1 +
+ public/globe.svg    |    1 +
+ public/next.svg     |    1 +
+ public/vercel.svg   |    1 +
+ public/window.svg   |    1 +
+ src/app/favicon.ico |  Bin 0 -> 25931 bytes
+ src/app/globals.css |   26 +
+ src/app/layout.tsx  |   33 +
+ src/app/page.tsx    |   65 +
+ tsconfig.json       |   34 +
+ 19 files changed, 6984 insertions(+)

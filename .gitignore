@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+.pnp.*
+
+# Build outputs
+.next/
+out/
+build/
+*.tsbuildinfo
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Claude Code runtime
+.claude-flow/daemon.pid
+.claude-flow/daemon.log
+.claude-flow/data/
+.claude-flow/metrics/
+.claude-flow/swarm/
+.claude-flow/system/
+.claude-flow/tasks/
+.claude-flow/agents/
+.claude-flow/security/
+.swarm/
+
+# Editor artifacts
+~$*
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+
+# Temp
+*.tmp
+*.bak

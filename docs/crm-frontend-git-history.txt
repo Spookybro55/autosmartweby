@@ -1,0 +1,3 @@
+f0bce25 snapshot: full CRM frontend before monorepo migration
+a606bc0 feat: initial commit
+39d2966 Initial commit from Create Next App
