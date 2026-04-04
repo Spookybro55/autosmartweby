@@ -6,6 +6,16 @@
 
 ## 2026-04-04
 
+### [DOCS] Rollout checklist pro Variantu B
+- **Oblast:** docs
+- **Vytvorene soubory:** docs/17-writeback-rollout-checklist.md
+- **Co:** Runbook pro provozni overeni Varianty B: deploy instrukce, Ensure lead IDs, Audit lead IDs, Refresh kontaktniho sheetu, smoke test write-backu (3 scenare), kontrola logu, postup pro uzavreni C-3. Obsahuje pending update pro locked docs/09-project-control-tower.md.
+- **Proc:** Varianta B je implementovana v kodu, ale pred definitivnim uzavrenim C-3 je nutne provozni overeni v zivem prostredi
+- **Dopad:** Jasny postup pro vlastnika — 6 kroku k PASS/FAIL rozhodnuti
+- **Aktualizovane docs:** docs/11-change-log.md
+- **Test/Overeni:** node scripts/check-doc-sync.mjs
+- **Autor:** Claude + user
+
 ### [FEATURE] Varianta B — lead_id-based write-back (C-3 VYRESENO)
 - **Oblast:** apps-script (ContactSheet.gs, Helpers.gs), docs
 - **Zmenene soubory:** apps-script/ContactSheet.gs (buildContactRowV2_, onContactSheetEdit, refreshContactingSheet), apps-script/Helpers.gs (findRowByLeadId_)
