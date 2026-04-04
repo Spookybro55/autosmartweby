@@ -170,7 +170,7 @@ var DETAIL_HEADERS_ = [
   'P\u0159edm\u011bt e-mailu',    // 16
   'N\u00e1vrh zpr\u00e1vy',       // 17
   'Pipeline stav',                 // 18
-  'CRM \u0159\u00e1dek'           // 19
+  'Lead ID'                        // 19
 ];
 
 var TOTAL_COLS_ = VISIBLE_HEADERS_.length + DETAIL_HEADERS_.length;
@@ -241,7 +241,7 @@ function derivePreviewDisplay_(hr, row) {
    ROW BUILDER
    ═══════════════════════════════════════════════════════════════ */
 
-function buildContactRowV2_(hr, row, sourceRowNum) {
+function buildContactRowV2_(hr, row) {
   var rd = hr.row(row);
 
   var businessName = String(rd.business_name || '').trim();
@@ -292,7 +292,7 @@ function buildContactRowV2_(hr, row, sourceRowNum) {
     String(hr.get(row, 'email_subject_draft') || ''),  // 16 Předmět
     String(hr.get(row, 'email_body_draft') || ''),     // 17 Zpráva
     rawOutreach,                                       // 18 Pipeline stav
-    sourceRowNum                                       // 19 CRM řádek
+    String(hr.get(row, 'lead_id') || '')               // 19 Lead ID
   ];
 
   return { data: visible.concat(detail), previewUrl: preview.url };
@@ -304,6 +304,15 @@ function buildContactRowV2_(hr, row, sourceRowNum) {
    ═══════════════════════════════════════════════════════════════ */
 
 function refreshContactingSheet() {
+  // R-3 fix: Lock prevents concurrent refresh + write-back collision
+  var refreshLock = LockService.getScriptLock();
+  if (!refreshLock.tryLock(5000)) {
+    aswLog_('WARN', 'refreshContactingSheet', 'Lock timeout — another operation in progress');
+    safeAlert_('Probíhá jiný zápis. Zkuste znovu za chvíli.');
+    return;
+  }
+
+  try {
   var ss = openCrmSpreadsheet_();
   var sourceSheet = getExternalSheet_(ss);
   if (!ensurePreviewExtensionReady_(sourceSheet)) return;
@@ -336,11 +345,24 @@ function refreshContactingSheet() {
   // --- Collect contact-ready rows ---
   var contactRows = [];
   var previewUrls = [];
+  var missingLeadIdCount = 0;
   for (var i = 0; i < updatedRows.length; i++) {
     if (trimLower_(hr.get(updatedRows[i], 'contact_ready')) !== 'true') continue;
-    var built = buildContactRowV2_(hr, updatedRows[i], i + DATA_START_ROW);
+    // P-1: Warn if contact-ready lead has no lead_id
+    var rowLeadId = String(hr.get(updatedRows[i], 'lead_id') || '').trim();
+    if (!rowLeadId) {
+      missingLeadIdCount++;
+      aswLog_('WARN', 'refreshContactingSheet',
+        'Contact-ready row ' + (i + DATA_START_ROW) + ' has NO lead_id — write-back will be blocked');
+    }
+    var built = buildContactRowV2_(hr, updatedRows[i]);
     contactRows.push(built.data);
     previewUrls.push(built.previewUrl);
+  }
+
+  if (missingLeadIdCount > 0) {
+    aswLog_('WARN', 'refreshContactingSheet',
+      missingLeadIdCount + ' contact-ready leads have no lead_id. Run "Ensure lead IDs" to fix.');
   }
 
   if (contactRows.length === 0) {
@@ -470,7 +492,18 @@ function refreshContactingSheet() {
   var msg = '"' + CONTACT_SHEET_NAME + '" aktualizov\u00e1n. ' +
     sorted.length + ' lead\u016f (H' + kpi.high + ' / Neoslov. ' + kpi.uncontacted + ')';
   aswLog_('INFO', 'refreshContactingSheet', msg);
-  safeAlert_(msg);
+
+  if (missingLeadIdCount > 0) {
+    safeAlert_(msg + '\n\n\u26a0 ' + missingLeadIdCount +
+      ' lead\u016f bez lead_id \u2014 write-back pro n\u011b nebude fungovat.\n' +
+      'Spus\u0165te "Ensure lead IDs" z menu.');
+  } else {
+    safeAlert_(msg);
+  }
+
+  } finally {
+    refreshLock.releaseLock();
+  }
 }
 
 
@@ -573,8 +606,9 @@ function onContactSheetEdit(e) {
   if (!WRITEBACK_MAP_[col]) return;
 
   // Guard: prevent re-entry (P1.1 — feedback on lock failure)
+  // R-2 fix: increased timeout from 2s to 5s
   var lock = LockService.getScriptLock();
-  if (!lock.tryLock(2000)) {
+  if (!lock.tryLock(5000)) {
     aswLog_('WARN', 'onContactSheetEdit',
       'Lock timeout at row ' + row + ' col ' + col + ' — edit NOT written back');
     try {
@@ -584,10 +618,32 @@ function onContactSheetEdit(e) {
   }
 
   try {
-    // Get CRM row reference from hidden column
-    var crmRowNum = sheet.getRange(row, CRM_ROW_COL_).getValue();
-    if (!crmRowNum || crmRowNum < DATA_START_ROW) {
-      aswLog_('WARN', 'onContactSheetEdit', 'No CRM row ref at sheet row ' + row);
+    // ── Variant B: lead_id-based lookup instead of row number ──
+    var leadId = String(sheet.getRange(row, CRM_ROW_COL_).getValue() || '').trim();
+    if (!leadId) {
+      aswLog_('WARN', 'onContactSheetEdit',
+        'No lead_id at contact sheet row ' + row + ' — write-back BLOCKED. Run "Ensure lead IDs" + Refresh.');
+      try {
+        e.range.setNote(
+          '\u26a0 Chyb\u00ed lead_id pro tento \u0159\u00e1dek.\n' +
+          'Zm\u011bna se NEPROPSALA.\n' +
+          'Spus\u0165te "Ensure lead IDs" a pot\u00e9 Refresh.'
+        );
+      } catch (noteErr) {}
+      return;
+    }
+
+    // Validate lead_id format (must start with ASW-)
+    if (leadId.indexOf('ASW-') !== 0) {
+      aswLog_('WARN', 'onContactSheetEdit',
+        'Invalid lead_id format "' + leadId + '" at row ' + row + ' — write-back BLOCKED');
+      try {
+        e.range.setNote(
+          '\u26a0 Neplatn\u00fd form\u00e1t lead_id.\n' +
+          'Zm\u011bna se NEPROPSALA.\n' +
+          'Spus\u0165te Refresh "Ke kontaktov\u00e1n\u00ed".'
+        );
+      } catch (noteErr) {}
       return;
     }
 
@@ -615,7 +671,29 @@ function onContactSheetEdit(e) {
       return;
     }
 
-    // P0.1 — Verify row identity before writing (business_name + city)
+    // ── Lead ID lookup: find current row in LEADS by lead_id ──
+    var sourceHr = getHeaderResolver_(sourceSheet);
+    var leadIdCol = sourceHr.colOrNull('lead_id');
+    if (!leadIdCol) {
+      aswLog_('ERROR', 'onContactSheetEdit', 'Column "lead_id" not found in source sheet');
+      return;
+    }
+
+    var crmRowNum = findRowByLeadId_(sourceSheet, leadIdCol, leadId);
+    if (!crmRowNum) {
+      aswLog_('ERROR', 'onContactSheetEdit',
+        'Lead "' + leadId + '" not found in LEADS — write-back BLOCKED. Refresh needed.');
+      try {
+        e.range.setNote(
+          '\u26a0 Lead "' + leadId + '" nenalezen v CRM.\n' +
+          'Zm\u011bna se NEPROPSALA.\n' +
+          'Spus\u0165te Refresh "Ke kontaktov\u00e1n\u00ed".'
+        );
+      } catch (noteErr) {}
+      return;
+    }
+
+    // P0.1 — Secondary guard: verify row identity (business_name + city)
     var sourceBusinessName = String(
       sourceSheet.getRange(crmRowNum, LEGACY_COL.BUSINESS_NAME).getValue() || ''
     ).trim();
@@ -633,12 +711,13 @@ function onContactSheetEdit(e) {
 
     if (!nameMatch || !cityMatch) {
       aswLog_('ERROR', 'onContactSheetEdit',
-        'ROW MISMATCH! CRM row ' + crmRowNum + ' = "' + sourceBusinessName + ' / ' + sourceCity +
+        'IDENTITY MISMATCH! lead_id=' + leadId + ' CRM row ' + crmRowNum +
+        ' = "' + sourceBusinessName + ' / ' + sourceCity +
         '" but contact row ' + row + ' = "' + contactFirma + ' / ' + contactCity +
-        '". Write-back BLOCKED. Refresh needed.');
+        '". Write-back BLOCKED.');
       try {
         e.range.setNote(
-          '\u26a0 CRM \u0159\u00e1dek ' + crmRowNum + ' nesed\u00ed s touto firmou.\n' +
+          '\u26a0 Lead_id nalezen, ale firma nesed\u00ed.\n' +
           'Zm\u011bna se NEPROPSALA.\n' +
           'Spus\u0165te Refresh "Ke kontaktov\u00e1n\u00ed".'
         );
@@ -654,7 +733,6 @@ function onContactSheetEdit(e) {
       newValue = reverseHumanizeOutreachStage_(newValue);
     }
 
-    var sourceHr = getHeaderResolver_(sourceSheet);
     var sourceCol = sourceHr.colOrNull(mapping.field);
     if (!sourceCol) {
       aswLog_('ERROR', 'onContactSheetEdit', 'Source column "' + mapping.field + '" not found');
@@ -672,8 +750,8 @@ function onContactSheetEdit(e) {
     } catch (noteErr) {}
 
     aswLog_('INFO', 'onContactSheetEdit',
-      'Write-back OK: CRM row ' + crmRowNum + ' ' + mapping.field + ' = ' +
-      String(newValue).substring(0, 100));
+      'Write-back OK: lead_id=' + leadId + ' CRM row ' + crmRowNum +
+      ' ' + mapping.field + ' = ' + String(newValue).substring(0, 100));
 
   } catch (err) {
     aswLog_('ERROR', 'onContactSheetEdit', 'Write-back failed: ' + err.message);

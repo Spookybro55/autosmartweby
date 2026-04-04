@@ -223,6 +223,35 @@ function ensurePreviewExtensionReady_(sheet) {
 
 
 /* ═══════════════════════════════════════════════════════════════
+   Lead ID Lookup — find LEADS row by lead_id (Variant B)
+   ═══════════════════════════════════════════════════════════════ */
+
+/**
+ * Searches the lead_id column for a matching ID and returns the 1-based
+ * row number in the sheet. Returns null if not found.
+ * Pure read-only — no side effects.
+ *
+ * @param {Sheet} sheet - The LEADS sheet
+ * @param {number} leadIdCol - 1-based column number of lead_id
+ * @param {string} leadId - The lead_id to search for
+ * @returns {number|null} 1-based row number or null
+ */
+function findRowByLeadId_(sheet, leadIdCol, leadId) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < DATA_START_ROW) return null;
+  var numRows = lastRow - DATA_START_ROW + 1;
+  var data = sheet.getRange(DATA_START_ROW, leadIdCol, numRows, 1).getValues();
+  var needle = String(leadId).trim();
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][0] || '').trim() === needle) {
+      return i + DATA_START_ROW;
+    }
+  }
+  return null;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
    Logging — _asw_logs sheet
    ═══════════════════════════════════════════════════════════════ */
 
