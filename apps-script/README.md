@@ -141,3 +141,14 @@ Expected webhook response format:
 - **Batch size**: Default 20 rows per queue run. Adjust `BATCH_SIZE` in Config.gs.
 - **Trigger frequency**: 15 minutes by default. Change in `installProjectTriggers()`.
 - **Existing integrations**: Nothing is renamed, moved, or deleted. All changes are append-only.
+
+## Deployment
+
+- `.clasp.json` parentId ukazuje na **TEST** spreadsheet (zamerny safety mechanismus)
+- `clasp push` deployuje do TEST prostredi
+- Pro deploy do produkce: rucne zkopirovat soubory do Apps Script editoru
+  produkcniho spreadsheetu (ID v Config.gs: `SPREADSHEET_ID`)
+- NIKDY nemenit parentId na produkcni ID bez vedomi vlastnika
+- Produkcni spreadsheet: viz `SPREADSHEET_ID` v Config.gs
+- Test spreadsheet: viz `parentId` v .clasp.json
+- Rollback spreadsheet: viz komentar v Config.gs (NEDOTYKAT SE)
