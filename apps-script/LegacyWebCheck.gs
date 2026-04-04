@@ -32,6 +32,21 @@ function runWebsiteCheck100() { processMissingWebsites_(100); }
 function processMissingWebsites_(limit) {
   var ss = openCrmSpreadsheet_();
   var sheet = getExternalSheet_(ss);
+
+  // P0 — Validate LEGACY_COL header positions before any read/write
+  var colCheck = validateLegacyColHeaders_(sheet);
+  if (!colCheck.ok) {
+    aswLog_('ERROR', 'processMissingWebsites_',
+      'LEGACY_COL MISMATCH — web check BLOCKED. ' + colCheck.mismatches.join('; '));
+    safeAlert_(
+      'Struktura CRM se změnila!\n' +
+      'Sloupce nesedí na očekávaných pozicích.\n' +
+      'Web check nebyl spuštěn.\n\n' +
+      colCheck.mismatches.join('\n')
+    );
+    return;
+  }
+
   var apiKey = getSerperApiKey_();
   var helperCols = ensureLegacyHelperColumns_(sheet);
 

@@ -110,6 +110,134 @@ function generateLeadId_() {
 
 
 /* ═══════════════════════════════════════════════════════════════
+   AUDIT LEAD IDs — read-only diagnostic scan
+   ═══════════════════════════════════════════════════════════════
+   Reports lead_id coverage, uniqueness, format consistency,
+   and contact-ready coverage. Pure read-only — never modifies
+   any cell values. Output goes to Logger + safeAlert_ only.
+   ═══════════════════════════════════════════════════════════════ */
+
+function auditLeadIds() {
+  var ss = openCrmSpreadsheet_();
+  var sheet = getExternalSheet_(ss);
+
+  if (!ensurePreviewExtensionReady_(sheet)) return;
+
+  var hr = getHeaderResolver_(sheet);
+  var idCol = hr.colOrNull('lead_id');
+  if (!idCol) {
+    Logger.log('AUDIT FAIL: sloupec lead_id neexistuje. Spustte Setup preview extension.');
+    safeAlert_('Sloupec "lead_id" nenalezen.\nSpusťte nejdřív "Setup preview extension".');
+    return;
+  }
+
+  var bulk = readAllData_(sheet);
+  if (bulk.data.length === 0) {
+    Logger.log('AUDIT: Zadna data.');
+    safeAlert_('Žádná data k auditu.');
+    return;
+  }
+
+  var total = bulk.data.length;
+  var empty = 0;
+  var ids = {};
+  var formatOk = 0;
+  var formatBad = 0;
+  var formatBadExamples = [];
+  var contactReady = 0;
+  var contactReadyMissing = 0;
+  var emptyExamples = [];
+
+  var ASW_PATTERN = /^ASW-[a-z0-9]+-[a-z0-9]{4}$/i;
+
+  for (var i = 0; i < bulk.data.length; i++) {
+    var row = bulk.data[i];
+    var leadId = String(row[idCol - 1] || '').trim();
+
+    // Check contact readiness for this row
+    var isContactReady = false;
+    try {
+      var readiness = buildContactReadiness_(hr, row);
+      isContactReady = readiness.ready;
+    } catch (e) {
+      // Ignore errors in readiness evaluation
+    }
+
+    if (!leadId) {
+      empty++;
+      if (emptyExamples.length < 5) {
+        var name = String(hr.get(row, 'business_name') || '').trim();
+        emptyExamples.push('Row ' + (i + DATA_START_ROW) + ': ' + (name || '(prazdny nazev)'));
+      }
+      if (isContactReady) contactReadyMissing++;
+    } else {
+      ids[leadId] = (ids[leadId] || 0) + 1;
+      if (ASW_PATTERN.test(leadId)) {
+        formatOk++;
+      } else {
+        formatBad++;
+        if (formatBadExamples.length < 5) formatBadExamples.push(leadId);
+      }
+    }
+
+    if (isContactReady) contactReady++;
+  }
+
+  // Count duplicate IDs
+  var dupeIds = [];
+  for (var id in ids) {
+    if (ids[id] > 1) dupeIds.push(id + ' (x' + ids[id] + ')');
+  }
+
+  var verdict;
+  if (empty === 0 && dupeIds.length === 0) {
+    verdict = 'READY: Vsechny radky maji unikatni lead_id. Varianta B pripravena.';
+  } else if (contactReadyMissing === 0 && dupeIds.length === 0) {
+    verdict = 'CONDITIONAL: ' + empty + ' radku bez lead_id, ale zadny neni contact-ready. ' +
+      'Doporuceno spustit "Ensure lead IDs", pak Varianta B.';
+  } else {
+    verdict = 'NOT READY: ' +
+      (contactReadyMissing > 0 ? contactReadyMissing + ' contact-ready radku BEZ lead_id. ' : '') +
+      (dupeIds.length > 0 ? dupeIds.length + ' duplicitnich lead_id. ' : '') +
+      'Nutne opravit pred Variantou B.';
+  }
+
+  var report = [
+    '=== LEAD ID AUDIT ===',
+    'Date: ' + new Date().toISOString(),
+    '',
+    '--- COVERAGE ---',
+    'Total rows:           ' + total,
+    'WITH lead_id:         ' + (total - empty),
+    'WITHOUT lead_id:      ' + empty,
+    'Coverage:             ' + Math.round((total - empty) / total * 100) + '%',
+    '',
+    '--- CONTACT-READY ---',
+    'Contact-ready:        ' + contactReady,
+    'CR missing lead_id:   ' + contactReadyMissing,
+    '',
+    '--- UNIQUENESS ---',
+    'Unique IDs:           ' + Object.keys(ids).length,
+    'Duplicate IDs:        ' + dupeIds.length,
+    dupeIds.length > 0 ? 'Dupes: ' + dupeIds.slice(0, 10).join(', ') : '',
+    '',
+    '--- FORMAT ---',
+    'ASW-* correct:        ' + formatOk,
+    'Non-standard:         ' + formatBad,
+    formatBadExamples.length > 0 ? 'Bad examples: ' + formatBadExamples.join(', ') : '',
+    '',
+    '--- EMPTY EXAMPLES ---',
+    emptyExamples.length > 0 ? emptyExamples.join('\n') : '(none)',
+    '',
+    '=== VERDICT: ' + verdict + ' ==='
+  ].join('\n');
+
+  Logger.log(report);
+  safeAlert_(report.substring(0, 1500));
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
    QUALIFY LEADS
    ═══════════════════════════════════════════════════════════════ */
 

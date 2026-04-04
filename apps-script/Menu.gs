@@ -40,6 +40,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Simulace + z\u00e1pis (dry run)',    'simulateAndWrite')
     .addItem('Audit sheet structure (read-only)',   'auditCurrentSheetStructure')
+    .addItem('Audit lead IDs (read-only)',         'auditLeadIds')
     .addSeparator()
     .addItem('Webhook pilot test (5-10 rows)',     'runWebhookPilotTest')
     .addSeparator()

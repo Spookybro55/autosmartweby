@@ -69,7 +69,7 @@ Ignored: .claude/, .claude-flow/ runtime, .swarm/, node_modules/, .next/, .env*
 | # | Rozhodnuti | Stav |
 |---|-----------|------|
 | D-1 | Junk soubory | HOTOVO (faze 03) |
-| D-2 | Column mappings sync | OTEVRENE |
+| D-2 | Column mappings sync | HOTOVO (faze 06) |
 | D-3 | Git strategie | HOTOVO (toto) |
 | D-4 | .clasp.json parentId | HOTOVO (zdokumentovano) |
 | D-5 | Nabidky do offers/ | HOTOVO (faze 03) |

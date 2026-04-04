@@ -3,22 +3,6 @@ import { NextRequest, NextResponse } from 'next/server';
 const PUBLIC_PATHS = ['/login', '/api/auth'];
 const SESSION_SECRET = process.env.NEXTAUTH_SECRET || '';
 
-async function hmacSign(data: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(SESSION_SECRET),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-  const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
-  return btoa(String.fromCharCode(...new Uint8Array(sig)))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-}
-
 async function verifyToken(token: string): Promise<{ email: string; ts: number } | null> {
   const dotIndex = token.indexOf('.');
   if (dotIndex === -1) return null;
@@ -26,10 +10,29 @@ async function verifyToken(token: string): Promise<{ email: string; ts: number }
   const data = token.slice(0, dotIndex);
   const signature = token.slice(dotIndex + 1);
 
-  const expected = await hmacSign(data);
-
-  // Compare signatures (constant-length check)
-  if (signature !== expected) return null;
+  // Timing-safe HMAC verification via crypto.subtle.verify (H-2 fix)
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(SESSION_SECRET),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['verify']
+  );
+  // Decode the base64url signature back to raw bytes for verify()
+  const sigBase64 = signature.replace(/-/g, '+').replace(/_/g, '/');
+  let sigBytes: Uint8Array;
+  try {
+    sigBytes = Uint8Array.from(atob(sigBase64), c => c.charCodeAt(0));
+  } catch {
+    return null;
+  }
+  const valid = await crypto.subtle.verify(
+    'HMAC', key,
+    sigBytes.buffer as ArrayBuffer,
+    encoder.encode(data),
+  );
+  if (!valid) return null;
 
   try {
     const json = atob(data.replace(/-/g, '+').replace(/_/g, '/'));

@@ -182,6 +182,66 @@ npx @claude-flow/cli@latest doctor --fix
 - CLI tools handle coordination via Bash: swarm init, memory, hooks, routing
 - NEVER use CLI tools as a substitute for Task tool agents
 
+## Mandatory Documentation Sync (ZÁVAZNÉ)
+
+Úkol NENÍ hotový, dokud není dokončena dokumentační synchronizace.
+Úkol NENÍ hotový, dokud není přidán záznam v changelogu.
+Tato pravidla jsou NEPŘEKROČITELNÁ — platí pro každou změnu bez výjimky.
+
+### Povinný postup
+
+1. Před změnou identifikuj dotčené dokumenty (viz `docs/13-doc-update-rules.md`).
+2. Proveď změnu v kódu.
+3. Aktualizuj příslušné docs.
+4. Přidej záznam do `docs/11-change-log.md`.
+5. Zkontroluj, zda je potřeba upravit:
+   - `docs/09-project-control-tower.md` (master řídicí dokument)
+   - `docs/12-route-and-surface-map.md` (route/surface mapa)
+   - README v dotčené složce
+6. NIKDY neuzavírej úkol bez "documentation sync complete".
+
+### Povinné spouštěče
+
+Jakákoliv z těchto změn VYŽADUJE changelog entry + doc sync check:
+- nový / smazaný / přesunutý / přejmenovaný soubor
+- nová route nebo změna route
+- nová API surface nebo změna API kontraktu
+- změna auth / env / config
+- změna CRM workflow nebo Apps Script logiky
+- změna source of truth
+- bug fix
+- cleanup s dopadem na strukturu
+
+### Povinný výstup na konci KAŽDÉHO úkolu
+
+Toto MUSÍ být poslední věc v každé odpovědi, která obsahuje změny:
+
+```
+- files changed: (seznam)
+- docs changed: (seznam)
+- why these docs: (krátké zdůvodnění)
+- changelog updated: yes/no
+- documentation sync complete: yes/no
+- remaining open items: (seznam nebo "none")
+```
+
+Pokud je changelog updated: no nebo documentation sync complete: no, MUSÍŠ to opravit PŘED ukončením odpovědi.
+
+### Definition of Done
+
+Viz `docs/14-definition-of-done.md`. Tři nezávislé checklisty:
+1. **Code done:** tsc OK, build OK, no secrets
+2. **Documentation done:** affected docs updated, changelog entry added
+3. **Test done:** tests pass (if applicable), build verified
+
+Všechny tři musí být splněny. Žádný úkol není hotový bez všech tří.
+
+### Validace
+
+```bash
+node scripts/check-doc-sync.mjs
+```
+
 ## Support
 
 - Documentation: https://github.com/ruvnet/claude-flow

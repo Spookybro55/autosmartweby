@@ -7,21 +7,18 @@ export const SHEET_CONFIG = {
   APPS_SCRIPT_URL: process.env.APPS_SCRIPT_WEB_APP_URL!,
 } as const;
 
-// Column mappings from LEADS sheet (0-based for API, matching Config.gs)
-export const LEADS_COLUMNS = {
-  // Legacy business columns (1-based in sheet → 0-based here)
-  business_name: 3,    // col 4
-  city: 8,             // col 9
-  phone: 10,           // col 11
-  email: 11,           // col 12
-  website_url: 12,     // col 13
-  has_website: 19,     // col 20
+// All column mappings are resolved dynamically at runtime via buildHeaderMap()
+// in mappers/sheet-to-domain.ts. No hardcoded column indices are used in the
+// frontend read/write path. Header names below must match the Google Sheet header row.
 
-  // Name-resolved business columns (resolved at runtime via header row)
-  // These will be resolved dynamically from headers
-} as const;
+// Required headers — missing any of these triggers a warning log.
+// The app continues to work but affected fields will be empty.
+export const REQUIRED_HEADERS = [
+  'lead_id', 'business_name', 'city', 'email', 'phone',
+  'outreach_stage', 'contact_ready', 'contact_priority',
+] as const;
 
-// Headers we need to resolve dynamically from the header row
+// All headers the frontend resolves from the header row
 export const DYNAMIC_HEADERS = [
   'ico', 'contact_name', 'segment', 'service_type', 'website_quality',
   'has_cta', 'mobile_ok', 'pain_point', 'rating', 'reviews_count',

@@ -40,20 +40,16 @@
 
 ## D-2: Column mappings — jak synchronizovat Apps Script a Frontend
 
-**Proč je to důležité:** `apps-script/Config.gs` (LEGACY_COL: 4,9,11,12,13,20) a `crm-frontend/src/lib/config.ts` (LEADS_COLUMNS: 3,8,10,11,12,19 = 0-based) mapují stejné sloupce nezávisle. Při přidání sloupce do sheetu se jeden aktualizuje a druhý ne → tichý data mismatch.
+**Stav: HOTOVO** (Varianta B implementována 2026-04-04)
 
-**Varianty:**
-1. **Sdílený konfigurační soubor** — JSON soubor v root, oba systémy ho čtou. Problém: Apps Script nemá přímý přístup k lokálním souborům.
-2. **Generovaný config** — skript, který z Config.gs vygeneruje config.ts. Spouštět při změně.
-3. **Frontend čte column pozice dynamicky z header řádku** — frontend už to částečně dělá (DYNAMIC_HEADERS). Rozšířit na všechny sloupce.
-4. **Validační test** — CI/skript, který porovná oba soubory a varuje při nesouladu.
-5. **Komentářová konvence** — ručně, s poznámkou "SYNC WITH Config.gs" v obou souborech.
+**Co bylo zjištěno:** Frontend READ i WRITE path byl od začátku plně dynamický (header resolution). `LEADS_COLUMNS` v config.ts byl dead code — nikde se neimportoval. Riziko bylo užší než původní audit naznačoval.
 
-**Doporučená varianta:** **3 + 4 kombinace.** Frontend už dynamicky resolvuje většinu sloupců přes DYNAMIC_HEADERS. Rozšířit to na všech 6 LEGACY_COL sloupců (eliminuje hardcoded pozice ve frontendu). Přidat jednoduchý validační skript jako pojistku.
+**Co bylo provedeno:**
+1. Smazán dead code `LEADS_COLUMNS` z `config.ts`
+2. Přidána `REQUIRED_HEADERS` konstanta + runtime validace v `buildHeaderMap()` — warning log při chybějícím headeru
+3. Přidána `validateLegacyColHeaders_()` do `LegacyWebCheck.gs` — blokuje web check pokud pozice nesedí
 
-**Riziko špatného rozhodnutí:** Pokud se nic neudělá → při první změně struktury sheetu frontend přestane správně číst data, ale nebude to vidět hned (tichá chyba).
-
-**Řešit:** HNED — je to největší technické riziko v projektu.
+**Detaily:** viz `docs/06-column-mappings-analysis.md` a `docs/06-column-mappings-options.md`
 
 ---
 
@@ -138,7 +134,7 @@
 
 **Doporučená varianta:** **3 krátkodobě, 2 dlouhodobě.** Pokud CRM používají 1-3 lidé interně, sdílené heslo je přijatelné. Při růstu → přejít na Google OAuth (přirozené, protože systém už je na Google ekosystému).
 
-**Dodatek:** Přidat alespoň `crypto.timingSafeEqual` do middleware (H-2) — triviální fix.
+**Dodatek (H-2 HOTOVO):** Timing-safe HMAC comparison implementována v middleware.ts přes `crypto.subtle.verify()` (2026-04-04). Odstraněn starý `hmacSign` + string comparison.
 
 **Riziko špatného rozhodnutí:** Při sdíleném hesle a více uživatelích → nemožnost auditu, kdo co udělal.
 

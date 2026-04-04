@@ -1,7 +1,7 @@
 import type { Lead, LeadListItem, SheetRow } from '@/lib/domain/lead';
 import type { DashboardStats } from '@/lib/domain/stats';
 import type { OutreachStageKey, PriorityKey } from '@/lib/config';
-import { OUTREACH_STAGES } from '@/lib/config';
+import { OUTREACH_STAGES, REQUIRED_HEADERS } from '@/lib/config';
 import { isToday, isPast, isThisWeek, parseISO } from 'date-fns';
 
 // Header index map built from the first row of the sheet
@@ -12,6 +12,17 @@ export function buildHeaderMap(headerRow: string[]): HeaderMap {
   headerRow.forEach((h, i) => {
     if (h) map.set(h.trim().toLowerCase(), i);
   });
+
+  // Warn about missing required headers (non-blocking)
+  const missing = REQUIRED_HEADERS.filter(h => !map.has(h));
+  if (missing.length > 0) {
+    console.warn(
+      `[CRM] Missing required headers in sheet: ${missing.join(', ')}. ` +
+      `Affected fields will be empty. Check that the Google Sheet header row ` +
+      `matches the expected column names.`
+    );
+  }
+
   return map;
 }
 
