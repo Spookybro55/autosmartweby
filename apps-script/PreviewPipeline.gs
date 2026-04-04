@@ -148,7 +148,8 @@ function auditLeadIds() {
   var contactReadyMissing = 0;
   var emptyExamples = [];
 
-  var ASW_PATTERN = /^ASW-[a-z0-9]+-[a-z0-9]{4}$/i;
+  // Accepts ASW-* (generated) and FIRMYCZ-* (legacy) and similar alphanumeric-with-hyphen IDs
+  var VALID_ID_PATTERN = /^[A-Z][\w]+-\d{3,}$|^ASW-[a-z0-9]+-[a-z0-9]{4}$/i;
 
   for (var i = 0; i < bulk.data.length; i++) {
     var row = bulk.data[i];
@@ -172,7 +173,7 @@ function auditLeadIds() {
       if (isContactReady) contactReadyMissing++;
     } else {
       ids[leadId] = (ids[leadId] || 0) + 1;
-      if (ASW_PATTERN.test(leadId)) {
+      if (VALID_ID_PATTERN.test(leadId)) {
         formatOk++;
       } else {
         formatBad++;
@@ -222,7 +223,7 @@ function auditLeadIds() {
     dupeIds.length > 0 ? 'Dupes: ' + dupeIds.slice(0, 10).join(', ') : '',
     '',
     '--- FORMAT ---',
-    'ASW-* correct:        ' + formatOk,
+    'Valid format:          ' + formatOk,
     'Non-standard:         ' + formatBad,
     formatBadExamples.length > 0 ? 'Bad examples: ' + formatBadExamples.join(', ') : '',
     '',

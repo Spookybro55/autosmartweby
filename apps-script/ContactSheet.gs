@@ -633,10 +633,12 @@ function onContactSheetEdit(e) {
       return;
     }
 
-    // Validate lead_id format (must start with ASW-)
-    if (leadId.indexOf('ASW-') !== 0) {
+    // Validate lead_id format — must be non-trivial identifier
+    // Accepts: ASW-* (generated), FIRMYCZ-* (legacy), any string with letters + hyphen/digit
+    // Rejects: pure numbers (old row references), whitespace-only, very short strings
+    if (/^\d+$/.test(leadId) || leadId.length < 3) {
       aswLog_('WARN', 'onContactSheetEdit',
-        'Invalid lead_id format "' + leadId + '" at row ' + row + ' — write-back BLOCKED');
+        'Invalid lead_id "' + leadId + '" at row ' + row + ' (numeric or too short) — write-back BLOCKED');
       try {
         e.range.setNote(
           '\u26a0 Neplatn\u00fd form\u00e1t lead_id.\n' +

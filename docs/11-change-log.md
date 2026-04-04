@@ -6,6 +6,15 @@
 
 ## 2026-04-04
 
+### [FIX] lead_id format validace — podpora FIRMYCZ-* formatu
+- **Oblast:** apps-script
+- **Zmenene soubory:** apps-script/ContactSheet.gs (onContactSheetEdit format check), apps-script/PreviewPipeline.gs (auditLeadIds format pattern)
+- **Co:** Write-back format validace byla prilis uzka (jen ASW-*), ale realna data pouzivaji format FIRMYCZ-0001. Opraveno: odmita jen ciste ciselne hodnoty a prilis kratke retezce (< 3 znaky). Audit pattern rozsiren na oba formaty.
+- **Proc:** Bez opravy by write-back blokoval vsech 798 existujicich leadu
+- **Dopad:** Write-back nyni akceptuje FIRMYCZ-*, ASW-*, i dalsi rozumne formaty
+- **Test/Overeni:** clasp push OK
+- **Autor:** Claude + user
+
 ### [DOCS] Rollout checklist pro Variantu B
 - **Oblast:** docs
 - **Vytvorene soubory:** docs/17-writeback-rollout-checklist.md
