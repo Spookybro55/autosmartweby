@@ -99,7 +99,7 @@ updateLeadFields(leadId, rowNumber, businessName, city, fields)
 - Firma bez nazvu (prazdne business_name) — normalizeBusinessName_('') === normalizeBusinessName_('') = true
 - Mesto je volitelne v porovnani: `!contactCity || !sourceCity` → pokud jedno chybi, city check je preskocen
 
-**Zavaznost:** VYSOKA — silent data corruption pri insert/delete + shodnem nazvu
+**Zavaznost:** ~~VYSOKA~~ **VYRESENO** — Varianta B eliminuje row drift. lead_id lookup nahrazuje row number reference. Identity check zachovan jako secondary guard.
 
 ### RIZIKO R-2: Race condition pri soubeznnem editovani
 
@@ -117,7 +117,7 @@ updateLeadFields(leadId, rowNumber, businessName, city, fields)
 - Uzivatel nemuze videt, ze se zmena nepropsala, pokud nepresune kurzor na bunku s note
 - Note muze byt prehlednuta
 
-**Zavaznost:** STREDNI — data ztrata jedne editace, uzivatel ma feedback (note), ale snadno prehlédne
+**Zavaznost:** ~~STREDNI~~ **ZMIRNENO** — lock timeout zvysen z 2s na 5s
 
 ### RIZIKO R-3: Refresh behem editovani
 
@@ -129,13 +129,12 @@ updateLeadFields(leadId, rowNumber, businessName, city, fields)
 - Pokud editacni trigger jeste nebezí, edit se ztrati
 - Pokud trigger bezi soucasne s refreshem, cte z mazaneho/prebuildeneho sheetu
 
-**Soucasna ochrana:** ZADNA. Refresh nepouziva LockService. Neni koordinace s onEdit triggerem.
+**Soucasna ochrana:** ~~ZADNA~~ **VYRESENO** — refreshContactingSheet() nyni pouziva LockService.getScriptLock() s 5s timeout. Sdili zamek s onContactSheetEdit.
 
 **Zbytkove riziko:**
-- Kompletni ztrata nepropsanych editu
-- Corrupted read behem rebuildu
+- Minimalni — lock zajistuje serialni pristup
 
-**Zavaznost:** VYSOKA — ztrata dat bez variovani
+**Zavaznost:** ~~VYSOKA~~ **VYRESENO**
 
 ### RIZIKO R-4: Prazdny/neplatny crmRowNum
 
@@ -192,13 +191,13 @@ updateLeadFields(leadId, rowNumber, businessName, city, fields)
 - Refresh contact sheet
 - Vlozit radek do LEADS pred existujicim leadem
 - Editovat bunku v contact sheet
-- Ocekavany vysledek: P0.1 BLOCK (row mismatch), warning note
+- Ocekavany vysledek (Varianta B): **OK** — lead_id lookup najde spravny radek nezavisle na pozici
 
 ### Scenar T-3: Delete row v LEADS, pak edit v contact sheet
 - Refresh contact sheet
 - Smazat radek v LEADS
 - Editovat bunku v contact sheet odkazujici na smazany radek
-- Ocekavany vysledek: bud P0.1 BLOCK (jiny nazev) nebo zapis na spatny radek (pokud nahodna shoda)
+- Ocekavany vysledek (Varianta B): **BLOCK** — findRowByLeadId_ vrati null, warning note na bunce
 
 ### Scenar T-4: Soubeznny edit dvou bunek
 - Dva uzivatele soucasne editují ruzne radky
@@ -236,10 +235,10 @@ updateLeadFields(leadId, rowNumber, businessName, city, fields)
 
 | # | Riziko | Zavaznost | Soucasny guard | Dostatecny? |
 |---|--------|-----------|----------------|-------------|
-| R-1 | Stale row po insert/delete | VYSOKA | P0.1 identity check | CASTECNE — selhava pri shodnych nazvech, prazdnych hodnotach |
-| R-2 | Race condition | STREDNI | LockService 2s | ANO pro bezny provoz, krehke pri zatezi |
-| R-3 | Refresh behem edit | VYSOKA | ZADNY | NE |
-| R-4 | Prazdny crmRowNum | NIZKA | Null check | ANO |
+| R-1 | Stale row po insert/delete | ~~VYSOKA~~ | lead_id lookup (Varianta B) | **VYRESENO** |
+| R-2 | Race condition | ~~STREDNI~~ | LockService 5s (zvyseno z 2s) | **ZMIRNENO** |
+| R-3 | Refresh behem edit | ~~VYSOKA~~ | LockService v refresh | **VYRESENO** |
+| R-4 | Prazdny lead_id | NIZKA | Format + null check, warning note | **VYRESENO** |
 | R-5 | Neplatny outreach_stage | NIZKA-STREDNI | Dropdown validation | VETSINOVE ANO |
 | R-6 | Chybejici sloupec v LEADS | NIZKA | colOrNull guard | ANO |
 | R-7 | Chybejici server-side handler | STREDNI | Zadny | NE (neni implementovano) |
@@ -250,18 +249,18 @@ updateLeadFields(leadId, rowNumber, businessName, city, fields)
 
 Detailni analyza lead_id jako stabilniho identifikatoru viz **docs/16-lead-id-audit.md**.
 
-Klicove zaveory:
+Klicove zavery:
 - lead_id existuje, format `ASW-{timestamp_base36}-{random4}`, de facto immutable
 - Generovani je POUZE manualni (menu "Ensure lead IDs") — neni automaticke
-- Pokryti dat: NEZNAMO — nutne spustit auditni skript (viz docs/16-lead-id-audit.md sekce 5)
 - Frontend uz lead_id pouziva s fallbackem na `row-{N}`
+- **STAV: Varianta B IMPLEMENTOVANA** (2026-04-04) — write-back nyni pouziva lead_id lookup
 
 ---
 
-## 7. Tri nejvetsi edge cases
+## 7. Tri nejvetsi edge cases (aktualizovano po Variante B)
 
-1. **Row drift po insert/delete v LEADS** (R-1) — identita check pomaha, ale neni 100% spolehlivy pri duplicitnich firmach nebo prazdnych hodnotach. Tohle je zakladni architekturalni slabina row-based pristupu.
+1. ~~**Row drift po insert/delete v LEADS** (R-1)~~ — **VYRESENO.** lead_id lookup nahrazuje row-number referenci. Radky se mohou presunout bez dopadu na write-back.
 
-2. **Refresh behem editovani** (R-3) — nulova ochrana, sheet se kompletne premaze behem rebuildu. Akekoli rozepsane edity se ztrati bez varovani.
+2. ~~**Refresh behem editovani** (R-3)~~ — **VYRESENO.** refreshContactingSheet() nyni pouziva LockService a sdili zamek s onContactSheetEdit.
 
-3. **Prazdne/duplicitni business_name+city** (podmnozina R-1) — identity check projde i kdyz nema projit. `normalizeBusinessName_('') === normalizeBusinessName_('')` je true.
+3. **Missing lead_id** (nove riziko) — pokud lead nema lead_id (ensureLeadIds nebyl spusten), write-back je ZABLOKOVANY s jasnou zpravou. Reseni: spustit "Ensure lead IDs" z menu pred pouzitim kontaktniho sheetu.

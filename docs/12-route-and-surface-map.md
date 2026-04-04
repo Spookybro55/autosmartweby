@@ -60,7 +60,7 @@
 
 | Typ | Funkce | Frekvence |
 |-----|--------|-----------|
-| onEdit | `onContactSheetEdit()` | Kazda editace v "Ke kontaktovani" |
+| onEdit | `onContactSheetEdit()` | Kazda editace v "Ke kontaktovani" — Varianta B: lead_id lookup |
 | Casovy | `processPreviewQueue()` | Kazdych 15 minut |
 
 ### Integracni body

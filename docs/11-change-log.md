@@ -6,6 +6,17 @@
 
 ## 2026-04-04
 
+### [FEATURE] Varianta B — lead_id-based write-back (C-3 VYRESENO)
+- **Oblast:** apps-script (ContactSheet.gs, Helpers.gs), docs
+- **Zmenene soubory:** apps-script/ContactSheet.gs (buildContactRowV2_, onContactSheetEdit, refreshContactingSheet), apps-script/Helpers.gs (findRowByLeadId_)
+- **Co:** Write-back prepsany z row-number na lead_id lookup. Sloupec 19 contact sheetu nyni drzi lead_id misto cisla radku. onContactSheetEdit pouziva findRowByLeadId_ pro nalezeni aktualniho radku. refreshContactingSheet pridan LockService (R-3 fix). Lock timeout zvysen z 2s na 5s (R-2 fix). Missing/invalid lead_id bezpecne blokuje write-back s warning note. Identity check zachovan jako secondary guard.
+- **Proc:** C-3 (row-based write-back) bylo kriticke riziko — insert/delete radku v LEADS mohl zpusobit silent data corruption
+- **Dopad:** R-1 (row drift) VYRESENO, R-2 (race) ZMIRNENO, R-3 (refresh race) VYRESENO. Write-back je nyni odolny vuci zmene poradi radku v LEADS.
+- **Aktualizovane docs:** docs/15-writeback-risk-analysis.md, docs/15-writeback-options.md, docs/12-route-and-surface-map.md, docs/11-change-log.md
+- **Test/Overeni:** tsc --noEmit OK (frontend beze zmen), Apps Script syntax review OK
+- **Poznamka:** Pred prvnim pouzitim nutne spustit "Ensure lead IDs" z CRM menu, aby vsechny leady mely lead_id
+- **Autor:** Claude + user
+
 ### [FEATURE] auditLeadIds() — read-only audit utility v Apps Script
 - **Oblast:** apps-script, docs
 - **Zmenene soubory:** apps-script/PreviewPipeline.gs (pridana auditLeadIds()), apps-script/Menu.gs (novy menu item)

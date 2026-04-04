@@ -135,6 +135,10 @@ Funkce je ciste read-only — pouziva pouze `readAllData_()`, `buildContactReadi
 
 ## 6. Vyhodnoceni pripravenosti Varianty B
 
+> **STAV: Varianta B IMPLEMENTOVANA** (2026-04-04, commit 4536839)
+> Implementace obsahuje safe guards pro missing lead_id — write-back je zablokovany s warning note pokud lead_id chybi.
+> Pred prvnim pouzitim je nutne spustit "Ensure lead IDs" z CRM menu.
+
 ### Pozitivni signaly
 
 | Signal | Dukaz |

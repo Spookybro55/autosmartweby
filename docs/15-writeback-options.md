@@ -1,9 +1,11 @@
 # Write-Back Repair Options
 
-> Verze 1.0 | 2026-04-04 | Autor: Claude + user
+> Verze 2.0 | 2026-04-04 | Autor: Claude + user
 > Zavislost: docs/15-writeback-risk-analysis.md
+>
+> **STAV: Varianta B IMPLEMENTOVANA** (2026-04-04, commit 4536839)
 
-Tri varianty opravy write-back mechanismu, serazene od nejmensiho zasahu po idealni reseni.
+Tri varianty opravy write-back mechanismu. **Varianta B byla zvolena a implementovana.**
 
 ---
 
