@@ -16,6 +16,7 @@ Google Sheets, spreadsheet ID v Config.gs (SPREADSHEET_ID).
 | LEADS | Hlavni data vsech leadu | Source of truth |
 | Ke kontaktovani | Odvozeny view kontakt-ready leadu | Derived (generovany) |
 | _asw_logs | Interni logy Apps Scriptu | System (auto-prune 5000 radku) |
+| _raw_import | Staging buffer pro scraped data pred vstupem do LEADS | System (append-only, viz A-02 kontrakt) |
 
 ## LEADS — sloupce
 
@@ -78,6 +79,18 @@ NOT_LINKED → NOT_FOUND / REVIEW / DRAFT_CREATED → SENT → LINKED → REPLIE
 
 Varianta B: lead_id-based lookup. Sloupec 19 drzi lead_id. onContactSheetEdit pouziva findRowByLeadId_ pro nalezeni aktualniho radku v LEADS. Secondary guard: business_name + city match.
 
+## Staging layer: _raw_import
+
+Novy system sheet ve stejnem SPREADSHEET_ID jako LEADS. Konvence leading underscore je stejna jako u `_asw_logs` (Config.gs:14). Role: staging buffer mezi scraperem a produkcnim LEADS sheetem. Raw data se nejdrive zapisi do `_raw_import`, projdou normalizaci a dedupe, a teprve pak (v jedinem okamziku pres import writer) vznikne novy LEADS radek s vygenerovanym `lead_id`.
+
+**LEADS zustava produkcni source of truth pro ciste leady.** `_raw_import` je source of truth pro surova vstupni data a jejich ingest lifecycle, nikdy ne pro business stav leadu.
+
+- **Row shape:** 16 sloupcu, 7 immutable po insertu, 9 update-in-place. Viz `docs/contracts/raw-import-staging.md` a `docs/contracts/raw-import-row.schema.json`.
+- **Status model:** `raw` / `normalized` / `duplicate_candidate` / `error` / `imported`. Status `error` a `imported` jsou terminalni.
+- **Decision model:** `import_decision` (nullable enum) je oddeleny od `normalized_status`. Hodnoty: `imported`, `rejected_error`, `rejected_duplicate`, `pending_review`.
+- **Hard duplicate** (ICO / domain / business email domain match) jde rovnou do `error` s `rejected_duplicate`. Status `duplicate_candidate` je vyhrazen vyhradne pro soft dup cekajici na manualni review.
+- **Retry:** `error` je terminalni. Opakovani = novy radek s novym `raw_import_id`; puvodni error radek zustava trvale jako audit.
+
 ## Contracts
 
 Kanonicke datove kontrakty zive v `docs/contracts/`. TypeScript typy jsou v `crm-frontend/src/lib/contracts/`.
@@ -85,5 +98,6 @@ Kanonicke datove kontrakty zive v `docs/contracts/`. TypeScript typy jsou v `crm
 | Contract | Verze | Schema | Spec |
 |----------|-------|--------|------|
 | Scraping Job Input | 1.0 | [contracts/scraping-job-input.schema.json](contracts/scraping-job-input.schema.json) | [contracts/scraping-job-input.md](contracts/scraping-job-input.md) |
+| RAW_IMPORT Row | 1.0 | [contracts/raw-import-row.schema.json](contracts/raw-import-row.schema.json) | [contracts/raw-import-staging.md](contracts/raw-import-staging.md) |
 
 Scraping Job Input definuje vstupni payload pro jeden scraping job (1 job = 1 query na 1 portalu v 1 meste/segmentu). 12 poli, vsechna required (nullable pole pouzivaji explicitni null, ne chybejici klic). `source_job_id` je deterministicky odvozen z (portal, segment, city, district, max_results, creation second) pres SHA-256, coz zajistuje idempotenci re-runu stejneho scope.
