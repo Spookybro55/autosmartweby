@@ -5,8 +5,8 @@ on:
     branches: [main]
 
 jobs:
-  docs-check:
-    name: Documentation Sync Check
+  docs-governance:
+    name: docs-governance
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
