@@ -22,9 +22,13 @@
 | Route | Metoda | Soubor | Pristup | Ucel |
 |-------|--------|--------|---------|------|
 | `/api/auth/login` | POST | `src/app/api/auth/login/route.ts` | Verejne | Auth -- email + sdilene heslo -> HMAC session cookie |
+| `/api/auth/google` | POST | `src/app/api/auth/google/route.ts` | Verejne | Google ID token verification -> HMAC session cookie |
+| `/api/auth/logout` | POST | `src/app/api/auth/logout/route.ts` | Verejne | Smazani crm-session cookie |
+| `/api/auth/me` | GET | `src/app/api/auth/me/route.ts` | Auth vyzadovan | Cteni session — email, provider, name |
 | `/api/leads` | GET | `src/app/api/leads/route.ts` | Auth vyzadovan | Nacteni vsech leadu z Google Sheets |
 | `/api/leads/[id]` | GET | `src/app/api/leads/[id]/route.ts` | Auth vyzadovan | Nacteni jednoho leadu podle ID |
 | `/api/leads/[id]/update` | POST | `src/app/api/leads/[id]/update/route.ts` | Auth vyzadovan | Aktualizace editovatelnych poli leadu pres Apps Script |
+| `/api/email/send` | POST | `src/app/api/email/send/route.ts` | Auth vyzadovan | **PLANOVANO** — odeslani emailu pres ESP adapter |
 | `/api/stats` | GET | `src/app/api/stats/route.ts` | Auth vyzadovan | Statistiky pro dashboard |
 
 ### Mechanismus autentizace
@@ -33,7 +37,10 @@
 - **Session:** HMAC-podepsana cookie `crm-session` (expirace 7 dni)
 - **Overeni:** `crypto.subtle.verify` (timing-safe)
 - **Allowlist uzivatelu:** env promenna `ALLOWED_EMAILS`
-- **Heslo:** sdilene env `AUTH_PASSWORD`
+- **Heslo:** sdilene env `AUTH_PASSWORD` (fallback)
+- **Google auth:** Google Identity Services (GIS) — primarni login. ID token overovan pres Google tokeninfo API. Viz `docs/18-google-auth-and-email-architecture.md`.
+- **Logout:** POST `/api/auth/logout` — smaze crm-session cookie
+- **Session info:** GET `/api/auth/me` — vrati email, provider (google/password), name
 
 ---
 

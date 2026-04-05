@@ -16,6 +16,12 @@
 - **Scope:** Implementace externi sluzby pro generovani preview webu z briefu. Napojeni na existujici webhook pipeline.
 - **Docs:** docs/20-current-state.md, docs/22-technical-architecture.md, docs/26-offer-generation.md, docs/27-infrastructure-storage.md
 
+### [B/B3] Google Auth Phase 1 — Google Identity Services login — WIP
+- **Scope:** Pridani Google OAuth prihlasovani do CRM frontendu pomoci Google Identity Services SDK. Existujici email+heslo login zustava jako fallback. Session je HMAC-SHA256 signed cookie (timing-safe verifikace pres crypto.subtle.verify).
+- **Owner:** claude
+- **Code:** crm-frontend/src/app/api/auth/google/route.ts (new), crm-frontend/src/app/api/auth/logout/route.ts (new), crm-frontend/src/app/api/auth/me/route.ts (new), crm-frontend/src/hooks/use-session.ts (new), crm-frontend/src/app/login/page.tsx (modified), crm-frontend/src/components/layout/header.tsx (modified), crm-frontend/src/components/layout/sidebar.tsx (modified), crm-frontend/.env.example (modified), apps-script/ContactSheet.gs (modified)
+- **Docs:** docs/20-current-state.md, docs/22-technical-architecture.md
+
 ### [C/C1] [SAMPLE] Lead qualification tuning — enterprise filter — DRAFT
 - **Scope:** Uprava kvalifikacni logiky — zpreseni enterprise/chain filtru, pridani novych kriterii.
 - **Docs:** docs/20-current-state.md, docs/21-business-process.md, docs/24-automation-workflows.md, docs/25-lead-prioritization.md

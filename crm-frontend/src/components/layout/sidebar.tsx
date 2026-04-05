@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
+import { useSession } from "@/hooks/use-session";
 
 const navigation = [
   { label: "Přehled", href: "/dashboard", icon: LayoutDashboard },
@@ -23,6 +24,7 @@ const navigation = [
 export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(true);
+  const { user } = useSession();
 
   return (
     <>
@@ -150,7 +152,7 @@ export function Sidebar() {
             )}
           >
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-700 text-xs font-medium text-white">
-              JN
+              {user ? user.email.slice(0, 2).toUpperCase() : '??'}
             </div>
             <div
               className={cn(
@@ -159,10 +161,10 @@ export function Sidebar() {
               )}
             >
               <span className="truncate text-sm font-medium text-white">
-                Jan Novák
+                {user?.name || user?.email || 'Nepřihlášen'}
               </span>
               <span className="truncate text-xs text-slate-500">
-                Sales Manager
+                {user?.provider === 'google' ? 'Google' : 'Heslo'}
               </span>
             </div>
           </div>

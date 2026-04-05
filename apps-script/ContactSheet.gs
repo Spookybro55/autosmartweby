@@ -170,7 +170,7 @@ var DETAIL_HEADERS_ = [
   'P\u0159edm\u011bt e-mailu',    // 16
   'N\u00e1vrh zpr\u00e1vy',       // 17
   'Pipeline stav',                 // 18
-  'Lead ID'                        // 19
+  'ID leadu'                       // 19
 ];
 
 var TOTAL_COLS_ = VISIBLE_HEADERS_.length + DETAIL_HEADERS_.length;
