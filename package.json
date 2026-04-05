@@ -1,0 +1,12 @@
+{
+  "name": "autosmartweby",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Autosmartweby CRM — monorepo",
+  "scripts": {
+    "docs:build-changelog": "node scripts/docs/build-changelog.mjs",
+    "docs:build-task-registry": "node scripts/docs/build-task-registry.mjs",
+    "docs:check": "node scripts/docs/check-doc-sync.mjs",
+    "docs:new-task": "node scripts/docs/create-task-record.mjs"
+  }
+}

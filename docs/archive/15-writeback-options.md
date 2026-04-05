@@ -3,7 +3,7 @@
 > Verze 2.0 | 2026-04-04 | Autor: Claude + user
 > Zavislost: docs/15-writeback-risk-analysis.md
 >
-> **STAV: Varianta B IMPLEMENTOVANA** (2026-04-04, commit 4536839)
+> **STAV: Varianta B IMPLEMENTOVANA A OVERENA** v TEST i PROD (2026-04-04, commit 4536839). C-3 CLOSED.
 
 Tri varianty opravy write-back mechanismu. **Varianta B byla zvolena a implementovana.**
 

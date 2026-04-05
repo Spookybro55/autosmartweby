@@ -1,0 +1,42 @@
+{
+  "streams": {
+    "A": {
+      "name": "Data & Automation",
+      "requiredDocs": [
+        "docs/20-current-state.md",
+        "docs/23-data-model.md",
+        "docs/24-automation-workflows.md"
+      ]
+    },
+    "B": {
+      "name": "Infrastructure & Offer",
+      "requiredDocs": [
+        "docs/20-current-state.md",
+        "docs/22-technical-architecture.md",
+        "docs/26-offer-generation.md",
+        "docs/27-infrastructure-storage.md"
+      ]
+    },
+    "C": {
+      "name": "Business Process & Prioritization",
+      "requiredDocs": [
+        "docs/20-current-state.md",
+        "docs/21-business-process.md",
+        "docs/24-automation-workflows.md",
+        "docs/25-lead-prioritization.md"
+      ]
+    }
+  },
+  "alwaysRequired": [
+    "docs/30-task-records/"
+  ],
+  "generated": [
+    "docs/11-change-log.md",
+    "docs/29-task-registry.md"
+  ],
+  "codePaths": {
+    "apps-script": ["apps-script/**"],
+    "crm-frontend": ["crm-frontend/src/**"],
+    "scripts": ["scripts/**"]
+  }
+}

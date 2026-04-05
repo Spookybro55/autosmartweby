@@ -1,8 +1,8 @@
 # Rollout Checklist — Varianta B (lead_id-based write-back)
 
-> Verze 1.0 | 2026-04-04 | Autor: Claude + user
-> Stav: CEKA NA PROVOZNI OVERENI
-> Po PASS vsech kroku: oznacit C-3 jako CLOSED v docs/09-project-control-tower.md
+> Verze 2.0 | 2026-04-04 | Autor: Claude + user
+> Stav: **VSECHNY KROKY PASS** — C-3 CLOSED
+> PROD overeni: Ensure OK, Audit OK (100% coverage, 0 dup, 0 missing CR), Refresh OK, Smoke test OK, Logy OK
 
 ---
 
@@ -15,17 +15,13 @@
 
 ---
 
-## Krok 0: Deploy kodu
+## Krok 0: Deploy kodu ✓ HOTOVO
 
-**Pred vsim ostatnim** je nutne nasadit aktualni kod do Apps Script:
+**Stav:** Nasazeno do PROD 2026-04-04 14:26 pres `clasp push` (10 souboru).
 
-```
-cd apps-script
-clasp push
-```
-
-> Pozor: `clasp push` jde do TEST prostredi (viz `.clasp.json` parentId).
-> Pro produkci: manualni copy-paste do produkce — viz `apps-script/README.md`.
+- TEST deploy: OK (overeno smoke testem — 798/798 lead_id, write-back OK)
+- PROD deploy: OK (clasp push do scriptId `1fnL4hKsueYG0HPci2wSE2NNgIyuXiVf9ESUClKQT63rNqfCfSGlql_qf`)
+- `.clasp.json` obnovena zpet na TEST scriptId
 
 ---
 
@@ -200,36 +196,12 @@ Po PASS vsech kroku (1-5):
 
 ---
 
-## Pending update pro docs/09-project-control-tower.md
+## Aktualizace docs/09-project-control-tower.md
 
-> Tento soubor byl locked pri posledni aktualizaci. Nasledujici zmeny je nutne propsat rucne:
-
-**Zmena 1 — Sekce 5, tabulka Kriticke:**
-```
-PRED:
-| C-3 | Row-based write-back — posunute radky | apps-script | Identity verification existuje (business_name + city), ale edge case: dva leadi se stejnym nazvem + mestem |
-
-PO (po provoznim overeni):
-| C-3 | Row-based write-back — posunute radky | apps-script | **CLOSED** (2026-04-XX) — Varianta B (lead_id lookup) implementovana a overena |
-```
-
-**Zmena 2 — Sekce 6, nova intervence:**
-```
-| 11 | 2026-04-XX | Write-back Varianta B (lead_id lookup) | C-3: findRowByLeadId_(), LockService v refresh, identity check zachovan | C-3 CLOSED |
-```
-
-**Zmena 3 — Sekce 1, shrnuti stavu:**
-```
-PRED:
-Zbyva: auth model (H-1/D-7), rate limiting (H-3), PreviewPipeline.gs refaktoring (M-6), web-starter bugy
-
-PO:
-Zbyva: auth model (H-1/D-7), rate limiting (H-3), PreviewPipeline.gs refaktoring (M-6), web-starter bugy
-C-3 (write-back row drift) CLOSED — Varianta B implementovana a overena
-```
-
-**Zmena 4 — Sekce governance validace:**
-```
-PRED: 26 pass, 0 warn, 0 fail
-PO: 28 pass, 0 warn, 0 fail
-```
+> Soubor je zamceny OneDrive procesem. Pripravena aktualizovana verze:
+> `docs/09-project-control-tower.md.updated`
+>
+> **Pro aplikaci:** `mv docs/09-project-control-tower.md.updated docs/09-project-control-tower.md`
+> (az OneDrive uvolni zamek, nebo po restartu OneDrive)
+>
+> Zmeny v .updated: C-3 CLOSED, intervence #11, C-3 v shrnuti, 28 pass validace.

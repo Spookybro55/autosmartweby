@@ -40,3 +40,11 @@ __pycache__/
 # Temp
 *.tmp
 *.bak
+
+# Claude Code config (local)
+.claude/
+.claude-flow/
+.playwright-mcp/
+
+# OneDrive lock artifacts
+docs/09-project-control-tower.md.updated

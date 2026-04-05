@@ -1,0 +1,118 @@
+# Claude Code Configuration — Autosmartweby
+
+## Source of Truth
+
+- **GitHub repo je jediny source of truth** pro veskerou konfiguraci, kod a dokumentaci.
+- **Apps Script editor NENI source of truth.** Kod se meni v repo (apps-script/), po merge se pushne pres clasp.
+- **Google Sheets je source of truth pro runtime data** (LEADS sheet), NE pro logiku nebo konfiguraci.
+
+## Task Workflow (POVINNE)
+
+Kazdy task MUSI:
+1. Zmenit kod (pokud je to code task)
+2. Aktualizovat prislusne kanonicke docs (podle stream mapy nize)
+3. Vytvorit nebo aktualizovat task record v `docs/30-task-records/`
+4. Spustit generovani: `node scripts/docs/build-changelog.mjs && node scripts/docs/build-task-registry.mjs`
+5. Spustit validaci: `node scripts/docs/check-doc-sync.mjs`
+
+### Na konci KAZDEHO tasku spust:
+```bash
+node scripts/docs/build-changelog.mjs
+node scripts/docs/build-task-registry.mjs
+node scripts/docs/check-doc-sync.mjs
+```
+
+### Novy task record:
+```bash
+node scripts/docs/create-task-record.mjs <TASK_ID> "<TITLE>"
+```
+
+## Branch Naming
+
+- `task/A1-short-name` — stream A (Data & Automation)
+- `task/B4-short-name` — stream B (Infrastructure & Offer)
+- `task/C2-short-name` — stream C (Business Process & Prioritization)
+
+## Task-Doc Mapa
+
+### Stream A — Data & Automation
+Primarni docs:
+- docs/20-current-state.md
+- docs/23-data-model.md
+- docs/24-automation-workflows.md
+
+### Stream B — Infrastructure & Offer
+Primarni docs:
+- docs/20-current-state.md
+- docs/22-technical-architecture.md
+- docs/26-offer-generation.md
+- docs/27-infrastructure-storage.md
+
+### Stream C — Business Process & Prioritization
+Primarni docs:
+- docs/20-current-state.md
+- docs/21-business-process.md
+- docs/24-automation-workflows.md
+- docs/25-lead-prioritization.md
+
+### Vzdy povinne
+- Task record v docs/30-task-records/
+- docs/20-current-state.md (pokud se meni stav systemu)
+
+## Zakazy
+
+- NEEDITUJ soubory v docs/archive/ pokud task neni explicitne o archivnich dokumentech
+- NEEDITUJ rucne docs/11-change-log.md ani docs/29-task-registry.md — jsou generovane
+- NECOMMITUJ secrets, credentials, .env soubory
+- NEPRACUJ v Apps Script editoru jako source of truth
+- NEVYTVAREJ soubory v root slozce — pouzij spravny adresar
+
+## Behavioral Rules
+
+- Read file before editing
+- NEVER create files unless necessary
+- NEVER commit .env files
+- Keep files under 500 lines
+
+## File Organization
+
+- `/apps-script` — Google Apps Script backend
+- `/crm-frontend` — Next.js CRM frontend
+- `/docs` — Kanonicka dokumentace
+- `/docs/archive` — Historicke/referencni dokumenty
+- `/docs/30-task-records` — Evidence zmenovych tasku
+- `/scripts/docs` — Dokumentacni automatizace
+- `/offers` — Obchodni nabidky
+- `/scripts` — Utility skripty
+
+## Build & Test
+
+```bash
+# Frontend build
+cd crm-frontend && npm run build
+
+# Doc validation
+node scripts/docs/check-doc-sync.mjs
+
+# Generate changelog + registry
+node scripts/docs/build-changelog.mjs
+node scripts/docs/build-task-registry.mjs
+
+# New task record
+node scripts/docs/create-task-record.mjs A2 "Task title"
+```
+
+## Security
+
+- NEVER hardcode API keys or secrets
+- NEVER commit .env files
+- Always validate user input at system boundaries
+
+## Definition of Done
+
+Task je HOTOV az kdyz:
+1. **Code done:** tsc OK, build OK, no secrets
+2. **Task record:** vytvoreny/aktualizovany v docs/30-task-records/
+3. **Docs done:** prislusne kanonicke docs aktualizovany
+4. **Generated docs:** changelog + task registry regenerovany
+5. **Validation:** check-doc-sync.mjs — 0 fail

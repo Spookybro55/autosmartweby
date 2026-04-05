@@ -1,0 +1,34 @@
+name: Docs Governance
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  docs-check:
+    name: Documentation Sync Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build changelog
+        run: node scripts/docs/build-changelog.mjs
+
+      - name: Build task registry
+        run: node scripts/docs/build-task-registry.mjs
+
+      - name: Verify generated files are up-to-date
+        run: |
+          if ! git diff --quiet docs/11-change-log.md docs/29-task-registry.md; then
+            echo "::error::Generated docs are not up-to-date. Run build-changelog.mjs and build-task-registry.mjs locally."
+            git diff docs/11-change-log.md docs/29-task-registry.md
+            exit 1
+          fi
+          echo "Generated files are up-to-date."
+
+      - name: Check documentation sync
+        run: node scripts/docs/check-doc-sync.mjs

@@ -1,0 +1,286 @@
+# Kontrolni vez projektu — Autosmartweby
+
+> **Verze:** 1.1
+> **Datum:** 2026-04-04
+> **Ucel:** Jediny operacni zdroj pravdy pro cely projekt Autosmartweby
+> **Aktualizace:** Pri kazde zmene stavu problemu, rozhodnuti nebo priority
+> **Governance:** Dokumentacni disciplina zavedena a finalizovana — viz `docs/10-documentation-governance.md`, `docs/13-doc-update-rules.md`, `docs/14-definition-of-done.md`. Validace: `node scripts/check-doc-sync.mjs` (28 pass, 0 warn, 0 fail).
+
+---
+
+## 1. Shrnuti
+
+Projekt Autosmartweby se sklada ze tri hlavnich systemu: CRM backend (Apps Script + Google Sheets), CRM frontend (Next.js) a verejny web (web-starter / autosmartweb.cz). Byly provedeny dva nezavisle auditni streamy:
+
+- **Stream 1 (nase sezeni):** Audit s pristupem ke kodu. Nalezeno 20 deduplikovanych problemu (C-1 az L-5), 8 rozhodnuti (D-1 az D-8). Vetsi cast vyresena.
+- **Stream 2 (nocni audity):** Audit BEZ pristupu k Apps Script kodu. 43 bugu (BUG-001 az BUG-043), prevazne o web-starteru. Mnohe byly hypotezy — nyni krizove overeny vuci skutecnemu kodu.
+
+**Stav k dnesnimu dni:**
+- 6 z 8 rozhodnuti uzavreno (D-1 az D-5, D-8 HOTOVO; D-6 CASTECNE; D-7 OTEVRENE)
+- Monorepo zavedeno, column mappings vycisteny, HMAC timing-safe opraveno
+- Zbyva: auth model (H-1/D-7), rate limiting (H-3), PreviewPipeline.gs refaktoring (M-6), web-starter bugy
+- **C-3 (write-back row drift) CLOSED** (2026-04-04) — Varianta B (lead_id lookup) implementovana a overena v TEST i PROD
+
+---
+
+## 2. Struktura systemu
+
+| Komponenta | Umisteni | Technologie | Radky kodu | Ucel |
+|------------|----------|-------------|------------|------|
+| **CRM backend** | `apps-script/` | Google Apps Script (V8) | ~4 640 | Zpracovani leadu, emaily, synchronizace, write-back |
+| **CRM frontend** | `crm-frontend/` | Next.js 16, React 19 | ~6 220 | Dashboard, pipeline, leads, follow-ups, login |
+| **Verejny web** | *web-starter/* (externi repo) | HTML/CSS/JS | neurceno | autosmartweb.cz — prezentacni web |
+| **Nabidky** | `offers/` | HTML, PDF, Python | ~8 souboru | Obchodni nabidky a nastroje pro konverzi |
+| **Dokumentace** | `docs/` | Markdown | 14+ souboru | Auditni zpravy, mapy, rozhodnuti, logy |
+
+### Hlavni soubory Apps Script
+
+| Soubor | Radky | Zodpovednost |
+|--------|-------|---------------|
+| Config.gs | — | Konstanty, column mappings, enums |
+| Helpers.gs | — | HeaderResolver, logging, validace |
+| PreviewPipeline.gs | 1 492 | Kvalifikace, sablony, briefy, drafty |
+| ContactSheet.gs | — | Write-back, "Ke kontaktovani" |
+| OutboundEmail.gs | — | Odeslani emailu/draftu pres Gmail |
+| MailboxSync.gs | — | Inbox sync, detekce odpovedi |
+| GmailLabels.gs | — | Sprava Gmail stitku |
+| LegacyWebCheck.gs | — | Serper API lookup webu |
+| Menu.gs | — | Custom menu v Google Sheets |
+
+### Hlavni stranky CRM frontend
+
+| Stranka | Route | Ucel |
+|---------|-------|------|
+| Login | `/login` | Prihlaseni (sdilene heslo + HMAC session) |
+| Dashboard | `/dashboard` | Prehled statistik |
+| Leads | `/leads` | Seznam a detail leadu |
+| Pipeline | `/pipeline` | Vizualizace obchodniho pipeline |
+| Follow-ups | `/follow-ups` | Planovane nasledne akce |
+
+---
+
+## 3. Zdroj pravdy
+
+| Domena | Zdroj | Umisteni | Poznamka |
+|--------|-------|----------|----------|
+| Zdrojovy kod | Git monorepo | `Nabidka weby/` (lokalni, bez remote) | master, 2+ commity |
+| CRM data | Google Sheets | SPREADSHEET_ID `1RBcLZkn3AruiqaQdJ7PHIxvCcoO5SC9Qnlw_NiLnpYc` | PRODUKCE |
+| CRM workflow | Apps Script | `apps-script/*.gs` | Clasp sync → TEST prostredi |
+| Column mappings (backend) | Config.gs | `LEGACY_COL`, `EXTENSION_COLUMNS` | Hardcoded + HeaderResolver |
+| Column mappings (frontend) | config.ts | `DYNAMIC_HEADERS`, `REQUIRED_HEADERS` | Plne dynamicke (header row) |
+| Outreach stage enum | Config.gs + config.ts | 6 stavu, synchronizovane | `NOT_CONTACTED` az `LOST` |
+| Rozhodnuti | docs/01-decision-list.md | D-1 az D-8 | |
+| Bug tracking (web-starter) | Nocni audity | BUG-001 az BUG-043 | Externi repo |
+| Bug tracking (CRM) | docs/01-audit-consolidation.md | C-1 az L-5 (20 polozek) | |
+| Deployment strategie | apps-script/README.md | Clasp → TEST, manualne → PRODUKCE | |
+| Tento dokument | docs/09-project-control-tower.md | Master control | |
+
+---
+
+## 4. Integrace nocnich auditu — krizova reference
+
+### Uzavrene / Nahrazene nalezy
+
+| Nocni audit nalez | Status | Duvod |
+|-------------------|--------|-------|
+| Apps Script kod neni ve version control | **UZAVRENO** | Apps Script je v monorepo pod `apps-script/`, clasp propojeny |
+| Apps Script deployment pipeline chybi | **UZAVRENO** | `.clasp.json` → TEST zdokumentovano, deployment strategie v `apps-script/README.md` |
+| Source of truth konfuze (CRM cast) | **CASTECNE UZAVRENO** | Monorepo zavedeno, column mappings synchronizovany, `LEADS_COLUMNS` dead code smazan |
+| Chybejici autentizace pro CRM | **NAHRAZENO** | CRM frontend ma auth: HMAC session tokeny, middleware, `ALLOWED_EMAILS` |
+| Chybejici dashboard | **NAHRAZENO** | CRM frontend ma `/dashboard`, `/leads`, `/pipeline`, `/follow-ups` |
+
+### Otevrene nalezy — web-starter (NE crm-frontend)
+
+| BUG ID | Popis | Zavaznost | Poznamka |
+|--------|-------|-----------|----------|
+| BUG-001 | Chybejici mobilni hamburger menu | stredni | web-starter scope |
+| BUG-002 | Nekompletni sitemap | nizka | web-starter scope |
+| BUG-003 | Kontaktni formular nenapojeny na CRM | vysoka | web-starter scope |
+| BUG-005 | Hardcoded sekce ignoruji data | stredni | web-starter scope |
+| BUG-006 | Hardcoded sekce ignoruji data (dalsi) | stredni | web-starter scope |
+| BUG-007 | GA skript mimo body | nizka | web-starter scope |
+| BUG-008 | Zadny rate limiting na kontaktni API | vysoka | web-starter scope |
+| BUG-013 az BUG-043 | Ruzne web-starter problemy | ruzna | Celkem ~30 polozek, vsechny web-starter scope |
+
+### Nalezy vyzadujici manualni overeni
+
+| BUG ID / ID | Popis | Co overit | Jak |
+|-------------|-------|-----------|-----|
+| BUG-009 | API kvoty v Apps Script | Zda produkce narazi na limity | Sledovat execution log v produkci |
+| BUG-011 | API kvoty (dalsi) | Dtto | Dtto |
+| BUG-023 | Strategie zalohovani LEADS sheetu | Existuje automaticka zaloha? | Overit v Google Sheets / Drive |
+| BUG-024 | Google Sheets/Gmail opravneni | Spravne nastavena? | Overit v Apps Script projektu |
+| M-5 | Mock data vs skutecne schema | `leads-data.ts` odpovida sheetu? | Porovnat strukturu s produkci |
+
+---
+
+## 5. Otevrene problemy podle zavaznosti
+
+### Kriticke
+
+| ID | Problem | Oblast | Stav ochrany |
+|----|---------|--------|--------------|
+| C-3 | ~~Row-based write-back — posunute radky~~ | apps-script | **CLOSED** (2026-04-04) — Varianta B (lead_id lookup) implementovana a overena v TEST i PROD. Smoke test: Write-back OK lead_id=FIRMYCZ-0007. |
+
+> **Poznamka:** C-1 (column mappings na 2 mistech) a C-2 (LEGACY_COL hardcoded) byly zmireny intervencemi D-2. Frontend je plne dynamicky. Zbyva riziko v LegacyWebCheck.gs — validace pridana.
+
+### Vysoke
+
+| ID | Problem | Oblast | Stav |
+|----|---------|--------|------|
+| H-1 / D-7 | Sdilene heslo pro vsechny uzivatele | crm-frontend | OTEVRENE — funguje, ale bez per-user auditu |
+| H-3 | Zadny rate limiting na login | crm-frontend | OTEVRENE — neni implementovano |
+| BUG-003 | Kontaktni formular nenapojeny na CRM | web-starter | OTEVRENE |
+| BUG-008 | Rate limiting na kontaktni API | web-starter | OTEVRENE |
+
+### Stredni
+
+| ID | Problem | Oblast | Stav |
+|----|---------|--------|------|
+| M-5 | Mock data mohou byt zastara | crm-frontend | NEOVERENO |
+| M-6 | PreviewPipeline.gs prilis velky (1 492 radku) | apps-script | OTEVRENE — refaktoring neni urgentni |
+| M-7 | Tri vyznamy "REVIEW" v systemu | apps-script | OTEVRENE — zdokumentovano, neni kriticke |
+| M-8 | `email_reply_type=REPLIED` nepropaguje do `outreach_stage` | apps-script | OTEVRENE — design decision (manualni workflow) |
+| BUG-001 | Chybejici mobilni menu | web-starter | OTEVRENE |
+| BUG-005/006 | Hardcoded sekce | web-starter | OTEVRENE |
+
+### Nizke
+
+| ID | Problem | Oblast | Stav |
+|----|---------|--------|------|
+| L-3 | Dva html2pdf skripty — ktery je aktualni | offers | NEOVERENO |
+| L-4 | PDF vs HTML aktualizace | offers | NEOVERENO |
+| L-5 | `.swarm/` vs `.claude-flow/` redundance | infra | NEJASNE |
+| BUG-002 | Nekompletni sitemap | web-starter | OTEVRENE |
+| BUG-007 | GA skript mimo body | web-starter | OTEVRENE |
+
+---
+
+## 6. Provedene intervence od auditu
+
+| # | Datum | Co | Detail | Rozhodnuti |
+|---|-------|----|--------|------------|
+| 1 | 2026-04-04 | Smazano 24 junk souboru + 1 temp + 1 bak | Vsechny 0 B artefakty z AI generace | D-1 HOTOVO |
+| 2 | 2026-04-04 | Column mappings vycisteny | `LEADS_COLUMNS` dead code smazan, `REQUIRED_HEADERS` validace pridana, `LegacyWebCheck.gs` guard pridan | D-2 HOTOVO |
+| 3 | 2026-04-04 | Monorepo setup | Root `git init`, `crm-frontend/.git` smazan (historie exportovana do bundle), initial commit 116 souboru | D-3 HOTOVO |
+| 4 | 2026-04-04 | `.clasp.json` zdokumentovano | parentId → TEST je zamerna safety pojistka | D-4 HOTOVO |
+| 5 | 2026-04-04 | Nabidky presunuty do `offers/` | 8 souboru, cesty v Python skriptech aktualizovany | D-5 HOTOVO |
+| 6 | 2026-04-04 | README prepsany | `crm-frontend/README.md` — skutecna dokumentace misto Next.js template | D-6 CASTECNE |
+| 7 | 2026-04-04 | `.env.local` overen | `.gitignore` spravne pokryva `.env*` | D-8 VYRESENO |
+| 8 | 2026-04-04 | Timing-safe HMAC | `crypto.subtle.verify()` v middleware.ts, starý `hmacSign` + string comparison odstranen | H-2 HOTOVO |
+| 9 | 2026-04-04 | Root `.gitignore` vytvoren | node_modules, .next, .env*, runtime, editor artifacts | Soucasti D-3 |
+| 10 | 2026-04-04 | Deployment strategie zdokumentovana | Pridan Deployment section do `apps-script/README.md` | Soucasti D-4 |
+| 11 | 2026-04-04 | Write-back Varianta B (lead_id lookup) | C-3: findRowByLeadId_(), LockService v refresh, identity check zachovan, format fix FIRMYCZ-* | C-3 CLOSED |
+
+---
+
+## 7. Aktivni rozhodnuti vlastnika
+
+| # | Tema | Moznosti | Doporuceni | Status |
+|---|------|----------|------------|--------|
+| D-7 | Auth model — sdilene heslo | (a) Nechat sdilene heslo pro 1-3 uzivatele, (b) Per-user credentials, (c) Google OAuth | Kratko (a), dlouhodobo (c) | **OTEVRENE** — vlastnik se musi rozhodnout podle poctu uzivatelu |
+| H-3 | Rate limiting na login | (a) In-memory counter, (b) External rate limiter, (c) Nechat | (a) — jednoduchy middleware | **OTEVRENE** |
+| M-8 | REPLIED → outreach_stage propagace | (a) Automaticky update, (b) Nechat manualni | Zavisi na obchodnim procesu | **OTEVRENE** — design decision |
+| M-6 | PreviewPipeline.gs rozdeleni | (a) Rozdelit na 3-4 soubory, (b) Nechat | (a) pri pristim vetsin refaktoringu | **OTEVRENE** — nizka priorita |
+| web-starter | Prioritizace BUG-001 az BUG-043 | Podle obchodniho dopadu | BUG-003 (formular→CRM) a BUG-008 (rate limit) nejdriv | **OTEVRENE** |
+
+---
+
+## 8. Priority
+
+### Do 24 hodin
+
+| Ukol | Duvod | Effort |
+|------|-------|--------|
+| Rozhodnuti D-7: auth model | Bezpecnostni riziko pri vice uzivatelich | 5 min rozhodnuti |
+| Overit M-5: mock data vs schema | Muze zpusobit matouci UI | 30 min |
+| Overit BUG-023: zaloha LEADS sheetu | Ztrata dat je nevratna | 10 min |
+
+### Do 7 dni
+
+| Ukol | Duvod | Effort |
+|------|-------|--------|
+| H-3: Implementovat rate limiting na login | Ochrana proti brute-force | 1-2 hod |
+| BUG-003: Napojit kontaktni formular na CRM | Obchodni hodnota — leady z webu | 2-4 hod |
+| BUG-008: Rate limiting na kontaktni API | Bezpecnost verejneho endpointu | 1-2 hod |
+| Overit BUG-009/011: API kvoty | Prevence produkci outage | 30 min sledovani |
+
+### Do 30 dni
+
+| Ukol | Duvod | Effort |
+|------|-------|--------|
+| M-6: Rozdelit PreviewPipeline.gs | Udrzitelnost kodu | 2-4 hod |
+| M-7: Prejmenovat "REVIEW" stavy | Snizeni konfuze | 1 hod + testovani |
+| D-6: Dokumentace — dalsi iterace | Uplna delba zodpovednosti docs vs READMEs | 2 hod |
+| BUG-001: Mobilni hamburger menu | UX web-starteru | 1-2 hod |
+| BUG-005/006: Dynamicke sekce | Spravne zobrazeni dat | 2-4 hod |
+| Remote git repo (GitHub) | Ochrana proti ztrate kodu na disku | 30 min setup |
+| L-3: Zjistit aktualni html2pdf skript | Cleanup | 15 min |
+
+---
+
+## 9. Stav dokumentace
+
+| Dokument | Stav | Aktualizovat pri |
+|----------|------|------------------|
+| `docs/09-project-control-tower.md` (tento) | **AKTUALNI** | Kazda zmena stavu problemu nebo rozhodnuti |
+| `docs/01-audit-consolidation.md` | **AKTUALNI** | Novy nalez v CRM kodu |
+| `docs/01-decision-list.md` | **AKTUALNI** | Zmena stavu rozhodnuti D-1 az D-8 |
+| `docs/06-column-mappings-analysis.md` | **AKTUALNI** | Zmena column mappings v Config.gs nebo config.ts |
+| `docs/06-column-mappings-options.md` | **AKTUALNI** | Jiz implementovano (Varianta B), dalsi zmeny nepravdepodobne |
+| `docs/CRM-SYSTEM-MAP.md` | **AKTUALNI** | Zmena architektury, novych souboru, novych sloupcu |
+| `apps-script/README.md` | **AKTUALNI** | Zmena deployment procesu nebo pridani noveho .gs souboru |
+| `crm-frontend/README.md` | **AKTUALNI** | Zmena setup procesu nebo pridani nove stranky |
+| `docs/05-monorepo-setup-log.md` | **UZAVRENY** | Jednorázová akce, neaktualizovat |
+| `docs/03-cleanup-executed.md` | **UZAVRENY** | Jednorázová akce, neaktualizovat |
+| `docs/02-cleanup-plan.md` | **UZAVRENY** | Plan proveden, viz 03-cleanup-executed |
+| `docs/02-target-structure.md` | **OVERIT** | Porovnat s aktualnim stavem po vsetkych zmenach |
+| `docs/04-git-and-deploy-decisions.md` | **OVERIT** | Mohlo se zmenit po monorepo setup |
+| `docs/00-project-map.md` | **ZASTARALE** | Popisuje stav pred cleanupem — nepresny od 2026-04-04 |
+| `docs/00-folder-inventory.md` | **ZASTARALE** | Popisuje stav pred smazanim junk souboru |
+
+### Pravidla aktualizace
+
+1. **Tento dokument** (`09-project-control-tower.md`) je master — aktualizovat VZDY kdyz se zmeni stav problemu, rozhodnuti, nebo priority
+2. Kazdy uzavreny problem dostat datum uzavreni a odkaz na commit/log
+3. Dokumenty oznacene UZAVRENY se nemeni
+4. Dokumenty oznacene ZASTARALE slozi jako historicka reference, ne jako zdroj pravdy
+
+---
+
+## 10. Definice hotovo (Definition of Done)
+
+Kazda budouci zmena v projektu je "hotova" kdyz splnuje:
+
+### Kod
+
+- [ ] Zmena je commitnuta v monorepo s popisnym commit message
+- [ ] Vsechny existujici testy prochazi (pokud existuji)
+- [ ] Zadne hardcoded secrets v kodu
+- [ ] Soubor nepresahuje 500 radku (nebo je zdokumentovana vyjimka)
+- [ ] Input validace na systemovych hranicich (API routes, Apps Script entry points)
+
+### Column mappings (pokud se meni sloupce)
+
+- [ ] `Config.gs` aktualizovan (LEGACY_COL, EXTENSION_COLUMNS)
+- [ ] `config.ts` aktualizovan (DYNAMIC_HEADERS, REQUIRED_HEADERS)
+- [ ] Outreach stage enum synchronizovany (pokud se meni)
+- [ ] `validateLegacyColHeaders_()` pokryva nove pozice
+
+### Dokumentace
+
+- [ ] `docs/09-project-control-tower.md` aktualizovan (stav problemu, priority)
+- [ ] `docs/01-decision-list.md` aktualizovan (pokud se meni rozhodnuti)
+- [ ] Relevantni README aktualizovan (pokud se meni setup nebo architektura)
+
+### Bezpecnost
+
+- [ ] `.env*` soubory NIKDY commitnuty
+- [ ] Zadne API klice v kodu
+- [ ] Auth zmeny testovany (login, session, middleware)
+
+### Deployment (Apps Script)
+
+- [ ] Testovano v TEST prostredi (clasp push → TEST spreadsheet)
+- [ ] Rucne overeno v produkci az po schvaleni
+- [ ] `DRY_RUN` pouzit pro risikove operace

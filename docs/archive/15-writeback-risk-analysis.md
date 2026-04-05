@@ -1,6 +1,8 @@
 # Write-Back Risk Analysis
 
-> Verze 1.0 | 2026-04-04 | Autor: Claude + user
+> Verze 1.1 | 2026-04-04 | Autor: Claude + user
+>
+> **STAV: Varianta B IMPLEMENTOVANA A OVERENA** v TEST i PROD (2026-04-04). C-3 CLOSED.
 
 Detailni analyza mechanismu row-based write-back v CRM systemu Autosmartweby. Ucel: identifikovat edge cases, rizika a testovaci scenare PRED jakoukoli implementacni zmenou.
 
