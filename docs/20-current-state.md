@@ -1,13 +1,38 @@
 # Current State — Autosmartweby
 
 > **Kanonicky dokument.** Aktualizuje se pri kazdem tasku, ktery meni stav systemu.
-> **Posledni aktualizace:** 2026-04-05
+> **Posledni aktualizace:** 2026-04-05 (Souhrn přepsán po hardening auditu)
 
 ---
 
 ## Souhrn
 
-Autosmartweby je CRM system pro oslovovani malych ceskych firem (primarne remeslniku), ktere nemaji web nebo maji slaby web, s nabidkou tvorby personalizovaneho webu.
+Autosmartweby je v aktuálním stavu poloautomatizovaný CRM systém pro oslovování českých živnostníků bez webových stránek.
+
+**Commitnutý snapshot (lokální branch master, commit 7341cc8):**
+- Google Apps Script backend (~4800 LOC, 9 souborů) pokrývá kvalifikaci leadů, generování briefů a e-mailových draftů, kód pro per-lead odesílání přes GmailApp, mailbox sync a write-back z odvozeného sheetu přes lead_id lookup (Variant B).
+- Next.js 16 CRM frontend je v rané fázi a obsahuje přihlašovací stránku a základní layout. V commitnuté verzi neobsahuje dashboard ani funkční autentizaci.
+- Pipeline běží v režimu DRY_RUN=true a standardně se zastaví ve stavu BRIEF_READY. Webhook pipeline v kódu existuje, ale je vypnutá (ENABLE_WEBHOOK=false).
+- Veškerý vstup dat je manuální. Systém nescrapuje leady, negeneruje webové stránky a nemá hosting pipeline.
+
+**Governance vrstva je definovaná v repu a lokálně validovaná, ale na GitHubu zatím nevynucovaná:**
+- obsahuje kanonické dokumenty docs/20–29, task records systém se 3 ukázkovými záznamy, 4 automatizační skripty, CI workflow a PR template,
+- check-doc-sync.mjs při lokálním běhu vrací 34 pass / 0 warn / 0 fail,
+- workflow docs-governance.yml je definované pro PR do main, ale bez aktivních branch protection rules nemá blokovací efekt,
+- část governance souborů je v nekonzistentním stavu kvůli OneDrive file locku: CLAUDE.md a docs/13-doc-update-rules.md zůstávají v aktivní starší verzi a nové verze existují jako .new soubory; část archivních duplikátů zůstává v kořenu docs/,
+- známá dokumentační nesrovnalost: docs/23-data-model.md uvádí 43 rozšiřujících sloupců, zatímco Config.gs jich definuje 45.
+
+**Mimo commitnutý snapshot existují lokální necommitnuté změny v working tree:**
+- Google Auth Phase 1: 3 API routes, session hook a úpravy login page, headeru a sidebaru; tato vrstva existuje jen lokálně, není commitnutá, nemá task record a neprošla governance workflow,
+- drobné změny v ContactSheet.gs a vybraných dokumentech docs/12, docs/15-* a docs/17,
+- 4 auth dokumenty docs/18-* existují mimo kanonický rozsah docs/20–29 a nejsou zahrnuté do check-doc-sync validace.
+
+**Branch stav není plně sjednocený:**
+- lokálně se pracuje na master,
+- GitHub remote používá main,
+- commitnutý snapshot odpovídá commitu 7341cc8, zatímco working tree obsahuje další lokální necommitnuté změny, které na remote nejsou.
+
+*Audit byl proveden k 2026-04-04.*
 
 ## Co dnes existuje
 

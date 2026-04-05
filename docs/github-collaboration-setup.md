@@ -6,26 +6,27 @@
 - **Visibility:** Private
 - **Default branch:** `main`
 
-## Tým a přístupy
+## Tým a p��ístupy
 
-| GitHub username           | Role         |
-|---------------------------|--------------|
-| Spookybro55               | Owner/Admin  |
-| tomasmaixner25-maker      | Collaborator |
-| *(jan.bezemek6@gmail.com)*| Collaborator |
+| GitHub username           | Role         | Stav |
+|---------------------------|--------------|------|
+| Spookybro55               | Owner/Admin  | Aktivní |
+| tomasmaixner25-maker      | Collaborator | Pozvánka odeslána 2026-04-05 |
+| *(jan.bezemek6@gmail.com)*| Collaborator | Čeká na zjištění GitHub username |
 
-> **Poznámka:** Pro uživatele jan.bezemek6@gmail.com je potřeba zjistit GitHub username a přidat ho ručně.
+> **Poznámka:** Pro uživatele jan.bezemek6@gmail.com je potřeba zjistit GitHub username a přidat ho ručně přes `gh api repos/Spookybro55/autosmartweby/collaborators/<USERNAME> -X PUT --input - <<< '{"permission":"push"}'`
 
-## Branch protection — `main`
+## Branch protection — `main` (aktivní od 2026-04-05)
 
-Na branch `main` jsou nastavena tato pravidla:
+Skutečně nastaveno přes GitHub API:
 
 - **Direct push zakázán** — nikdo nemůže pushovat přímo do `main`
 - **Require pull request before merging** — změny jdou pouze přes PR
 - **Require at least 1 approving review** — PR musí schválit minimálně 1 reviewer
-- **Require status check `docs-governance`** — PR musí projít workflow kontrolou dokumentace
+- **Require status check `docs-governance`** — PR musí projít workflow kontrolou dokumentace (strict: branch musí být aktuální)
 - **Dismiss stale approvals** — při novém push se dřívější approval zruší
-- **Require branches to be up to date** — branch musí být aktuální před mergem
+- **Enforce admins: false** — owner může obejít pravidla v nutných případech
+- **Force push zakázán** — nelze přepisovat historii main
 
 ## Workflow pro tým
 
@@ -41,9 +42,9 @@ Na branch `main` jsou nastavena tato pravidla:
    ```bash
    git checkout main
    git pull origin main
-   git checkout -b task/<ID>-<popis>
+   git checkout -b task/<TASK_ID>-<short-name>
    ```
-   Příklady: `task/042-login-page`, `task/015-fix-offer-calc`
+   Příklady: `task/A3-serper-retry`, `task/B2-auth-phase1`, `task/C4-priority-logic`
 
 3. **Pracuj a commituj** na své branch:
    ```bash

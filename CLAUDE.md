@@ -1,248 +1,144 @@
-# Claude Code Configuration - RuFlo V3
+# Claude Code Configuration — Autosmartweby
 
-## Behavioral Rules (Always Enforced)
+## Source of Truth
 
-- Do what has been asked; nothing more, nothing less
-- NEVER create files unless they're absolutely necessary for achieving your goal
-- ALWAYS prefer editing an existing file to creating a new one
-- NEVER proactively create documentation files (*.md) or README files unless explicitly requested
-- NEVER save working files, text/mds, or tests to the root folder
-- Never continuously check status after spawning a swarm — wait for results
-- ALWAYS read a file before editing it
-- NEVER commit secrets, credentials, or .env files
+- **Tento repo (GitHub) je jediny source of truth.**
+- Apps Script editor NENI source of truth — clasp push se dela az z integrovaneho stavu po merge do main.
+- Google Sheets je runtime source of truth pro data; tento repo je source of truth pro kod a dokumentaci.
 
-## File Organization
+## Tym a workflow
 
-- NEVER save to root folder — use the directories below
-- Use `/src` for source code files
-- Use `/tests` for test files
-- Use `/docs` for documentation and markdown files
-- Use `/config` for configuration files
-- Use `/scripts` for utility scripts
-- Use `/examples` for example code
+3 lide pracuji paralelne, kazdy na vlastni branch. Pravidla:
 
-## Project Architecture
+- `main` je chranena branch — direct push zakazan
+- zmeny jdou do `main` pouze pres Pull Request
+- kazdy PR musi projit status checkem `docs-governance`
+- kazdy PR musi byt schvalen minimalne 1 reviewerem
 
-- Follow Domain-Driven Design with bounded contexts
-- Keep files under 500 lines
-- Use typed interfaces for all public APIs
-- Prefer TDD London School (mock-first) for new code
-- Use event sourcing for state changes
-- Ensure input validation at system boundaries
+## Branch naming
 
-### Project Config
-
-- **Topology**: hierarchical-mesh
-- **Max Agents**: 15
-- **Memory**: hybrid
-- **HNSW**: Enabled
-- **Neural**: Enabled
-
-## Build & Test
-
-```bash
-# Build
-npm run build
-
-# Test
-npm test
-
-# Lint
-npm run lint
+```
+task/<TASK_ID>-<short-name>
 ```
 
-- ALWAYS run tests after making code changes
-- ALWAYS verify build succeeds before committing
+Priklady: `task/A3-serper-retry`, `task/B2-auth-phase1`, `task/C4-priority-logic`
 
-## Security Rules
+Streamy:
+- **A** = Data & Automation
+- **B** = Infrastructure & Offer
+- **C** = Business Process & Prioritization
 
-- NEVER hardcode API keys, secrets, or credentials in source files
-- NEVER commit .env files or any file containing secrets
-- Always validate user input at system boundaries
-- Always sanitize file paths to prevent directory traversal
-- Run `npx @claude-flow/cli@latest security scan` after security-related changes
+## Co kazdy task MUSI dodat
 
-## Concurrency: 1 MESSAGE = ALL RELATED OPERATIONS
+1. **Code changes** (pokud je to code task)
+2. **Task record** v `docs/30-task-records/{TASK_ID}.md`
+3. **Kanonicke docs** podle stream mapy (viz nize)
+4. **Regenerovane generated files:**
+   ```bash
+   node scripts/docs/build-changelog.mjs
+   node scripts/docs/build-task-registry.mjs
+   ```
+5. **Validace:**
+   ```bash
+   node scripts/docs/check-doc-sync.mjs
+   ```
 
-- All operations MUST be concurrent/parallel in a single message
-- Use Claude Code's Task tool for spawning agents, not just MCP
-- ALWAYS batch ALL todos in ONE TodoWrite call (5-10+ minimum)
-- ALWAYS spawn ALL agents in ONE message with full instructions via Task tool
-- ALWAYS batch ALL file reads/writes/edits in ONE message
-- ALWAYS batch ALL Bash commands in ONE message
+## Task-Doc Mapa (povinne mapovani)
 
-## Swarm Orchestration
+| Stream | Nazev | Povinne docs |
+|--------|-------|-------------|
+| **A** | Data & Automation | docs/20, docs/23, docs/24 |
+| **B** | Infrastructure & Offer | docs/20, docs/22, docs/26, docs/27 |
+| **C** | Business Process & Prioritization | docs/20, docs/21, docs/24, docs/25 |
 
-- MUST initialize the swarm using CLI tools when starting complex tasks
-- MUST spawn concurrent agents using Claude Code's Task tool
-- Never use CLI tools alone for execution — Task tool agents do the actual work
-- MUST call CLI tools AND Task tool in ONE message for complex work
+Vzdy povinne bez ohledu na stream:
+- Task record v `docs/30-task-records/`
+- Regenerovane: `docs/11-change-log.md`, `docs/29-task-registry.md`
 
-### 3-Tier Model Routing (ADR-026)
+Dalsi docs podle typu zmeny:
+- Nova/zmenena routa → `docs/12-route-and-surface-map.md`
+- Zmena API kontraktu → `docs/12`, `docs/01-decision-list.md`
+- Zmena auth/env/config → `docs/22`, `docs/27`
+- Nove riziko → `docs/28-risks-bottlenecks-scaling.md`
 
-| Tier | Handler | Latency | Cost | Use Cases |
-|------|---------|---------|------|-----------|
-| **1** | Agent Booster (WASM) | <1ms | $0 | Simple transforms (var→const, add types) — Skip LLM |
-| **2** | Haiku | ~500ms | $0.0002 | Simple tasks, low complexity (<30%) |
-| **3** | Sonnet/Opus | 2-5s | $0.003-0.015 | Complex reasoning, architecture, security (>30%) |
+## Zakazy
 
-- Always check for `[AGENT_BOOSTER_AVAILABLE]` or `[TASK_MODEL_RECOMMENDATION]` before spawning agents
-- Use Edit tool directly when `[AGENT_BOOSTER_AVAILABLE]`
+- **Necommituj secrets** (.env, API keys, hesla)
+- **Needituj archive docs** (`docs/archive/`) pokud task neni explicitne archivni
+- **Needituj cizi task records** — kazdy task = jiny soubor
+- **Nerucne edituj generated files** (`docs/11-change-log.md`, `docs/29-task-registry.md`) — regeneruji se skriptem
+- **Nepushuj do main primo** — vzdy pres PR
+- **Nepushuj do Apps Scriptu z feature branche** — az po merge do main
 
-## Swarm Configuration & Anti-Drift
-
-- ALWAYS use hierarchical topology for coding swarms
-- Keep maxAgents at 6-8 for tight coordination
-- Use specialized strategy for clear role boundaries
-- Use `raft` consensus for hive-mind (leader maintains authoritative state)
-- Run frequent checkpoints via `post-task` hooks
-- Keep shared memory namespace for all agents
-
-```bash
-npx @claude-flow/cli@latest swarm init --topology hierarchical --max-agents 8 --strategy specialized
-```
-
-## Swarm Execution Rules
-
-- ALWAYS use `run_in_background: true` for all agent Task calls
-- ALWAYS put ALL agent Task calls in ONE message for parallel execution
-- After spawning, STOP — do NOT add more tool calls or check status
-- Never poll TaskOutput or check swarm status — trust agents to return
-- When agent results arrive, review ALL results before proceeding
-
-## V3 CLI Commands
-
-### Core Commands
-
-| Command | Subcommands | Description |
-|---------|-------------|-------------|
-| `init` | 4 | Project initialization |
-| `agent` | 8 | Agent lifecycle management |
-| `swarm` | 6 | Multi-agent swarm coordination |
-| `memory` | 11 | AgentDB memory with HNSW search |
-| `task` | 6 | Task creation and lifecycle |
-| `session` | 7 | Session state management |
-| `hooks` | 17 | Self-learning hooks + 12 workers |
-| `hive-mind` | 6 | Byzantine fault-tolerant consensus |
-
-### Quick CLI Examples
-
-```bash
-npx @claude-flow/cli@latest init --wizard
-npx @claude-flow/cli@latest agent spawn -t coder --name my-coder
-npx @claude-flow/cli@latest swarm init --v3-mode
-npx @claude-flow/cli@latest memory search --query "authentication patterns"
-npx @claude-flow/cli@latest doctor --fix
-```
-
-## Available Agents (60+ Types)
-
-### Core Development
-`coder`, `reviewer`, `tester`, `planner`, `researcher`
-
-### Specialized
-`security-architect`, `security-auditor`, `memory-specialist`, `performance-engineer`
-
-### Swarm Coordination
-`hierarchical-coordinator`, `mesh-coordinator`, `adaptive-coordinator`
-
-### GitHub & Repository
-`pr-manager`, `code-review-swarm`, `issue-tracker`, `release-manager`
-
-### SPARC Methodology
-`sparc-coord`, `sparc-coder`, `specification`, `pseudocode`, `architecture`
-
-## Memory Commands Reference
-
-```bash
-# Store (REQUIRED: --key, --value; OPTIONAL: --namespace, --ttl, --tags)
-npx @claude-flow/cli@latest memory store --key "pattern-auth" --value "JWT with refresh" --namespace patterns
-
-# Search (REQUIRED: --query; OPTIONAL: --namespace, --limit, --threshold)
-npx @claude-flow/cli@latest memory search --query "authentication patterns"
-
-# List (OPTIONAL: --namespace, --limit)
-npx @claude-flow/cli@latest memory list --namespace patterns --limit 10
-
-# Retrieve (REQUIRED: --key; OPTIONAL: --namespace)
-npx @claude-flow/cli@latest memory retrieve --key "pattern-auth" --namespace patterns
-```
-
-## Quick Setup
-
-```bash
-claude mcp add claude-flow -- npx -y @claude-flow/cli@latest
-npx @claude-flow/cli@latest daemon start
-npx @claude-flow/cli@latest doctor --fix
-```
-
-## Claude Code vs CLI Tools
-
-- Claude Code's Task tool handles ALL execution: agents, file ops, code generation, git
-- CLI tools handle coordination via Bash: swarm init, memory, hooks, routing
-- NEVER use CLI tools as a substitute for Task tool agents
-
-## Mandatory Documentation Sync (ZÁVAZNÉ)
-
-Úkol NENÍ hotový, dokud není dokončena dokumentační synchronizace.
-Úkol NENÍ hotový, dokud není přidán záznam v changelogu.
-Tato pravidla jsou NEPŘEKROČITELNÁ — platí pro každou změnu bez výjimky.
-
-### Povinný postup
-
-1. Před změnou identifikuj dotčené dokumenty (viz `docs/13-doc-update-rules.md`).
-2. Proveď změnu v kódu.
-3. Aktualizuj příslušné docs.
-4. Přidej záznam do `docs/11-change-log.md`.
-5. Zkontroluj, zda je potřeba upravit:
-   - `docs/09-project-control-tower.md` (master řídicí dokument)
-   - `docs/12-route-and-surface-map.md` (route/surface mapa)
-   - README v dotčené složce
-6. NIKDY neuzavírej úkol bez "documentation sync complete".
-
-### Povinné spouštěče
-
-Jakákoliv z těchto změn VYŽADUJE changelog entry + doc sync check:
-- nový / smazaný / přesunutý / přejmenovaný soubor
-- nová route nebo změna route
-- nová API surface nebo změna API kontraktu
-- změna auth / env / config
-- změna CRM workflow nebo Apps Script logiky
-- změna source of truth
-- bug fix
-- cleanup s dopadem na strukturu
-
-### Povinný výstup na konci KAŽDÉHO úkolu
-
-Toto MUSÍ být poslední věc v každé odpovědi, která obsahuje změny:
+## Povinny vystup na konci kazdeho tasku
 
 ```
 - files changed: (seznam)
 - docs changed: (seznam)
-- why these docs: (krátké zdůvodnění)
+- why these docs: (kratke zduvodneni)
 - changelog updated: yes/no
 - documentation sync complete: yes/no
 - remaining open items: (seznam nebo "none")
 ```
 
-Pokud je changelog updated: no nebo documentation sync complete: no, MUSÍŠ to opravit PŘED ukončením odpovědi.
+Pokud `changelog updated: no` nebo `documentation sync complete: no`, oprav to PRED ukoncenim odpovedi.
 
-### Definition of Done
+## Definition of Done
 
-Viz `docs/14-definition-of-done.md`. Tři nezávislé checklisty:
+Tri nezavisle checklisty (viz `docs/14-definition-of-done.md`):
 1. **Code done:** tsc OK, build OK, no secrets
 2. **Documentation done:** affected docs updated, changelog entry added
 3. **Test done:** tests pass (if applicable), build verified
 
-Všechny tři musí být splněny. Žádný úkol není hotový bez všech tří.
+Vsechny tri musi byt splneny.
 
-### Validace
+## Build & Scripts
 
 ```bash
-node scripts/check-doc-sync.mjs
+# Regeneruj changelog z task records
+npm run docs:build-changelog
+
+# Regeneruj task registry z task records
+npm run docs:build-task-registry
+
+# Validuj dokumentacni sync
+npm run docs:check
+
+# Vytvor novy task record
+npm run docs:new-task -- <TASK_ID> "<TITLE>"
 ```
 
-## Support
+## Apps Script deployment
 
-- Documentation: https://github.com/ruvnet/claude-flow
-- Issues: https://github.com/ruvnet/claude-flow/issues
+Az po merge do main:
+```bash
+cd apps-script
+# Prepni .clasp.json scriptId na PROD
+clasp push
+# Vrat scriptId zpet na TEST
+```
+
+## Struktura dokumentace
+
+```
+docs/
+  01-decision-list.md          # Owner decisions
+  09-project-control-tower.md  # Master ridici dokument
+  10-documentation-governance.md
+  11-change-log.md             # GENERATED — needituj rucne
+  12-route-and-surface-map.md
+  13-doc-update-rules.md       # Task-doc mapa a pravidla
+  14-definition-of-done.md
+  20-current-state.md          # Kanonicka vrstva 20-29
+  21-business-process.md
+  22-technical-architecture.md
+  23-data-model.md
+  24-automation-workflows.md
+  25-lead-prioritization.md
+  26-offer-generation.md
+  27-infrastructure-storage.md
+  28-risks-bottlenecks-scaling.md
+  29-task-registry.md          # GENERATED — needituj rucne
+  30-task-records/             # Task records (1 soubor per task)
+  archive/                     # Archivni/reference docs — needituj
+```
