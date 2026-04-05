@@ -91,6 +91,30 @@ Novy system sheet ve stejnem SPREADSHEET_ID jako LEADS. Konvence leading undersc
 - **Hard duplicate** (ICO / domain / business email domain match) jde rovnou do `error` s `rejected_duplicate`. Status `duplicate_candidate` je vyhrazen vyhradne pro soft dup cekajici na manualni review.
 - **Retry:** `error` je terminalni. Opakovani = novy radek s novym `raw_import_id`; puvodni error radek zustava trvale jako audit.
 
+## Normalization: raw -> LEADS (A-03)
+
+Pravidla pro transformaci `_raw_import.raw_payload_json` na validni LEADS radek. Cely kontrakt v `docs/contracts/normalization-raw-to-leads.md`, strojove citelny mapping v `docs/contracts/raw-to-leads-mapping.json`.
+
+**Principy:**
+- Reuse existujicich helperu v `Helpers.gs:320-395` (`normalizePhone_`, `trimLower_`, `removeDiacritics_`, `canonicalizeUrl_`, `isRealUrl_`). Zadne paralelni cleaning funkce.
+- `lead_id` format `ASW-{ts36}-{rnd4}` zustava beze zmeny; generator se extrahuje z `PreviewPipeline.gs:63-108` do sdileneho `generateLeadId_()` v `Helpers.gs`.
+- Append-only rozsireni LEADS: 6 novych `source_*` sloupcu na konci `EXTENSION_COLUMNS`. Legacy pozice 1-20 (`LEGACY_COL`) nedotceno.
+- `phone`, `email`, `website_url` jsou vzdy string — `""` pokud invalid, nikdy `null`. Konzistentni s `isBlank_()` guardem a Sheets round-trip.
+- `has_website` se vzdy dopocitava z `website_url` jako `"yes"`/`"no"`.
+
+**Reject pravidla:** chybejici `business_name`, `city`, nebo oba `phone`+`email` prazdne -> raw radek skonci v `_raw_import` jako `error` s `rejected_error`. Retry = novy radek.
+
+### Nove source metadata sloupce v LEADS (append-only)
+
+| # | Sloupec | Typ | Zdroj |
+|---|---------|-----|-------|
+| 1 | source_job_id | string | _raw_import.source_job_id (FK na A-01 job) |
+| 2 | source_portal | enum | _raw_import.source_portal (firmy.cz / zivefirmy.cz) |
+| 3 | source_url | string (URL) | _raw_import.source_url |
+| 4 | source_raw_import_id | string | _raw_import.raw_import_id (FK zpet na raw radek) |
+| 5 | source_scraped_at | ISO 8601 UTC | _raw_import.scraped_at |
+| 6 | source_imported_at | ISO 8601 UTC | generovano pri LEADS insert |
+
 ## Contracts
 
 Kanonicke datove kontrakty zive v `docs/contracts/`. TypeScript typy jsou v `crm-frontend/src/lib/contracts/`.
@@ -99,5 +123,6 @@ Kanonicke datove kontrakty zive v `docs/contracts/`. TypeScript typy jsou v `crm
 |----------|-------|--------|------|
 | Scraping Job Input | 1.0 | [contracts/scraping-job-input.schema.json](contracts/scraping-job-input.schema.json) | [contracts/scraping-job-input.md](contracts/scraping-job-input.md) |
 | RAW_IMPORT Row | 1.0 | [contracts/raw-import-row.schema.json](contracts/raw-import-row.schema.json) | [contracts/raw-import-staging.md](contracts/raw-import-staging.md) |
+| Normalization: raw -> LEADS | 1.0 | — | [contracts/normalization-raw-to-leads.md](contracts/normalization-raw-to-leads.md) + [contracts/raw-to-leads-mapping.json](contracts/raw-to-leads-mapping.json) |
 
 Scraping Job Input definuje vstupni payload pro jeden scraping job (1 job = 1 query na 1 portalu v 1 meste/segmentu). 12 poli, vsechna required (nullable pole pouzivaji explicitni null, ne chybejici klic). `source_job_id` je deterministicky odvozen z (portal, segment, city, district, max_results, creation second) pres SHA-256, coz zajistuje idempotenci re-runu stejneho scope.
