@@ -31,3 +31,9 @@
 - **Owner:** claude
 - **Code:** CLAUDE.md (modified), scripts/check-doc-sync.mjs (deleted)
 - **Docs:** CLAUDE.md, docs/13-doc-update-rules.md, docs/github-collaboration-setup.md, docs/00-folder-inventory.md, docs/00-project-map.md, docs/CRM-SYSTEM-MAP.md
+
+### [C/C4] Post-audit docs corrections — docs/20, docs/23, governance wording — DONE
+- **Scope:** Oprava fakticke nepravdy v docs/20-current-state.md (Souhrn tvrdil "frontend neobsahuje dashboard" — commitnuty kod ho obsahuje). Oprava poctu extension sloupcu v docs/23 (43 → 45). Zpreseni governance wordingu v CLAUDE.md a docs/13 — CI vynucuje aktuálnost generated files, ale nevynucuje existenci task recordu.
+- **Owner:** claude
+- **Code:** — (—)
+- **Docs:** docs/20-current-state.md, docs/23-data-model.md, CLAUDE.md, docs/13-doc-update-rules.md

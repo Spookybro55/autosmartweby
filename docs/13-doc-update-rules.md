@@ -15,8 +15,8 @@ Kazdy task patri do streamu (A/B/C). Podle streamu je povinne aktualizovat nasle
 | **C** | Business Process & Prioritization | docs/20-current-state.md, docs/21-business-process.md, docs/24-automation-workflows.md, docs/25-lead-prioritization.md |
 
 ### Vzdy povinne (bez ohledu na stream)
-- Task record v `docs/30-task-records/{TASK_ID}.md`
-- Regenerovane: `docs/11-change-log.md`, `docs/29-task-registry.md` (skriptem)
+- Task record v `docs/30-task-records/{TASK_ID}.md` — ocekavany u kazdeho tasku (CI nekontroluje jeho existenci, ale absence je process violation)
+- Regenerovane: `docs/11-change-log.md`, `docs/29-task-registry.md` (skriptem — CI vynucuje aktuálnost)
 
 ### Dalsi docs podle typu zmeny
 

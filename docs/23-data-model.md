@@ -30,7 +30,7 @@ Puvodni business data — pozice definovane v LEGACY_COL (Config.gs):
 
 Dalsi: source, ico, contact_name, segment, service_type, area, atd.
 
-### Extension sloupce (43 sloupcu, append-only)
+### Extension sloupce (45 sloupcu, append-only)
 Definovane v EXTENSION_COLUMNS (Config.gs):
 - **Deduplikace:** company_key, branch_key, dedupe_group, dedupe_flag
 - **Pipeline:** lead_stage, preview_stage, outreach_stage, qualified_for_preview, qualification_reason

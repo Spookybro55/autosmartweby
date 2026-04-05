@@ -1,38 +1,28 @@
 # Current State — Autosmartweby
 
 > **Kanonicky dokument.** Aktualizuje se pri kazdem tasku, ktery meni stav systemu.
-> **Posledni aktualizace:** 2026-04-05 (Souhrn přepsán po hardening auditu)
+> **Posledni aktualizace:** 2026-04-05
 
 ---
 
 ## Souhrn
 
-Autosmartweby je v aktuálním stavu poloautomatizovaný CRM systém pro oslovování českých živnostníků bez webových stránek.
+Autosmartweby je poloautomatizovany CRM system pro oslovovani ceskych zivnostniku bez webovych stranek.
 
-**Commitnutý snapshot (lokální branch master, commit 7341cc8):**
-- Google Apps Script backend (~4800 LOC, 9 souborů) pokrývá kvalifikaci leadů, generování briefů a e-mailových draftů, kód pro per-lead odesílání přes GmailApp, mailbox sync a write-back z odvozeného sheetu přes lead_id lookup (Variant B).
-- Next.js 16 CRM frontend je v rané fázi a obsahuje přihlašovací stránku a základní layout. V commitnuté verzi neobsahuje dashboard ani funkční autentizaci.
-- Pipeline běží v režimu DRY_RUN=true a standardně se zastaví ve stavu BRIEF_READY. Webhook pipeline v kódu existuje, ale je vypnutá (ENABLE_WEBHOOK=false).
-- Veškerý vstup dat je manuální. Systém nescrapuje leady, negeneruje webové stránky a nemá hosting pipeline.
+**Apps Script backend** (~4800 LOC, 9 souboru): kvalifikace leadu, generovani briefu a emailovych draftu, per-lead odesilani pres GmailApp, mailbox sync, write-back z odvozeneho sheetu pres lead_id lookup (Variant B). Pipeline bezi v rezimu DRY_RUN=true a standardne se zastavi ve stavu BRIEF_READY. Webhook pipeline existuje v kodu, je vypnuta (ENABLE_WEBHOOK=false).
 
-**Governance vrstva je definovaná v repu a lokálně validovaná, ale na GitHubu zatím nevynucovaná:**
-- obsahuje kanonické dokumenty docs/20–29, task records systém se 3 ukázkovými záznamy, 4 automatizační skripty, CI workflow a PR template,
-- check-doc-sync.mjs při lokálním běhu vrací 34 pass / 0 warn / 0 fail,
-- workflow docs-governance.yml je definované pro PR do main, ale bez aktivních branch protection rules nemá blokovací efekt,
-- část governance souborů je v nekonzistentním stavu kvůli OneDrive file locku: CLAUDE.md a docs/13-doc-update-rules.md zůstávají v aktivní starší verzi a nové verze existují jako .new soubory; část archivních duplikátů zůstává v kořenu docs/,
-- známá dokumentační nesrovnalost: docs/23-data-model.md uvádí 43 rozšiřujících sloupců, zatímco Config.gs jich definuje 45.
+**CRM frontend** (Next.js 16, React 19, TypeScript): prihlasen stránka (email+heslo), dashboard s KPI widgety, leads tabulka s filtrovanim a detail drawerem, pipeline kanban (read-only, 6 sloupcu), follow-up timeline, editace 5 poli per lead se zapisem zpet do Sheets. Frontend bezi lokalne, neni nasazen na verejne URL. Data cte z Google Sheets pres service account, zapis pres Apps Script Web App endpoint (frontend writer existuje, server handler doPost chybi).
 
-**Mimo commitnutý snapshot existují lokální necommitnuté změny v working tree:**
-- Google Auth Phase 1: 3 API routes, session hook a úpravy login page, headeru a sidebaru; tato vrstva existuje jen lokálně, není commitnutá, nemá task record a neprošla governance workflow,
-- drobné změny v ContactSheet.gs a vybraných dokumentech docs/12, docs/15-* a docs/17,
-- 4 auth dokumenty docs/18-* existují mimo kanonický rozsah docs/20–29 a nejsou zahrnuté do check-doc-sync validace.
+**Vstup dat** je rucni. System nescrapuje leady, negeneruje webove stranky a nema hosting pipeline.
 
-**Branch stav není plně sjednocený:**
-- lokálně se pracuje na master,
-- GitHub remote používá main,
-- commitnutý snapshot odpovídá commitu 7341cc8, zatímco working tree obsahuje další lokální necommitnuté změny, které na remote nejsou.
+**Governance vrstva** je definovana v repu a vynucovana na GitHubu:
+- branch protection na main je aktivni (require PR, 1 review, status check docs-governance, dismiss stale, strict),
+- CI workflow docs-governance.yml kontroluje aktuálnost generovanych souboru a dokumentacni sync,
+- check-doc-sync.mjs vraci 43 pass / 0 warn / 0 fail,
+- task records system s 5 zaznamy, 4 automatizacni skripty, PR template,
+- enforce_admins je false — owner muze obejit branch protection.
 
-*Audit byl proveden k 2026-04-04.*
+CI validuje aktuálnost generated files a existenci governance souboru. Nevaliduje povinnost task recordu pro kodove zmeny — to je konvence, ne enforcement.
 
 ## Co dnes existuje
 
@@ -51,12 +41,14 @@ Autosmartweby je v aktuálním stavu poloautomatizovaný CRM systém pro oslovov
 - DRY_RUN defaultne zapnuty
 
 ### CRM frontend (Next.js 16 + React 19)
-- Login (email+heslo + Google OAuth Phase 1 — ceka na .env setup)
+- Login (email+heslo, auth pres HMAC-SHA256 session cookie)
 - Dashboard (KPI: k osloveni, high priority, follow-upy, pipeline breakdown)
 - Leads tabulka s filtrovanim, razenim, detail drawer
 - Pipeline kanban (6 sloupcu, read-only, bez drag-drop)
 - Follow-up timeline (po terminu, dnes, zitra, tento tyden)
 - Editace 5 poli per lead se zapisem zpet do Sheets
+- Data: Google Sheets pres service account (read), Apps Script Web App (write — doPost chybi)
+- Mock service pro lokalni vyvoj bez Sheets pripojeni
 - Bezi lokalne, neni nasazen na verejne URL
 
 ### Dokumentace
@@ -71,13 +63,13 @@ Autosmartweby je v aktuálním stavu poloautomatizovaný CRM systém pro oslovov
 - Hromadne odesilani emailu
 - Automaticky trigger na novy radek v LEADS
 - End-to-end automatizace bez lidskeho zasahu
-- CI/CD pipeline
-- Testy
+- CI/CD pipeline pro kod (existuje jen docs-governance check)
+- Testy (zadne unit, integration ani e2e testy)
 - Frontend deployment (Vercel/Netlify)
+- Apps Script Web App doPost handler (frontend writer existuje, server handler ne)
 
 ## Co je rozpracovane
 
 - Webhook pipeline pro preview weby — kod pripraveny, ENABLE_WEBHOOK=false, zadna cilova sluzba
-- Google Auth Phase 1 — kod hotovy, ceka na .env.local
+- Google Auth Phase 1 — kod na feature branch task/B3-auth-phase1, ceka na .env.local a merge
 - Email sending pres ESP (Phase 2) — architektura navrzena, implementace 0%
-- Apps Script Web App endpoint — frontend writer existuje, server handler (doPost) chybi

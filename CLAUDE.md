@@ -31,9 +31,9 @@ Streamy:
 ## Co kazdy task MUSI dodat
 
 1. **Code changes** (pokud je to code task)
-2. **Task record** v `docs/30-task-records/{TASK_ID}.md`
+2. **Task record** v `docs/30-task-records/{TASK_ID}.md` — ocekavane u kazdeho tasku; CI to nevynucuje jako blocker, ale absence task recordu je process violation
 3. **Kanonicke docs** podle stream mapy (viz nize)
-4. **Regenerovane generated files:**
+4. **Regenerovane generated files** (CI toto vynucuje — PR failne, pokud nejsou aktualni):
    ```bash
    node scripts/docs/build-changelog.mjs
    node scripts/docs/build-task-registry.mjs
