@@ -8,32 +8,21 @@
 
 ## 2026-04-05
 
-### [A/A1] [SAMPLE] Scraping pipeline — data vstup do LEADS — DRAFT
-- **Scope:** Implementace prvniho zdroje dat pro LEADS sheet. Definice formatu vstupu, mapovani sloupcu, validace.
-- **Docs:** docs/20-current-state.md, docs/23-data-model.md, docs/24-automation-workflows.md
+### [A/A1] Scraping Job Input Contract — WIP
+- **Scope:** Definice kanonickeho datoveho kontraktu pro jeden scraping job. 1 job = 1 query na 1 portalu v 1 meste/segmentu. Kontrakt obsahuje 11 poli (7 required, 4 optional), lifecycle envelope (created/running/completed/failed) a deterministicky `source_job_id` odvozeny z (portal, segment, city, district, max_results, creation second) pres SHA-256 hash10. Zadne nested objekty. Zaklad pro A-02 staging layer a A-04 scraper runtime.
+- **Owner:** Stream A
+- **Code:** docs/contracts/scraping-job-input.schema.json (new), docs/contracts/scraping-job-input.md (new), crm-frontend/src/lib/contracts/scraping-job-input.ts (new)
+- **Docs:** docs/23-data-model.md, docs/30-task-records/A1.md
 
 ### [B/B1] [SAMPLE] Preview web generator — webhook service — DRAFT
-- **Scope:** Implementace externi sluzby pro generovani preview webu z briefu. Napojeni na existujici webhook pipeline.
-- **Docs:** docs/20-current-state.md, docs/22-technical-architecture.md, docs/26-offer-generation.md, docs/27-infrastructure-storage.md
 
 ### [C/C1] [SAMPLE] Lead qualification tuning — enterprise filter — DRAFT
-- **Scope:** Uprava kvalifikacni logiky — zpreseni enterprise/chain filtru, pridani novych kriterii.
-- **Docs:** docs/20-current-state.md, docs/21-business-process.md, docs/24-automation-workflows.md, docs/25-lead-prioritization.md
 
 ### [C/C2] Hardening audit — přepis sekce Souhrn v docs/20 — DONE
-- **Scope:** Nahrazení sekce „Souhrn" v docs/20-current-state.md schváleným textem z hardening auditu. Text explicitně rozlišuje commitnutý kód, governance vrstvu (definovaná/validovaná/nevynucovaná) a uncommitted změny v working tree.
 - **Owner:** claude
-- **Code:** — (—)
-- **Docs:** docs/20-current-state.md
 
 ### [C/C3] Repo governance hardening — CLAUDE.md, branch protection, cleanup — DONE
-- **Scope:** Kompletni hardening repa pro 3-osobni tym: nahrazeni CLAUDE.md (z generickeho RuFlo V3 na project-specific governance), nahrazeni docs/13 (.new → aktivni), nastaveni branch protection na GitHubu, pridani collaboratora, odstraneni duplicit a smeti, aktualizace docs/github-collaboration-setup.md.
 - **Owner:** claude
-- **Code:** CLAUDE.md (modified), scripts/check-doc-sync.mjs (deleted)
-- **Docs:** CLAUDE.md, docs/13-doc-update-rules.md, docs/github-collaboration-setup.md, docs/00-folder-inventory.md, docs/00-project-map.md, docs/CRM-SYSTEM-MAP.md
 
 ### [C/C4] Post-audit docs corrections — docs/20, docs/23, governance wording — DONE
-- **Scope:** Oprava fakticke nepravdy v docs/20-current-state.md (Souhrn tvrdil "frontend neobsahuje dashboard" — commitnuty kod ho obsahuje). Oprava poctu extension sloupcu v docs/23 (43 → 45). Zpreseni governance wordingu v CLAUDE.md a docs/13 — CI vynucuje aktuálnost generated files, ale nevynucuje existenci task recordu.
 - **Owner:** claude
-- **Code:** — (—)
-- **Docs:** docs/20-current-state.md, docs/23-data-model.md, CLAUDE.md, docs/13-doc-update-rules.md
