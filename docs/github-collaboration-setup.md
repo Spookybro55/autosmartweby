@@ -6,7 +6,7 @@
 - **Visibility:** Private
 - **Default branch:** `main`
 
-## Tým a p��ístupy
+## Tym a pristupy
 
 | GitHub username           | Role         | Stav |
 |---------------------------|--------------|------|
