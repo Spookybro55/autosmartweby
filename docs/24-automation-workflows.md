@@ -715,3 +715,488 @@ Legenda:
 
 ---
 
+## Reliability & Idempotency — C-03
+
+> **Autoritativni specifikace.** Definuje idempotency keys, retry politiku, dead-letter handling a locking pro vsechny automaticke workflow kroky.
+> **Task ID:** C-03
+> **Dependency:** C-01 (canonical lifecycle_state), C-02 (orchestrator model, step contract, run history)
+> **Vytvoreno:** 2026-04-05
+
+---
+
+### 1. Ucel a scope
+
+**Co C-03 resi:**
+- Idempotency key pro kazdy automaticky krok — co dela operaci unikatni a jak se detekuje duplikat.
+- Retry politiku — kolikrat, s jakym backoffem, pro jake typy failu.
+- Dead-letter handling — kam jdou kroky po vycerpani pokusu, jak se dohledaji.
+- Locking pravidla — jak zabranit soubehu (double-run) pri concurrent triggeru.
+- Formalni oddeleni run correlation, idempotency, lock a retry jako nezavislych vrstev.
+
+**Co C-03 NERESI:**
+- Neimplementuje outbound queue schema (C-05).
+- Neimplementuje provider abstraction (C-06).
+- Neimplementuje full exception queue UX ani resolution workflow (C-09).
+- Neimplementuje follow-up engine (C-08).
+- Nepridava novou infrastrukturu (message bus, distributed lock) — pracuje s Apps Script LockService + Sheets.
+- Neimplementuje runtime kod — toto je specifikace.
+
+**Vztah k C-02:**
+C-02 definuje orchestrator model a step contract s polem `retry_eligibility` per step. C-03 formalizuje retry_eligibility do konkretni matice, definuje idempotency keys, ktere C-02 nezavedl, a pridava dead-letter design. C-03 je reliability vrstva NAD C-02 orchestratorem.
+
+**Vztah k budoucim taskum:**
+- C-05 (Outbound queue): prebira retry matici pro email send krok; queue schema je scope C-05, ne C-03.
+- C-06 (Provider abstraction): C-03 definuje failure classes nezavisle na provideru; C-06 mapuje konkretni provider errory na tyto classes.
+- C-09 (Exception queue): C-03 definuje dead-letter zaznam; C-09 formalizuje operator workflow pro resolvovani dead-letter.
+
+---
+
+### 2. Reliability principles
+
+1. **run_id != idempotency key.** run_id (z C-02) je korelacni identifikator jednoho vyvolani funkce. Idempotency key identifikuje konkretni operaci a jeji side effect. Jeden run_id muze obsahovat desitky ruznych idempotency keys (jeden per lead per step).
+
+2. **Idempotency je per step, per side effect.** Kazdy krok ma vlastni idempotency key vztazenou k jeho specificke operaci. generate_brief a send_email maji RUZNE idempotency keys i pro stejny lead.
+
+3. **Retry je povolen jen tam, kde je bezpecny.** Krok s ireverzibilnim side effectem (email send) ma striktnejsi retry pravidla nez krok s prepsovatelnymi zapisy (brief generation).
+
+4. **Permanent fail nesmi nekonecne retryovat.** Kazdy krok ma max_attempts. Po vycerpani → dead-letter. Zadny automaticky retry smycka.
+
+5. **Dead-letter je konec automatickeho zpracovani, ne ztrata zaznamu.** Dead-letter zaznam obsahuje dost informaci pro manualni diagnostiku a re-drive operatorem.
+
+6. **Lock zabranuje soubehu, ale nenahrazuje idempotency.** LockService prevent concurrent execution. Idempotency key preventi duplicate side effects i pri sequentialnim re-runu. Obe vrstvy jsou nutne, zadna nestaci sama.
+
+7. **Manual action neni automaticky retry.** Operatorove rucni akce (menu items) NEJSOU subject retry politiky. Retry se tyka jen automatickych/trigger-driven kroku.
+
+8. **State guard je prvni linie obrany.** Pred kontrolou idempotency key musi krok overit lifecycle preconditions (C-02 step contract). State guard je efektivnejsi nez key lookup — vetsi rychlost, nizsi komplexita.
+
+---
+
+### 3. Katalog automatickych kroku
+
+Kroky relevantni pro C-03 reliability design. Vychazi z realneho kodu (apps-script/) a C-02 step contract.
+
+| # | step_name | current_or_target | trigger_source | subject_type | side_effect_type | fully_automatic |
+|---|-----------|-------------------|----------------|--------------|------------------|-----------------|
+| S1 | qualify_lead | current | manual (menu qualifyLeads) | lead (batch) | sheet write: lead_stage, qualification fields | Ne (manual trigger, auto processing) |
+| S2 | generate_brief | current | scheduled (15min processPreviewQueue) | lead (batch) | sheet write: brief JSON, email drafts, preview_stage | Ano |
+| S3 | send_webhook | current (disabled) | scheduled (processPreviewQueue, ENABLE_WEBHOOK=false) | lead | external POST + sheet write: preview_stage | Ano |
+| S4 | send_email | current | manual (menu sendCrmEmail) | lead | Gmail send (IREVERZIBILNI) + sheet write: outreach metadata | Ne (manual trigger) |
+| S5 | create_draft | current | manual (menu createCrmDraft) | lead | Gmail draft + sheet write | Ne (manual trigger) |
+| S6 | sync_mailbox | current | manual (menu syncMailboxMetadata) | lead (batch) | Gmail label (idempotentni) + sheet write: sync metadata | Ne (manual trigger) |
+| S7 | web_check | current | manual (menu runWebsiteCheck*) | lead (batch) | external GET (Serper) + sheet write: website fields | Ne (manual trigger) |
+| S8 | write_back | current | reactive (onContactSheetEdit) | lead field | sheet write: 1 pole v LEADS z derived sheetu | Ano (trigger) |
+| S9 | refresh_contact_sheet | current | manual (menu) | derived sheet | sheet rebuild (idempotentni) | Ne (manual trigger) |
+| S10 | normalize_lead | target | auto (future ingest) | lead | sheet write: normalizovana data | Ano (budouci) |
+| S11 | dedupe_lead | target | auto (future ingest) | lead | sheet write: dedupe_flag | Ano (budouci) |
+| S12 | process_email_queue | target | scheduled (future C-05) | lead (batch) | Gmail send (IREVERZIBILNI) + sheet write | Ano (budouci) |
+
+**Poznamka:** S1, S4, S5, S6, S7, S9 jsou manual-trigger kroky. C-03 retry matice se na ne vztahuje jen v kontextu ROW-LEVEL failu UVNITR batch runu (napr. qualifyLeads zpracovava 200 leadu, 1 failne — retry se tyka toho 1 leadu, ne celeho batch runu). Rucni re-spusteni celeho menu itemu je rozhodnuti operatora, ne automaticky retry.
+
+---
+
+### 4. Idempotency key tabulka
+
+Dva idempotency mody:
+- **state-guard-only**: Duplicate execution se detekuje pres stav leadu/pole v LEADS sheetu. Legitimni tam, kde side effect je prepsovateny (sheet write) nebo nativne idempotentni (Gmail addLabel). Formalni content-hash key neni nutny.
+- **formal_key**: Duplicate execution se detekuje pres content-hash klíc. Povinny tam, kde side effect je ireverzibilni (email send) nebo externi (webhook POST).
+
+| # | step_name | idempotency_mode | guard / key formula | duplicate_detection_point | duplicate_outcome | uniqueness_boundary |
+|---|-----------|------------------|---------------------|---------------------------|-------------------|---------------------|
+| S1 | qualify_lead | state-guard-only | `lead_stage NOT IN (IN_PIPELINE, PREVIEW_SENT) AND dedupe_flag != TRUE` | PreviewPipeline.gs:307-321 — pred zapisem kvalifikacnich poli | Skip row — lead uz je v pokrocilem stavu, kvalifikace by downgradovala | Per lead. Opakování se stejnymi daty = stejny vysledek (deterministicke). Opakování se zmenenymi daty = LEGALNI (novy vysledek). |
+| S2 | generate_brief | state-guard-only | `preview_stage IN ('', 'not_started', 'failed') AND qualified_for_preview == TRUE AND dedupe_flag != TRUE` | PreviewPipeline.gs:908 (eligibleStages) — pred vstupem do brief generation smycky | Skip row — lead uz ma brief nebo je v pokrocilem stavu (QUEUED, SENT_TO_WEBHOOK, READY) | Per lead. Brief se prepise (idempotentni zapis). Opakování je bezpecne — novy brief nahradi stary. |
+| S3 | send_webhook | **formal_key** | `webhook:{lead_id}:{SHA256(preview_brief_json)}` | Pred webhook callem: lookup v _asw_logs pro zaznam s timto klicem a outcome=success | Skip POST — webhook uz zpracoval tento brief. Pouzit existujici vysledek z preview_stage. | Per lead, per brief version. Zmena briefu generuje novy hash → novy POST je LEGALNI. |
+| S4 | send_email | **formal_key** | `send:{lead_id}:{SHA256(email + subject + body)}` | Triple check: 1) `outreach_stage NOT IN (contacted, won, lost)` 2) `last_email_sent_at` < 5min guard 3) lookup v _asw_logs pro zaznam s timto klicem a outcome=success | BLOCK — email s timto obsahem uz byl odeslan. Zadna akce. | Per lead, per email obsah. Zmena draftu generuje novy hash → novy send je LEGALNI. |
+| S5 | create_draft | state-guard-only | `outreach_stage NOT IN (contacted, won, lost)` | OutboundEmail.gs:357-365 — pred zapisem outreach metadata | Duplikovany draft se vytvori v Gmailu (nedestruktivni); outreach_stage se neprepise (monotonic guard) | Per lead. Gmail draft je reverziblni — duplicita je nepohodlna, ne destruktivni. |
+| S6 | sync_mailbox | state-guard-only | `email IS NOT EMPTY` (row filter) — sync prepisuje metadata, zadny guard neni potreba | MailboxSync.gs:69 — per-row try-catch; metadata se vzdy prepisuji aktualnimi hodnotami | Noop — sync prepisuje metadata aktualnim stavem. Duplicitni sync = stejny vysledek. Gmail addLabel je idempotentni. | Per lead. Sync je nativne idempotentni — kazdy beh prepisuje stejne pole aktualnimi daty. |
+| S7 | web_check | state-guard-only | `business_name IS NOT EMPTY AND (has_website IS EMPTY OR has_website != 'yes')` (row filter) | LegacyWebCheck.gs:81+ — per-row; vysledek se vzdy prepise | Prepis — novy Serper vysledek nahradi stary. Zmena v case je zadouci (novy web nalezen), ne duplicita. | Per lead. Serper API je read-only (zadny side effect na externi strane). Sheet write je prepsovateny. |
+| S8 | write_back | state-guard-only | `lead_id EXISTS AND lead_id.length >= 3 AND identity_match(business_name, city)` + LockService | ContactSheet.gs:621-728 — lock → lead_id validace → identity match → zapis | Lock contention → abort (cell note ⚠). Identity mismatch → abort. Zapis stejne hodnoty = noop. | Per lead, per field, per value. Zapis je idempotentni — stejna hodnota dvakrat = beze zmeny. |
+| S9 | refresh_contact_sheet | state-guard-only | LockService tryLock(5000) — rebuild je plne deterministicky z aktualniho stavu LEADS | ContactSheet.gs:308-313 — lock pred rebuild | Lock contention → abort + alert user. Duplicitni rebuild = stejny vysledek (deterministicky z LEADS). | Per sheet. Vysledek zavisi POUZE na aktualnim stavu LEADS — zadna externí zavislost. |
+| S10 | normalize_lead | **formal_key** (target) | `norm:{lead_id}:{SHA256(raw_input_fields)}` | Target — neimplementovano. Check: lookup pro zaznam s timto klicem. | Skip pokud uz normalizovano se stejnym inputem. Zmena raw dat → novy hash → opetovná normalizace LEGALNI. | Per lead, per input version. |
+| S11 | dedupe_lead | state-guard-only (target) | `company_key je deterministicky (ICO > domena > email > norm. jmeno + mesto)` | Target — castecne v qualifyLeads (PreviewPipeline.gs:262-275). Check: company_key uz existuje v dedup skupinách. | Skip — company_key pro stejna data vraci stejny vysledek. Prvni lead v skupine = canonical, ostatni = dedupe_flag=TRUE. | Per company_key. Deterministicke — opakování vraci stejny vysledek. |
+| S12 | process_email_queue | **formal_key** (target) | Stejna strategie jako S4: `send:{lead_id}:{SHA256(email + subject + body)}` | Target — neimplementovano (C-05). Stejna triple-check logika jako S4. | BLOCK — stejna ochrana jako manual send. | Per lead, per email obsah. |
+
+**Oddelení pojmu:**
+
+| Pojem | Co resi | Priklad |
+|-------|---------|---------|
+| **run_id** (C-02) | Korelace: "tento beh processPreviewQueue" | `run-processPreviewQueue-20260405-143000` — 50 leadu v jednom behu |
+| **idempotency key** (C-03) | Deduplikace: "tato operace pro tento lead s timto obsahem" | `brief:ASW-001` nebo `send:ASW-001:{hash}` |
+| **LockService** (C-03 sekce 7) | Soubehovost: "nikdo jiny nesmi bezet soucasne" | ScriptLock.tryLock(10000) na processPreviewQueue |
+
+Kazda vrstva resi jiny problem. Zadna nenahrazuje ostatni.
+
+---
+
+### 5. Retry matrix
+
+#### 5.1 Failure classes
+
+| Class | Popis | Priklad | Default chovani |
+|-------|-------|---------|-----------------|
+| **TRANSIENT** | Docasna chyba; opakovany pokus muze uspet | API timeout, rate limit, lock contention, sheet quota | Auto retry pri dalsim scheduled runu |
+| **PERMANENT** | Trvala chyba; retry nepomuze | Invalid email format, missing required data, header mismatch, recipient rejected | → dead-letter, zadny retry |
+| **AMBIGUOUS** | Nejiste, zda side effect probehl | Webhook timeout (request odeslan, response nedosel), Gmail send timeout | → HOLD pro manualni overeni, pak retry nebo dead-letter |
+| **HUMAN_REVIEW** | Technicky OK, ale vyzaduje lidske rozhodnuti | REVIEW_REQUIRED, PREVIEW_READY_FOR_REVIEW, quality score pod prahem | → cekani na operatora (neni fail, neni retry) |
+
+#### 5.2 Retry matice
+
+Pokryva VSECH 12 kroku z katalogu (sekce 3). Kroky oznacene `[manual]` nemaji automaticky retry — operator rozhoduje o re-runu. Kroky oznacene `[target]` jsou budouci design.
+
+| # | step_name | scope | failure_class | max_attempts | backoff_rule | retry_trigger | terminal_action | notes |
+|---|-----------|-------|---------------|--------------|--------------|---------------|-----------------|-------|
+| S1 | qualify_lead | current [manual] | TRANSIENT | 3 | Operator re-runs z menu | Manual re-run | dead-letter po 3 failech | Sheet API error; kvalifikace je deterministicka |
+| S1 | qualify_lead | current [manual] | PERMANENT | 1 | — | — | dead-letter okamzite | Chybejici povinne pole (business_name, email/phone) |
+| S2 | generate_brief | current [auto] | TRANSIENT | 3 | +1 scheduled cycle (15min) | processPreviewQueue timer | dead-letter po 3 failech; preview_stage=FAILED | eligibleStages zahrnuje 'failed' → auto retry |
+| S2 | generate_brief | current [auto] | PERMANENT | 1 | — | — | dead-letter okamzite; preview_stage=FAILED | Missing segment, template not found |
+| S3 | send_webhook | current [auto, disabled] | TRANSIENT | 3 | +1 scheduled cycle (15min) | processPreviewQueue timer | dead-letter; preview_stage=FAILED | Webhook timeout/5xx |
+| S3 | send_webhook | current [auto, disabled] | PERMANENT | 1 | — | — | dead-letter; preview_stage=FAILED | Webhook 4xx, WEBHOOK_URL empty |
+| S3 | send_webhook | current [auto, disabled] | AMBIGUOUS | 1 | — | Manual overeni | HOLD — operator overi externi system | Timeout, request mohl projit |
+| S4 | send_email | current [manual] | TRANSIENT | 1 | — | Manual only | dead-letter; NIKDY auto retry | IREVERZIBILNI — i transient fail = manual overeni |
+| S4 | send_email | current [manual] | PERMANENT | 1 | — | — | dead-letter okamzite | Recipient rejected, invalid email |
+| S4 | send_email | current [manual] | AMBIGUOUS | 1 | — | — | HOLD + manual review | Gmail timeout — zkontrolovat Sent folder |
+| S5 | create_draft | current [manual] | TRANSIENT | 3 | Operator re-runs z menu | Manual re-run | dead-letter po 3 failech | Gmail API docasna chyba; draft je reverziblni |
+| S5 | create_draft | current [manual] | PERMANENT | 1 | — | — | dead-letter okamzite | Chybejici email data, nevalidni recipient |
+| S6 | sync_mailbox | current [manual] | TRANSIENT | 3 | +1 manual run | Manual re-run | dead-letter po 3 failech; email_sync_status=ERROR | Gmail search timeout |
+| S6 | sync_mailbox | current [manual] | PERMANENT | 1 | — | — | dead-letter; email_sync_status=ERROR | Neexistujici email, permanentni API error |
+| S7 | web_check | current [manual] | TRANSIENT | 3 | +1 manual run | Manual re-run | dead-letter; web check skip | Serper API timeout/rate limit |
+| S7 | web_check | current [manual] | PERMANENT | 1 | — | — | dead-letter; web check skip | Serper API key invalid |
+| S8 | write_back | current [auto/reactive] | TRANSIENT | 1 | — | Dalsi edit trigger | Abort; cell note ⚠ | Lock contention; dalsi edit = novy pokus |
+| S8 | write_back | current [auto/reactive] | PERMANENT | 1 | — | — | Abort + cell note | lead_id neexistuje, identity mismatch |
+| S9 | refresh_contact_sheet | current [manual] | TRANSIENT | 3 | Operator re-runs z menu | Manual re-run | dead-letter po 3 failech | Lock contention, sheet API error |
+| S9 | refresh_contact_sheet | current [manual] | PERMANENT | 1 | — | — | dead-letter okamzite | Source sheet chybi, header mismatch |
+| S10 | normalize_lead | **target** | TRANSIENT | 3 | +1 scheduled cycle | Auto (budouci ingest timer) | dead-letter | Budouci A-stream; sheet API error |
+| S10 | normalize_lead | **target** | PERMANENT | 1 | — | — | dead-letter okamzite | Budouci A-stream; nevalidni data format |
+| S11 | dedupe_lead | **target** | TRANSIENT | 3 | +1 scheduled cycle | Auto (budouci ingest timer) | dead-letter | Budouci A-stream; sheet API error |
+| S11 | dedupe_lead | **target** | PERMANENT | 1 | — | — | dead-letter okamzite | Budouci A-stream; company_key generation fail |
+| S12 | process_email_queue | **target** | TRANSIENT | 1 | — | Manual only | dead-letter; NIKDY auto retry | Budouci C-05; stejna pravidla jako S4 (IREVERZIBILNI) |
+| S12 | process_email_queue | **target** | PERMANENT | 1 | — | — | dead-letter okamzite | Budouci C-05; stejna pravidla jako S4 |
+| S12 | process_email_queue | **target** | AMBIGUOUS | 1 | — | — | HOLD + manual review | Budouci C-05; stejna pravidla jako S4 |
+
+**Souhrn retry coverage:**
+
+| Scope | Pocet kroku | Pokryti v retry matici |
+|-------|-------------|----------------------|
+| Current [auto] | 3 (S2, S3, S8) | Ano — vsechny 3 maji radky pro TRANSIENT + PERMANENT (+ AMBIGUOUS pro S3) |
+| Current [manual] | 6 (S1, S4, S5, S6, S7, S9) | Ano — vsech 6 ma radky; retry trigger = manual re-run operatorem |
+| Target | 3 (S10, S11, S12) | Ano — vsechny 3 maji radky; design pripraveny pro budouci implementaci |
+| **Celkem** | **12** | **12 / 12 = 100% coverage** |
+
+**Klicove principy retry matice:**
+
+1. **send_email NIKDY nema automaticky retry.** I transient fail vyzaduje manualni overeni. Duvod: ireverzibilni side effect (email odeslan, nelze vzit zpet).
+2. **generate_brief ma implicitni retry mechanismus**: processPreviewQueue (15min timer) znovu zpracuje leady s preview_stage=FAILED. Retry counter = pocet po sobe jdoucich fail logu pro dany lead.
+3. **Backoff je realizovany pres scheduled cycle**, ne pres Utilities.sleep. Apps Script nema persistentni stav mezi behy — "backoff" = preskoceni pri tomto behu, retry pri dalsim behu.
+4. **max_attempts tracking**: Retry count se sleduje pres `_asw_logs` — pocet zaznamu s outcome=failed pro dany lead_id + step_name od posledniho outcome=success. Pri implementaci se pridava `retry_count` do payload.
+
+#### 5.3 Retry count tracking
+
+Retry count se NEPERSISTUJE jako sloupec v LEADS. Pocita se z _asw_logs:
+
+```
+retry_count pro (lead_id, step_name) =
+  pocet po sobe jdoucich radku v _asw_logs
+  WHERE lead_id = X AND payload.step_name = Y AND payload.outcome = 'failed'
+  od posledniho radku s outcome IN ('success', 'dead_letter') pro stejny lead_id + step_name
+  (nebo od prvniho zaznamu, pokud zadny success/dead_letter neexistuje)
+```
+
+**Proc ne sloupec v LEADS:**
+- Retry count je per-step, ne per-lead. Lead muze mit retry_count=0 pro brief ale retry_count=2 pro webhook.
+- Pridani N retry_count sloupcu (jeden per step) by znamenalo schema bloat.
+- _asw_logs uz obsahuje vsechny potrebne informace; retry_count je derivovatelny.
+
+**Implementacni poznamka:** Pri implementaci muze byt optimalizovano cache v runtime (promenna v batch runu), ale source of truth je vzdy _asw_logs.
+
+---
+
+### 6. Dead-letter design
+
+#### 6.1 Rozhodnuti
+
+Dead-letter zaznamy se zapisuji do dedickovaneho `_asw_dead_letters` sheetu. Tento sheet je **append-only** a **nikdy se neprunuje**.
+
+`_asw_logs` (C-02 run history) zustava source of truth pro bezne run zaznamy (outcome=success/failed/skipped/blocked/waiting_review) a zachovava si existujici pruning (1000 radku pri >5000). Dead-letter zaznamy do _asw_logs NEPATRI.
+
+**Proc separatni sheet, ne _asw_logs:**
+- _asw_logs ma log rotation (Helpers.gs:300-303): prune 1000 radku pri >5000. Otevrene dead-letter zaznamy by mohly byt smazany pred resolution — to je neprijatelne pro audit.
+- Dead-letter zaznam neni log — je to formalni eskalacni zaznam s resolution lifecycle (open → resolved / wont_fix). Logy jsou fire-and-forget; dead-letters vyzaduji sledovani.
+- Separatni sheet umoznuje primy filtr pres sheet sloupce bez JSON parsing (operator nemusí parsovat payload JSON).
+- `_asw_dead_letters` bude maly (desitky zaznamu, ne tisice) — pruning neni potreba.
+
+**Vztah k _asw_logs:**
+- Pri dosazeni max_attempts se do _asw_logs zapise bezny zaznam s outcome=failed (posledni pokus).
+- Soucasne se zapise radek do _asw_dead_letters s kompletnim kontextem.
+- Cross-reference: dead-letter zaznam obsahuje `last_run_id` a `last_event_id` ukazujici na posledni _asw_logs zaznam.
+- _asw_logs NEMA outcome `dead_letter` — dead-letter existuje jen v _asw_dead_letters.
+
+#### 6.2 Dead-letter lifecycle
+
+```
+1. Step failne → _asw_logs: outcome=failed, retry_count=N
+2. Dalsi beh retry → stejny step pro stejny lead (pokud retry_count < max_attempts)
+3. retry_count >= max_attempts NEBO failure_class=PERMANENT →
+     _asw_logs: outcome=failed (posledni pokus)
+     _asw_dead_letters: novy radek s resolution_status=open
+4. Operator prohlizi _asw_dead_letters (filtr: resolution_status=open)
+5. Operator diagnostikuje a opravuje pricinu
+6. Operator manualne re-drivuje krok → novy run v _asw_logs
+7. Pokud re-drive uspeje → operator aktualizuje resolution_status na "resolved" v _asw_dead_letters
+8. Pokud re-drive znovu failne → novy dead-letter radek (novy dead_letter_id)
+```
+
+#### 6.3 Schema `_asw_dead_letters` sheetu
+
+**Sheet se vytvori automaticky pri prvnim dead-letter zapisu** (analogicky k ensureLogSheet_ v Helpers.gs).
+
+**Sloupce (flat — ne JSON, primo filtrovatelne):**
+
+| Sloupec | Typ | Popis |
+|---------|-----|-------|
+| dead_letter_id | string | Unikatni ID. Format: `dl-{YYYYMMDD}-{HHmmss}-{rand4}` |
+| created_at | ISO datetime | Cas zapisu dead-letter zaznamu |
+| step_name | string | Ktery krok failnul (napr. "generate_brief") |
+| lead_id | string | Identifikator leadu |
+| last_run_id | string | run_id posledniho pokusu (cross-ref do _asw_logs) |
+| last_event_id | string | event_id posledniho pokusu (cross-ref do _asw_logs) |
+| idempotency_key | string | Key z tabulky v sekci 4 (napr. "brief:ASW-123") |
+| failure_class | string | TRANSIENT / PERMANENT / AMBIGUOUS |
+| retry_count | number | Kolik pokusu probehlo pred dead-letter |
+| terminal_reason | string | max_attempts_exceeded / permanent_failure / ambiguous_hold |
+| last_error_message | string | Posledni chybova hlaska (truncated 500 chars) |
+| state_before | string | effective_lifecycle_state pred krokem |
+| suggested_next_action | string | Co by mel operator udelat |
+| resolution_status | string | `open` / `resolved` / `wont_fix` |
+| resolved_at | ISO datetime | Cas resolution (prazdne dokud open) |
+| resolution_note | string | Operator poznamka pri resolution (prazdne dokud open) |
+
+**Pravidla:**
+- Sheet je **append-only** — radky se NIKDY nemazou.
+- `resolution_status` je jediny sloupec, ktery se zpetne edituje (open → resolved/wont_fix).
+- `resolved_at` a `resolution_note` se doplni pri resolution.
+- Zadny pruning, zadna rotace, zadny auto-delete.
+
+#### 6.4 Garantie auditovatelnosti
+
+| Vlastnost | Jak je zajistena |
+|-----------|------------------|
+| **Neztratitelnost** | _asw_dead_letters nema pruning ani rotaci. Radky se nikdy nemazou. |
+| **Filtrovatelnost bez JSON** | Vsechny pole jsou flat sloupce — operator filtruje primo v sheetu bez parsovani. |
+| **Cross-reference** | last_run_id a last_event_id ukazuji na posledni _asw_logs zaznam pro plny kontext. |
+| **Resolution tracking** | resolution_status lifecycle (open → resolved/wont_fix) s casovou znackou a poznamkou. |
+| **Oddeleni od run history** | _asw_logs si zachovava pruning (5000 radku); dead-letters nejsou ohrozeny. |
+
+#### 6.5 Dohledavani dead-letter zaznamu
+
+| Dotaz | Filtr (primo v sheetu) |
+|-------|------------------------|
+| Vsechny otevrene dead-letters | `resolution_status == "open"` |
+| Dead-letters pro konkretni lead | `lead_id == "ASW-..."` |
+| Dead-letters z konkretniho runu | `last_run_id == "run-processPreviewQueue-..."` |
+| Dead-letters podle kroku | `step_name == "generate_brief"` |
+| Permanentni faily | `failure_class == "PERMANENT"` |
+| Ambiguous holds | `terminal_reason == "ambiguous_hold"` |
+| Vyresene dead-letters | `resolution_status == "resolved"` |
+
+---
+
+### 7. Locking rules
+
+#### 7.1 Soucasny stav lockingu v projektu
+
+Projekt dnes pouziva `LockService.getScriptLock()` na 2 mistech:
+
+| Kde | Soubor:radek | Timeout | Co chrani |
+|-----|--------------|---------|-----------|
+| refreshContactingSheet | ContactSheet.gs:308 | tryLock(5000) | Rebuild derived sheetu — zabranuje concurrent rebuild |
+| onContactSheetEdit | ContactSheet.gs:610 | tryLock(5000) | Write-back z derived do LEADS — zabranuje concurrent zapis |
+
+Zadna dalsi funkce LockService nepouziva. processPreviewQueue (15min timer) NEMA lock.
+
+#### 7.2 Lock typy a jejich scope
+
+Apps Script nabizi 3 typy locku. Pro tento projekt:
+
+| Typ | Scope | Pouziti v projektu |
+|-----|-------|--------------------|
+| ScriptLock | Vsechny vyvolani stejneho scriptu | Ano — dnes 2 mista (viz vyse) |
+| DocumentLock | Vsechna vyvolani vazana na stejny dokument | Ne — neni potreba (ScriptLock postacuje) |
+| UserLock | Vyvolani stejneho uzivatele | Ne — neni potreba |
+
+**Rozhodnuti: Zustat u ScriptLock.** DocumentLock a UserLock nepridavaji hodnotu pro tento use case (3 uzivatele, 1 spreadsheet, 1 script projekt).
+
+#### 7.3 Lock pravidla per krok
+
+| Step | Vyzaduje lock | Lock typ | Lock scope | Timeout | On contention |
+|------|---------------|----------|------------|---------|---------------|
+| S2 generate_brief (processPreviewQueue) | **ANO** — chybi dnes | ScriptLock | Cely batch run | tryLock(10000) | Abort run, log WARN; dalsi timer cycle retry |
+| S8 write_back (onContactSheetEdit) | Ano — existuje | ScriptLock | Per edit event | tryLock(5000) | Abort, cell note ⚠, log WARN |
+| S9 refresh_contact_sheet | Ano — existuje | ScriptLock | Cely rebuild | tryLock(5000) | Abort, alert user, log WARN |
+| S1 qualify_lead | Ne | — | — | — | Manual trigger — operator nesmi spustit 2x soucasne (UI to neumozni) |
+| S4 send_email | Ne | — | — | — | Manual per-lead — UI dialog blokuje concurrent |
+| S6 sync_mailbox | Ne | — | — | — | Manual trigger; idempotentni zapis |
+| S7 web_check | Ne | — | — | — | Manual trigger; per-row throttle (150ms sleep) |
+
+#### 7.4 Identifikovana mezera: processPreviewQueue bez locku
+
+**Problem:** processPreviewQueue je volany 15min timerem. Pokud jeden beh trva dele nez 15 minut (blizi se 6min limitu, ale teoreticky mozne pri prekryvu manual + timer), muze bezet soucasne se:
+- Dalsim timer-triggered behem
+- Manualnim spustenim z menu
+
+**Reseni:** Pridat ScriptLock na zacatek processPreviewQueue s tryLock(10000). Pokud lock neni dostupny, skip cely beh a logovat WARN.
+
+**Proc lock sam nestaci bez idempotency:**
+- Lock zabranuje SOUBEZNEMU behu. Ale dva SEQUENCNI behy mohou zpracovat stejny lead, pokud stav nebyl aktualizovan.
+- Priklad: Run A zpracuje lead X, ale writeExtensionColumns_ jeste nedokoncil batch zapis. Run B zacne, precte stary stav, zpracuje lead X znovu.
+- Reseni: State guard (preview_stage check) je prvni linie. Lock je druha linie. Oboje spolecne zabranuji duplicitam.
+
+#### 7.5 Lock best practices pro Apps Script
+
+1. **Vzdy tryLock(), nikdy waitLock().** waitLock blokuje execution time (6min limit).
+2. **Vzdy releaseLock() v finally bloku.** Zabranuje orphan lockum.
+3. **Lock timeout: 5-10s.** Kratsi → false contention; delsi → blokovani execution time.
+4. **Log lock contention jako WARN.** Umoznuje monitoring frekvence contention.
+5. **Lock granularita: script-level.** Per-lead lock neni v Apps Script mozny (LockService nema named locks).
+
+---
+
+### 8. Fail scenare
+
+#### Scenar 1: Preview generation fail (generate_brief — S2)
+
+**Co se presne pokazilo:**
+processPreviewQueue (15min timer) zpracovava lead ASW-123. buildPreviewBrief_() selze na chybejicim `segment` poli — lead ma prazdny segment, template selection vrati null.
+
+**Failure class:** PERMANENT (chybejici data, retry nepomuze dokud operator neopravi data).
+
+**Prubeh:**
+1. processPreviewQueue zacne batch, dosahne lead ASW-123.
+2. chooseTemplateType_() vrati null (segment prazdny).
+3. buildPreviewBrief_() hodi exception "Missing segment for template selection".
+4. Catch blok: preview_stage=FAILED, preview_error="Missing segment for template selection", last_processed_at aktualizovano.
+5. Log: outcome=failed, failure_class=PERMANENT, step_name=generate_brief, retry_count=1.
+6. Dalsi 15min beh: processPreviewQueue znovu dosahne ASW-123 (preview_stage=FAILED je v eligibleStages).
+7. Retry_count z _asw_logs = 1. max_attempts pro PERMANENT = 1. → outcome=dead_letter.
+8. Dead-letter log: terminal_reason=permanent_failure, suggested_next_action="Doplnit segment pole pro lead ASW-123, pak manualne spustit processPreviewQueue".
+
+**Jak se zabrani duplicate side effectu:**
+Brief generation je prepsovatena (idempotentni). I kdyby z nejakeho duvodu probehl duplicitni zapis, vysledek je stejny. State guard (preview_stage check) v praxi zabrani duplicitnimu zpracovani.
+
+#### Scenar 2: Email send ambiguous fail (send_email — S4)
+
+**Co se presne pokazilo:**
+Operator spusti sendCrmEmail() pro lead ASW-456. GmailApp.sendEmail() hodi timeout exception po 30s. Neni jasne, zda Gmail email odeslal nebo ne.
+
+**Failure class:** AMBIGUOUS (side effect mohl probehnout).
+
+**Prubeh:**
+1. Operator vybere lead, potvrdí send v UI dialogu.
+2. sendGmailMessage_() zavola GmailApp.sendEmail().
+3. Exception: "Service invocation timed out".
+4. Catch blok: email_last_error="Service invocation timed out".
+5. Log: outcome=failed, failure_class=AMBIGUOUS, step_name=send_email, retry_count=1.
+6. **ZADNY automaticky retry** — send_email ma max_attempts=1 pro vsechny failure classes.
+7. Okamzite outcome=dead_letter: terminal_reason=ambiguous_hold, suggested_next_action="Zkontrolovat Gmail Sent folder pro email na [recipient]. Pokud odeslan → manualne nastavit outreach_stage=CONTACTED. Pokud neodeslan → manualne re-drive send."
+8. outreach_stage NENI aktualizovan (nebylo potvrzeno odeslani).
+
+**Jak se zabrani duplicate side effectu:**
+- Operator MUSI pred re-drive zkontrolovat Gmail Sent folder.
+- Idempotency key `send:{lead_id}:{SHA256(email+subject+body)}` — pokud _asw_logs uz obsahuje zaznam s timto klicem a outcome=success, re-send je BLOKOVAN.
+- Double-send guard (last_email_sent_at < 5min) poskytuje druhou vrstvu ochrany.
+- Pokud operator zjisti, ze email BYL odeslan, manualne nastavi outreach_stage=CONTACTED a zapise resolution log.
+
+#### Scenar 3: Mailbox sync fail (sync_mailbox — S6)
+
+**Co se presne pokazilo:**
+syncMailboxMetadata() zpracovava batch 150 leadu. Pro lead ASW-789 GmailApp.search() vrati exception "Service temporarily unavailable" (Google API transient error). Zbylych 149 leadu se zpracuje uspesne.
+
+**Failure class:** TRANSIENT (Google API docasna nedostupnost).
+
+**Prubeh:**
+1. syncMailboxMetadata() iteruje pres vsechny leady s emailem.
+2. Lead ASW-789: GmailApp.search() hodi "Service temporarily unavailable".
+3. Row-level catch: email_sync_status=ERROR, email_last_error="Service temporarily unavailable".
+4. Log: outcome=failed, failure_class=TRANSIENT, step_name=sync_mailbox, retry_count=1.
+5. Batch pokracuje — dalsi leady se zpracuji uspesne (per-row resilience).
+6. Operator spusti syncMailboxMetadata() znovu (manual re-run).
+7. Lead ASW-789 se znovu zpracuje. Retry_count z _asw_logs = 1. max_attempts = 3.
+8a. Pokud tentokrat uspeje → outcome=success, email_sync_status=LINKED/REPLIED/atd.
+8b. Pokud failne potřetí → outcome=dead_letter: terminal_reason=max_attempts_exceeded, suggested_next_action="Zkontrolovat Gmail API status. Pokud OK, zkusit manualni sync pro tento konkretni lead."
+
+**Jak se zabrani duplicate side effectu:**
+Sync je nativne idempotentni — prepisuje metadata aktualnimi hodnotami. Gmail addLabel je idempotentni (pridani stejneho labelu vicekrat = noop). Duplicitni sync je bezpecny.
+
+---
+
+### 9. Sample dead-letter row
+
+**Radek v `_asw_dead_letters` sheetu:**
+
+| dead_letter_id | created_at | step_name | lead_id | last_run_id | last_event_id | idempotency_key | failure_class | retry_count | terminal_reason | last_error_message | state_before | suggested_next_action | resolution_status | resolved_at | resolution_note |
+|----------------|-----------|-----------|---------|-------------|---------------|-----------------|---------------|-------------|-----------------|-------------------|--------------|----------------------|-------------------|-------------|-----------------|
+| dl-20260405-144522-d3a1 | 2026-04-05T14:45:22Z | generate_brief | ASW-1712345678-a1b2 | run-processPreviewQueue-20260405-144500 | evt-20260405-144522-d3a1 | brief:ASW-1712345678-a1b2 | TRANSIENT | 3 | max_attempts_exceeded | UrlFetchApp timeout after 30000ms during template fetch | QUALIFIED | Zkontrolovat dostupnost template service. Pokud OK, manualne presunout lead do QUALIFIED a spustit processPreviewQueue. | open | | |
+
+**Soucasne v `_asw_logs` (posledni pokus, bezny fail log):**
+
+| logged_at | level | source | row | lead_id | message | payload |
+|-----------|-------|--------|-----|---------|---------|---------|
+| 2026-04-05T14:45:20Z | ERROR | processPreviewQueue | 42 | ASW-1712345678-a1b2 | Brief generation failed (attempt 3/3) | `{"run_id":"run-processPreviewQueue-20260405-144500","event_id":"evt-20260405-144520-f1b2","step_name":"generate_brief","outcome":"failed","retry_count":3}` |
+
+**Po resolution operatorem:**
+
+| dead_letter_id | ... | resolution_status | resolved_at | resolution_note |
+|----------------|-----|-------------------|-------------|-----------------|
+| dl-20260405-144522-d3a1 | ... | resolved | 2026-04-05T16:30:00Z | Template service restartovan, lead re-driven v run-processPreviewQueue-20260405-163000 |
+
+---
+
+### 10. Mapping na aktualni projekt
+
+#### 10.1 Co dnes projekt ma
+
+| Oblast | Soucasny stav | Soubor:radek |
+|--------|--------------|--------------|
+| LockService | 2 mista: refreshContactingSheet, onContactSheetEdit | ContactSheet.gs:308, 610 |
+| State guards | preview_stage eligibleStages, lead_stage IN_PIPELINE guard, outreach_stage monotonic guard, dedupe_flag guard | PreviewPipeline.gs:908, 307, 1037; OutboundEmail.gs:357 |
+| Error logging | aswLog_ do _asw_logs, per-row try-catch v batch operacich | Helpers.gs:294; vsude |
+| Double-send protection | 5min time window + UI confirmation | OutboundEmail.gs:165-192 |
+| Identity verification | business_name + city match pred write-back a send | ContactSheet.gs:698-728; OutboundEmail.gs:194-206 |
+| Error state tracking | preview_error, email_last_error, email_sync_status=ERROR | Config.gs:88, 108, 163 |
+| Header validation | validateLegacyColHeaders_ pred kritickyma operacemi | Helpers.gs:277; ContactSheet.gs:660; LegacyWebCheck.gs:37 |
+| Batch resilience | Per-row try-catch; 1 fail nezastavi batch | PreviewPipeline.gs:286, 924; MailboxSync.gs:69 |
+
+#### 10.2 Co chybi
+
+| Oblast | Co chybi | Dopad | Effort |
+|--------|----------|-------|--------|
+| Lock na processPreviewQueue | Timer-triggered batch nema lock | Mozny concurrent run (timer + manual) | Low — pridat ScriptLock.tryLock na zacatek funkce |
+| Formalni idempotency key pro webhook | send_webhook nema content-hash guard | Mozny duplicate webhook POST | Medium — pridat SHA256(brief_json) pred POST |
+| Formalni idempotency key pro email send | Pouze time-based guard (5min), ne content-based | Mozny duplicate email po >5min | Medium — pridat key do _asw_logs + lookup pred send |
+| Retry count tracking | Zadny retry counter; FAILED leady se retryuji bez limitu | Mozna nekonecna smycka pro permanentni fail | Medium — derivovat z _asw_logs nebo pridat runtime counter |
+| Dead-letter recording | Chybi `_asw_dead_letters` sheet a dead-letter zapis | FAILED leady nejsou eskalovany; zustavaji v FAILED navzdy | Low — vytvorit sheet (analogicky k ensureLogSheet_) + zapis pri max_attempts |
+| max_attempts enforcement | Neexistuje; FAILED lead je retryovan pri kazdem cyklu | Zbytecne CPU; trigger budget spotrebovava | Medium — pridat retry_count check pred zpracovanim |
+| outcome pole v logu | _asw_logs nema structured outcome (C-02 design, neimplementovano) | Run history dohledavani neni mozne | Medium — implementovat C-02 run history contract |
+
+#### 10.3 Co je target-state design
+
+| Oblast | Target stav | Zavisi na |
+|--------|------------|-----------|
+| normalize_lead idempotency (S10) | input hash guard | A-stream ingest pipeline implementace |
+| dedupe_lead samostatny krok (S11) | company_key dedupe | A-stream ingest pipeline implementace |
+| process_email_queue (S12) | Stejna ochrana jako S4 | C-05 outbound queue implementace |
+| Webhook idempotency (S3) | brief_hash guard + idempotentni externi sluzba | B-stream preview service |
+
+#### 10.4 Low-effort implementacni kroky
+
+1. **Pridat ScriptLock na processPreviewQueue** — ~5 radku kodu, okamzity ucitek.
+2. **Pridat retry_count do aswLog_ payloadu** — rozsireni opts.payload o retry_count pri FAILED outcome.
+3. **Pridat dead_letter outcome** — nove outcome value v aswLog_ call pri dosazeni max_attempts.
+4. **Pridat max_attempts check** — v processPreviewQueue pred zpracovanim leadu: pocitat FAILED zaznamy v _asw_logs, skip pokud >= max_attempts.
+
+#### 10.5 Casti zavisle na dalsich taskech
+
+| C-03 cast | Zavisi na | Task |
+|-----------|-----------|------|
+| Email send idempotency key lookup v _asw_logs | C-02 run history implementace (structured payload) | Implementacni task |
+| process_email_queue retry (S12) | C-05 outbound queue schema | C-05 |
+| Provider-specific error classification | C-06 provider abstraction | C-06 |
+| Dead-letter resolution operator workflow | C-09 exception queue UX | C-09 |

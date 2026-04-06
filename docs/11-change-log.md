@@ -38,6 +38,12 @@
 - **Code:** *(zadne code changes)* (—)
 - **Docs:** docs/24-automation-workflows.md, docs/20-current-state.md
 
+### [C/C-03] Definovat idempotency keys, retry politiku a dead-letter handling — DONE
+- **Scope:** Reliability vrstva nad C-02 orchestratorem. Definuje idempotency key pro kazdy automaticky krok, retry matici (transient/permanent/ambiguous failures, max_attempts, backoff), dead-letter handling v _asw_logs, locking pravidla pro LockService. Specifikace — ne implementace.
+- **Owner:** Claude
+- **Code:** *(zadne code changes)* (—)
+- **Docs:** docs/24-automation-workflows.md, docs/20-current-state.md
+
 ### [C/C-01] Definovat end-to-end lifecycle leadu jako state machine — DONE
 - **Scope:** Definice jedineho kanonicky lifecycle stavu (`lifecycle_state`) pro kazdy lead v systemu. Pokryva cestu od importu az po reakci leadu (REPLIED/BOUNCED/UNSUBSCRIBED) nebo diskvalifikaci. WON/LOST jsou downstream sales outcome mimo scope C-01. Specifikace — ne implementace.
 - **Owner:** Claude
