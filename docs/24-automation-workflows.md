@@ -55,8 +55,28 @@ Kod existuje v processPreviewQueue() a runWebhookPilotTest(). Payload: brief JSO
 | Kontrakt | Verze | Stav | Spec |
 |----------|-------|------|------|
 | Scraping Job Input | 1.0 | Hotovy (A1) | [contracts/scraping-job-input.md](contracts/scraping-job-input.md) |
+| RAW_IMPORT Row | 1.0 | Hotovy (A2) | [contracts/raw-import-staging.md](contracts/raw-import-staging.md) |
 
-Scraping Job Input kontrakt definuje vstupni payload pro jeden scraping job. Pouzije se jako vstup pro scraper runtime (A4) a staging layer (A2). Samotna implementace scrapingu jeste neexistuje.
+Scraping Job Input kontrakt definuje vstupni payload pro jeden scraping job. RAW_IMPORT Row definuje staging layer mezi scraperem a LEADS. Samotna implementace jeste neexistuje.
+
+## Ingest flow (scraper -> _raw_import -> LEADS)
+
+Staging-based ingest pipeline. Navrh v A-02 (RAW_IMPORT staging layer), kod jeste neni implementovan.
+
+```
+1. Scraper (A-04)      -> insert do _raw_import [status: raw]
+2. Normalizer (A-03)   -> parse raw_payload_json, validate, clean
+                          -> status: normalized (OK) nebo error (fail)
+3. Dedupe (A-05)       -> company_key match proti LEADS + intra-job
+                          -> status: normalized (clean) / duplicate_candidate (soft)
+                          -> error + rejected_duplicate (hard)
+4. Import writer       -> generate lead_id, append LEADS row
+                          -> update _raw_import: status: imported
+```
+
+**Boundary:** produkcni lead vznika v jedinem atomickem kroku — import writer appenduje do LEADS a zpetne updatuje `_raw_import` na `imported`. Pred tim data neexistuji v LEADS, nejsou viditelna v downstream pipeline.
+
+Viz `docs/contracts/raw-import-staging.md` pro uplny kontrakt (status model, decision model, invariants matrix, sample rows).
 
 ## Chybejici automatizace
 
@@ -64,3 +84,4 @@ Scraping Job Input kontrakt definuje vstupni payload pro jeden scraping job. Pou
 - Hromadne odesilani emailu (neni implementovano)
 - Automaticky scraping (neni implementovan — kontrakt pripraven, viz vyse)
 - Preview web generovani (neni implementovano)
+- Ingest flow runtime (navrzen v A-02/A-03, kod neni implementovan)

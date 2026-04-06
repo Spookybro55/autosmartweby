@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autosmartweby.local/schemas/raw-import-row/1.0",
+  "title": "RawImportRow",
+  "description": "One row in the _raw_import staging sheet. Append-only on row creation; status/audit columns are update-in-place.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "raw_import_id",
+    "source_job_id",
+    "source_portal",
+    "source_url",
+    "scraped_at",
+    "raw_payload_json",
+    "normalized_status",
+    "normalization_error",
+    "duplicate_candidate",
+    "duplicate_of_lead_id",
+    "lead_id",
+    "import_decision",
+    "decision_reason",
+    "created_at",
+    "updated_at",
+    "processed_by"
+  ],
+  "properties": {
+    "raw_import_id": {
+      "type": "string",
+      "pattern": "^RAW-[0-9a-f]{10}-\\d{6}$",
+      "minLength": 21,
+      "maxLength": 21,
+      "description": "Unique id. Format: RAW-{source_job_id_hash10}-{seq6}. Deterministic within a job. Immutable."
+    },
+    "source_job_id": {
+      "type": "string",
+      "description": "FK to ScrapingJobInput.source_job_id (A-01). Format validation is the responsibility of the A-01 contract and the producer (scraper); A-02 does not duplicate the regex/minLength rules to avoid double-maintenance. Immutable."
+    },
+    "source_portal": {
+      "type": "string",
+      "enum": ["firmy.cz", "zivefirmy.cz"],
+      "description": "Copy of portal from job input, denormalized for filtering without join. Immutable."
+    },
+    "source_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL of the business detail page on the portal. With source_job_id forms the row idempotency key. Immutable."
+    },
+    "scraped_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+      "description": "ISO 8601 UTC timestamp of extraction. Immutable."
+    },
+    "raw_payload_json": {
+      "type": "string",
+      "description": "Full raw scrape output for this one record as a JSON string. Content shape defined by A-04 scraper. Immutable."
+    },
+    "normalized_status": {
+      "type": "string",
+      "enum": ["raw", "normalized", "duplicate_candidate", "error", "imported"],
+      "default": "raw",
+      "description": "Technical lifecycle state. See spec section 3."
+    },
+    "normalization_error": {
+      "type": ["string", "null"],
+      "maxLength": 1024,
+      "default": null,
+      "description": "Technical error message. Non-null only when import_decision = rejected_error."
+    },
+    "duplicate_candidate": {
+      "type": "boolean",
+      "default": false,
+      "description": "TRUE if dedupe found any match (hard or soft)."
+    },
+    "duplicate_of_lead_id": {
+      "type": ["string", "null"],
+      "default": null,
+      "description": "FK to LEADS.lead_id of matched lead for hard duplicates. null for soft dup or non-duplicate."
+    },
+    "lead_id": {
+      "type": ["string", "null"],
+      "default": null,
+      "description": "FK to LEADS.lead_id after successful import. Non-null only in 'imported' status."
+    },
+    "import_decision": {
+      "type": ["string", "null"],
+      "enum": ["imported", "rejected_error", "rejected_duplicate", "pending_review", null],
+      "default": null,
+      "description": "Business decision. null until decided. See spec section 4."
+    },
+    "decision_reason": {
+      "type": ["string", "null"],
+      "maxLength": 256,
+      "default": null,
+      "description": "Human-readable reason code or description."
+    },
+    "created_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+      "description": "Row insert timestamp. Immutable."
+    },
+    "updated_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+      "description": "Last modification timestamp of any mutable column. Equals created_at at insert."
+    },
+    "processed_by": {
+      "type": "string",
+      "enum": ["scraper", "normalizer", "dedupe", "import_writer", "manual"],
+      "default": "scraper",
+      "description": "Writer component that last modified the row."
+    }
+  }
+}
