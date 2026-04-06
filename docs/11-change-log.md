@@ -6,11 +6,15 @@
 
 ---
 
-## 2026-04-05
+## 2026-04-06
 
-### [A/A1] [SAMPLE] Scraping pipeline — data vstup do LEADS — DRAFT
-- **Scope:** Implementace prvniho zdroje dat pro LEADS sheet. Definice formatu vstupu, mapovani sloupcu, validace.
-- **Docs:** docs/20-current-state.md, docs/23-data-model.md, docs/24-automation-workflows.md
+### [A/A1] Scraping Job Input Contract — DONE
+- **Scope:** Definice kanonickeho datoveho kontraktu pro jeden scraping job. 1 job = 1 query na 1 portalu v 1 meste/segmentu. Kontrakt obsahuje 12 poli, vsechna required (key musi byt explicitne pritomen; nullable pole maji hodnotu null). Lifecycle envelope (created/running/completed/failed) a deterministicky `source_job_id` odvozeny z (portal, segment, city, district, max_results, creation second) pres SHA-256 hash10. `error_message` zachycuje chybovy detail pri stavu failed. Zadne nested objekty. Zaklad pro A-02 staging layer a A-04 scraper runtime.
+- **Owner:** Stream A
+- **Code:** docs/contracts/scraping-job-input.schema.json (new), docs/contracts/scraping-job-input.md (new), crm-frontend/src/lib/contracts/scraping-job-input.ts (new)
+- **Docs:** docs/23-data-model.md, docs/20-current-state.md, docs/24-automation-workflows.md, docs/30-task-records/A1.md
+
+## 2026-04-05
 
 ### [B/B1] [SAMPLE] Preview web generator — webhook service — DRAFT
 - **Scope:** Implementace externi sluzby pro generovani preview webu z briefu. Napojeni na existujici webhook pipeline.

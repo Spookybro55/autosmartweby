@@ -8,7 +8,7 @@
 
 | Task ID | Stream | Title | Owner | Status | Date | Affected Docs | Code Areas |
 |---------|--------|-------|-------|--------|------|---------------|------------|
-| A1 | A | [SAMPLE] Scraping pipeline — data vstup do LEADS | TBD | draft | 2026-04-05 | docs/20-current-state.md, docs/23-data-model.md, docs/24-automation-workflows.md | - |
+| A1 | A | Scraping Job Input Contract | Stream A | done | 2026-04-06 | docs/23-data-model.md, docs/20-current-state.md, docs/24-automation-workflows.md, docs/30-task-records/A1.md | docs, crm-frontend |
 | B1 | B | [SAMPLE] Preview web generator — webhook service | TBD | draft | 2026-04-05 | docs/20-current-state.md, docs/22-technical-architecture.md, docs/26-offer-generation.md, docs/27-infrastructure-storage.md | - |
 | C1 | C | [SAMPLE] Lead qualification tuning — enterprise... | TBD | draft | 2026-04-05 | docs/20-current-state.md, docs/21-business-process.md, docs/24-automation-workflows.md, docs/25-lead-prioritization.md | - |
 | C2 | C | Hardening audit — přepis sekce Souhrn v docs/20 | claude | done | 2026-04-05 | docs/20-current-state.md | — |

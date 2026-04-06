@@ -50,9 +50,17 @@
 
 Kod existuje v processPreviewQueue() a runWebhookPilotTest(). Payload: brief JSON + contact data. Ocekavany response: preview_url, screenshot_url, quality_score. WEBHOOK_URL je prazdny, zadna cilova sluzba.
 
+## Pripravene kontrakty pro budouci automatizaci
+
+| Kontrakt | Verze | Stav | Spec |
+|----------|-------|------|------|
+| Scraping Job Input | 1.0 | Hotovy (A1) | [contracts/scraping-job-input.md](contracts/scraping-job-input.md) |
+
+Scraping Job Input kontrakt definuje vstupni payload pro jeden scraping job. Pouzije se jako vstup pro scraper runtime (A4) a staging layer (A2). Samotna implementace scrapingu jeste neexistuje.
+
 ## Chybejici automatizace
 
 - Trigger na novy radek v LEADS (neni implementovan)
 - Hromadne odesilani emailu (neni implementovano)
-- Automaticky scraping (neni implementovan)
+- Automaticky scraping (neni implementovan — kontrakt pripraven, viz vyse)
 - Preview web generovani (neni implementovano)

@@ -77,3 +77,13 @@ NOT_LINKED → NOT_FOUND / REVIEW / DRAFT_CREATED → SENT → LINKED → REPLIE
 ## Write-back mechanismus
 
 Varianta B: lead_id-based lookup. Sloupec 19 drzi lead_id. onContactSheetEdit pouziva findRowByLeadId_ pro nalezeni aktualniho radku v LEADS. Secondary guard: business_name + city match.
+
+## Contracts
+
+Kanonicke datove kontrakty zive v `docs/contracts/`. TypeScript typy jsou v `crm-frontend/src/lib/contracts/`.
+
+| Contract | Verze | Schema | Spec |
+|----------|-------|--------|------|
+| Scraping Job Input | 1.0 | [contracts/scraping-job-input.schema.json](contracts/scraping-job-input.schema.json) | [contracts/scraping-job-input.md](contracts/scraping-job-input.md) |
+
+Scraping Job Input definuje vstupni payload pro jeden scraping job (1 job = 1 query na 1 portalu v 1 meste/segmentu). 12 poli, vsechna required (nullable pole pouzivaji explicitni null, ne chybejici klic). `source_job_id` je deterministicky odvozen z (portal, segment, city, district, max_results, creation second) pres SHA-256, coz zajistuje idempotenci re-runu stejneho scope.
