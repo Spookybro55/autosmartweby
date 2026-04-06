@@ -11,8 +11,12 @@
     "portal",
     "segment",
     "city",
+    "district",
+    "max_results",
     "job_created_at",
-    "job_status"
+    "job_status",
+    "job_started_at",
+    "job_completed_at"
   ],
   "properties": {
     "schema_version": {
@@ -23,7 +27,7 @@
     "source_job_id": {
       "type": "string",
       "pattern": "^[a-z0-9]+-\\d{8}T\\d{6}Z-[0-9a-f]{10}$",
-      "minLength": 29,
+      "minLength": 35,
       "maxLength": 64,
       "description": "Deterministic unique job id. Format: {portal_slug}-{yyyymmddThhmmssZ}-{hash10}. See contract doc section 6."
     },
@@ -43,7 +47,7 @@
       "type": "string",
       "minLength": 2,
       "maxLength": 64,
-      "description": "Czech city name, Title Case, UTF-8 with diacritics. Example: \"Plzen\"."
+      "description": "Czech city name, Title Case, UTF-8 with diacritics. Example: \"Plzeň\"."
     },
     "district": {
       "type": ["string", "null"],

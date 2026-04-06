@@ -8,7 +8,7 @@
 
 | Task ID | Stream | Title | Owner | Status | Date | Affected Docs | Code Areas |
 |---------|--------|-------|-------|--------|------|---------------|------------|
-| A1 | A | Scraping Job Input Contract | Stream A | in-progress | 2026-04-05 | docs/23-data-model.md, docs/30-task-records/A1.md | docs, crm-frontend |
+| A1 | A | Scraping Job Input Contract | Stream A | done | 2026-04-06 | - | - |
 | B1 | B | [SAMPLE] Preview web generator — webhook service | TBD | draft | 2026-04-05 | - | - |
 | C1 | C | [SAMPLE] Lead qualification tuning — enterprise... | TBD | draft | 2026-04-05 | - | - |
 | C2 | C | Hardening audit — přepis sekce Souhrn v docs/20 | claude | done | 2026-04-05 | - | - |
