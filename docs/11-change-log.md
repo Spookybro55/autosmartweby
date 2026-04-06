@@ -32,9 +32,11 @@
 - **Scope:** Implementace externi sluzby pro generovani preview webu z briefu. Napojeni na existujici webhook pipeline.
 - **Docs:** docs/20-current-state.md, docs/22-technical-architecture.md, docs/26-offer-generation.md, docs/27-infrastructure-storage.md
 
-### [C/C1] [SAMPLE] Lead qualification tuning — enterprise filter — DRAFT
-- **Scope:** Uprava kvalifikacni logiky — zpreseni enterprise/chain filtru, pridani novych kriterii.
-- **Docs:** docs/20-current-state.md, docs/21-business-process.md, docs/24-automation-workflows.md, docs/25-lead-prioritization.md
+### [C/C-01] Definovat end-to-end lifecycle leadu jako state machine — DONE
+- **Scope:** Definice jedineho kanonicky lifecycle stavu (`lifecycle_state`) pro kazdy lead v systemu. Pokryva cestu od importu az po reakci leadu (REPLIED/BOUNCED/UNSUBSCRIBED) nebo diskvalifikaci. WON/LOST jsou downstream sales outcome mimo scope C-01. Specifikace — ne implementace.
+- **Owner:** Claude
+- **Code:** *(zadne code changes)* (—)
+- **Docs:** docs/21-business-process.md, docs/23-data-model.md, docs/20-current-state.md
 
 ### [C/C2] Hardening audit — přepis sekce Souhrn v docs/20 — DONE
 - **Scope:** Nahrazení sekce „Souhrn" v docs/20-current-state.md schváleným textem z hardening auditu. Text explicitně rozlišuje commitnutý kód, governance vrstvu (definovaná/validovaná/nevynucovaná) a uncommitted změny v working tree.
