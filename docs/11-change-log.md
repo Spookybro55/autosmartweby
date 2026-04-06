@@ -20,13 +20,13 @@
 - **Code:** docs/contracts/raw-import-row.schema.json (new), docs/contracts/raw-import-staging.md (new), crm-frontend/src/lib/contracts/raw-import-row.ts (new)
 - **Docs:** docs/20-current-state.md, docs/23-data-model.md, docs/24-automation-workflows.md, docs/30-task-records/A2.md
 
-## 2026-04-05
-
-### [A/A3] Normalization Raw to LEADS Rules — WIP
+### [A/A3] Normalization Raw to LEADS Rules — DONE
 - **Scope:** Definice kanonickych pravidel pro transformaci surovych dat z `_raw_import.raw_payload_json` na validni LEADS radek. Kontrakt pokryva: field mapping (23 sloupcu), cleaning rules per pole, reject/null/empty policy, `lead_id` generation (reuse existujiciho formatu), a 6 novych `source_*` metadata sloupcu appendovanych do LEADS. Zadne paralelni helpery — vsechny cleaning operace pres existujici `Helpers.gs` funkce.
 - **Owner:** Stream A
 - **Code:** docs/contracts/normalization-raw-to-leads.md (new), docs/contracts/raw-to-leads-mapping.json (new)
-- **Docs:** docs/23-data-model.md, docs/24-automation-workflows.md, docs/30-task-records/A3.md
+- **Docs:** docs/20-current-state.md, docs/23-data-model.md, docs/24-automation-workflows.md, docs/30-task-records/A3.md
+
+## 2026-04-05
 
 ### [B/B1] [SAMPLE] Preview web generator — webhook service — DRAFT
 - **Scope:** Implementace externi sluzby pro generovani preview webu z briefu. Napojeni na existujici webhook pipeline.
