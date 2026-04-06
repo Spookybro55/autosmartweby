@@ -1,0 +1,261 @@
+{
+  "$schema": "https://autosmartweby.local/schemas/raw-to-leads-mapping/1.0",
+  "title": "RawToLeadsMapping",
+  "version": "1.0",
+  "description": "Machine-readable field mapping from _raw_import.raw_payload_json and row metadata to LEADS columns. Consumed by the normalizer (A-03 implementation).",
+  "source_payload_shape": {
+    "note": "Canonical keys produced by scraper (A-04). Scraper is responsible for portal-specific parsing; normalizer consumes uniform shape.",
+    "keys": [
+      "business_name", "ico", "contact_name", "phone", "email", "website",
+      "city", "district", "area", "segment", "category", "service_type",
+      "pain_point", "rating", "reviews_count"
+    ]
+  },
+  "leads_column_resolution": {
+    "legacy_hardcoded": {
+      "note": "Positions fixed in Config.gs:44 LEGACY_COL, protected by validateLegacyColHeaders_() in Helpers.gs:277",
+      "business_name": 4,
+      "city": 9,
+      "phone": 11,
+      "email": 12,
+      "website_url": 13,
+      "has_website": 20
+    },
+    "header_resolver": {
+      "note": "Accessed by name via buildHeaderResolver() in Helpers.gs:56",
+      "columns": [
+        "ico", "contact_name", "district", "area", "segment", "service_type",
+        "pain_point", "rating", "reviews_count", "source"
+      ]
+    },
+    "extension_append_only": {
+      "note": "New columns appended to EXTENSION_COLUMNS in Config.gs:63",
+      "new_source_metadata": [
+        "source_job_id", "source_portal", "source_url",
+        "source_raw_import_id", "source_scraped_at", "source_imported_at"
+      ],
+      "existing_used": ["lead_id", "lead_stage"]
+    }
+  },
+  "field_mapping": [
+    {
+      "source": "payload.business_name",
+      "target": "business_name",
+      "target_kind": "legacy_hardcoded",
+      "transform": "String(v).trim(); collapse whitespace; preserve case + diacritics + suffixes; max 200 chars",
+      "missing": "REJECT with MISSING_BUSINESS_NAME if < 2 chars after trim",
+      "helpers": []
+    },
+    {
+      "source": "payload.ico",
+      "target": "ico",
+      "target_kind": "header_resolver",
+      "transform": "String(v).replace(/\\D/g,''); valid iff exactly 8 digits; no checksum validation",
+      "missing": "keep null",
+      "helpers": []
+    },
+    {
+      "source": "payload.contact_name",
+      "target": "contact_name",
+      "target_kind": "header_resolver",
+      "transform": "String(v).trim(); collapse whitespace; fake standalone tokens (info, sales, office, hello, kontakt, admin, webmaster) -> null",
+      "missing": "keep null",
+      "helpers": []
+    },
+    {
+      "source": "payload.phone",
+      "target": "phone",
+      "target_kind": "legacy_hardcoded",
+      "transform": "normalizePhone_() then CZ prefix rules: +420 for 9 digits, 00420 -> +420, 0xxxxxxxxx -> +420, 420xxxxxxxxx -> +420xxxxxxxxx; require >=9 digits after normalization",
+      "missing": "empty string \"\" (not null) if invalid; at least one of phone/email must be non-empty",
+      "helpers": ["normalizePhone_ (Helpers.gs:328)"]
+    },
+    {
+      "source": "payload.email",
+      "target": "email",
+      "target_kind": "legacy_hardcoded",
+      "transform": "trimLower_(); regex ^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+      "missing": "empty string \"\" (not null) if invalid; at least one of phone/email must be non-empty",
+      "helpers": ["trimLower_ (Helpers.gs:332)"]
+    },
+    {
+      "source": "payload.website",
+      "target": "website_url",
+      "target_kind": "legacy_hardcoded",
+      "transform": "canonicalizeUrl_() -> https://host; then isRealUrl_() check",
+      "missing": "empty string \"\" if invalid or empty",
+      "helpers": ["canonicalizeUrl_ (Helpers.gs:385)", "isRealUrl_ (Helpers.gs:414)"]
+    },
+    {
+      "source": "computed from website_url",
+      "target": "has_website",
+      "target_kind": "legacy_hardcoded",
+      "transform": "isRealUrl_(website_url) ? 'yes' : 'no'",
+      "missing": "never null or empty — always 'yes' or 'no'",
+      "helpers": ["isRealUrl_ (Helpers.gs:414)"]
+    },
+    {
+      "source": "payload.city",
+      "target": "city",
+      "target_kind": "legacy_hardcoded",
+      "transform": "String(v).trim(); preserve case + diacritics (required for CITY_LOCATIVES_ in Helpers.gs:498)",
+      "missing": "REJECT with MISSING_CITY if empty after trim",
+      "helpers": []
+    },
+    {
+      "source": "payload.district",
+      "target": "district",
+      "target_kind": "header_resolver",
+      "transform": "String(v).trim(); preserve diacritics; if district == city then null (redundant)",
+      "missing": "keep null",
+      "helpers": []
+    },
+    {
+      "source": "payload.area",
+      "target": "area",
+      "target_kind": "header_resolver",
+      "transform": "String(v).trim(); preserve diacritics",
+      "missing": "keep null",
+      "helpers": []
+    },
+    {
+      "source": "payload.segment (fallback payload.category)",
+      "target": "segment",
+      "target_kind": "header_resolver",
+      "transform": "removeDiacritics_(trimLower_()); replace non [a-z0-9] with -, collapse, strip edge dashes; must match ^[a-z0-9][a-z0-9_-]*[a-z0-9]$",
+      "missing": "keep null (and if < 2 chars after cleaning)",
+      "helpers": ["removeDiacritics_ (Helpers.gs:324)", "trimLower_ (Helpers.gs:332)"]
+    },
+    {
+      "source": "payload.service_type",
+      "target": "service_type",
+      "target_kind": "header_resolver",
+      "transform": "String(v).trim(); collapse whitespace; NO lowercasing, NO diacritics stripping — human-readable raw text",
+      "missing": "keep null",
+      "helpers": []
+    },
+    {
+      "source": "payload.pain_point",
+      "target": "pain_point",
+      "target_kind": "header_resolver",
+      "transform": "String(v).trim()",
+      "missing": "keep null",
+      "helpers": []
+    },
+    {
+      "source": "payload.rating",
+      "target": "rating",
+      "target_kind": "header_resolver",
+      "transform": "String(v).replace(',','.').trim(); Number(); valid iff finite AND in [0, 5]",
+      "missing": "keep null; NO clamp — out-of-range yields null",
+      "helpers": []
+    },
+    {
+      "source": "payload.reviews_count",
+      "target": "reviews_count",
+      "target_kind": "header_resolver",
+      "transform": "parseInt(String(v).trim(), 10); valid iff integer >= 0",
+      "missing": "keep null; empty string, null, NaN, negative all yield null",
+      "helpers": []
+    },
+    {
+      "source": "_raw_import.source_job_id",
+      "target": "source_job_id",
+      "target_kind": "extension_append_only",
+      "transform": "copy as-is",
+      "missing": "always present (required from A-01)",
+      "helpers": []
+    },
+    {
+      "source": "_raw_import.source_portal",
+      "target": "source_portal",
+      "target_kind": "extension_append_only",
+      "transform": "copy as-is",
+      "missing": "always present",
+      "helpers": []
+    },
+    {
+      "source": "_raw_import.source_url",
+      "target": "source_url",
+      "target_kind": "extension_append_only",
+      "transform": "copy as-is",
+      "missing": "always present",
+      "helpers": []
+    },
+    {
+      "source": "_raw_import.raw_import_id",
+      "target": "source_raw_import_id",
+      "target_kind": "extension_append_only",
+      "transform": "copy as-is",
+      "missing": "always present",
+      "helpers": []
+    },
+    {
+      "source": "_raw_import.scraped_at",
+      "target": "source_scraped_at",
+      "target_kind": "extension_append_only",
+      "transform": "copy as-is (ISO 8601 UTC)",
+      "missing": "always present",
+      "helpers": []
+    },
+    {
+      "source": "generated",
+      "target": "source_imported_at",
+      "target_kind": "extension_append_only",
+      "transform": "new Date().toISOString()",
+      "missing": "always generated at LEADS insert moment",
+      "helpers": []
+    },
+    {
+      "source": "generated",
+      "target": "lead_id",
+      "target_kind": "extension_append_only",
+      "transform": "generateLeadId_() — ASW-{ts36}-{rnd4}, shared helper in Helpers.gs; refactored from PreviewPipeline.gs:63-108 ensureLeadIds()",
+      "missing": "always generated at LEADS insert moment",
+      "helpers": ["generateLeadId_ (new in Helpers.gs)"]
+    },
+    {
+      "source": "constant",
+      "target": "lead_stage",
+      "target_kind": "extension_append_only",
+      "transform": "literal 'NEW'",
+      "missing": "always set; downstream qualifyLeads() changes it later",
+      "helpers": []
+    }
+  ],
+  "reject_rules": {
+    "rejected_error": [
+      {"code": "INVALID_PAYLOAD_JSON", "condition": "raw_payload_json cannot be parsed as JSON"},
+      {"code": "MISSING_BUSINESS_NAME", "condition": "business_name is empty or < 2 chars after trim"},
+      {"code": "MISSING_CITY", "condition": "city is empty after trim"},
+      {"code": "NO_CONTACT_CHANNELS", "condition": "both phone and email are empty string after cleaning"},
+      {"code": "NORMALIZATION_FAILED", "condition": "normalizer throws exception"},
+      {"code": "LEADS_WRITE_FAILED", "condition": "Sheets API error at LEADS append"}
+    ]
+  },
+  "check_order": [
+    "1. Parse raw_payload_json (fail -> INVALID_PAYLOAD_JSON)",
+    "2. Clean business_name (fail -> MISSING_BUSINESS_NAME)",
+    "3. Clean city (fail -> MISSING_CITY)",
+    "4. Clean phone and email (both empty -> NO_CONTACT_CHANNELS)",
+    "5. Clean website_url, compute has_website",
+    "6. Clean remaining optional fields",
+    "7. Copy source metadata from _raw_import row",
+    "8. Generate lead_id and source_imported_at",
+    "9. Assemble LEADS row payload and hand off to import writer"
+  ],
+  "null_vs_empty_policy": {
+    "empty_string_not_null": {
+      "fields": ["phone", "email", "website_url"],
+      "reason": "Consistent with isBlank_() guard in Helpers.gs:336, Google Sheets never stores null (round-trip yields ''), and project helpers like normalizePhone_() and extractDomainFromUrl_() return '' not null for invalid input"
+    },
+    "always_filled": {
+      "fields": ["has_website", "lead_stage", "lead_id", "source_job_id", "source_portal", "source_url", "source_raw_import_id", "source_scraped_at", "source_imported_at"],
+      "reason": "Computed or copied from _raw_import; never null, never empty"
+    },
+    "keep_null": {
+      "fields": ["ico", "contact_name", "district", "area", "segment", "service_type", "pain_point", "rating", "reviews_count"],
+      "reason": "Optional fields with no meaningful empty-string representation"
+    }
+  }
+}
