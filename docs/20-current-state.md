@@ -51,8 +51,9 @@ CI validuje aktuálnost generated files a existenci governance souboru. Nevalidu
 - Mock service pro lokalni vyvoj bez Sheets pripojeni
 - Bezi lokalne, neni nasazen na verejne URL
 
-### Datove kontrakty
-- Scraping Job Input v1.0 (`docs/contracts/scraping-job-input.schema.json`) — kanonicky kontrakt pro jeden scraping job (1 job = 1 query na 1 portalu v 1 meste/segmentu). Definuje 11 poli, deterministicky `source_job_id` a lifecycle stavy. Zaklad pro budouci automatizaci scrapingu (A2+).
+### Datove kontrakty a staging
+- Scraping Job Input v1.0 (`docs/contracts/scraping-job-input.schema.json`) — kanonicky kontrakt pro jeden scraping job (1 job = 1 query na 1 portalu v 1 meste/segmentu). Definuje 12 poli, deterministicky `source_job_id` a lifecycle stavy. Zaklad pro budouci automatizaci scrapingu.
+- RAW_IMPORT staging layer v1.0 (`docs/contracts/raw-import-staging.md`) — kontrakt pro `_raw_import` system sheet, staging buffer mezi scraperem a LEADS. 16 sloupcu, 5-stavovy status model, 4-hodnotovy decision model. Kod jeste neni implementovan — pouze kontrakt a dokumentace.
 
 ### Dokumentace
 - Governance s validacnim scriptem

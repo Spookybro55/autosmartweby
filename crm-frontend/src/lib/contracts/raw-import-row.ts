@@ -4,6 +4,7 @@
 //
 // One row in the _raw_import staging sheet. Append-only on row creation;
 // status/audit columns are update-in-place during lifecycle.
+// All 16 fields are required (must be explicitly present; nullable fields use explicit null).
 
 export type RawImportPortal = "firmy.cz" | "zivefirmy.cz";
 

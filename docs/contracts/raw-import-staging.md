@@ -33,15 +33,17 @@
 | 5 | `scraped_at` | string (ISO 8601 UTC) | yes | — | Extraction timestamp. Immutable. |
 | 6 | `raw_payload_json` | string (serialized JSON) | yes | — | Full raw scrape output as JSON string. Shape defined by A-04. Immutable. |
 | 7 | `normalized_status` | enum | yes | `raw` | Technical lifecycle. `raw` / `normalized` / `duplicate_candidate` / `error` / `imported`. |
-| 8 | `normalization_error` | string \| null | no | `null` | Technical error message. Non-null only when `import_decision = rejected_error`. |
+| 8 | `normalization_error` | string \| null | yes | — | Technical error message. Non-null only when `import_decision = rejected_error`. |
 | 9 | `duplicate_candidate` | boolean | yes | `FALSE` | TRUE if dedupe found any match (hard or soft). |
-| 10 | `duplicate_of_lead_id` | string \| null | no | `null` | FK to `LEADS.lead_id` of the matched lead. Non-null only for hard duplicates. |
-| 11 | `lead_id` | string \| null | no | `null` | FK to `LEADS.lead_id` of *this* row after import. Non-null only in `imported` status. |
-| 12 | `import_decision` | enum \| null | no | `null` | Business decision. `imported` / `rejected_error` / `rejected_duplicate` / `pending_review`. |
-| 13 | `decision_reason` | string \| null | no | `null` | Human-readable reason code (e.g. `HARD_DUP_ICO`, `MISSING_BUSINESS_NAME`). |
+| 10 | `duplicate_of_lead_id` | string \| null | yes | — | FK to `LEADS.lead_id` of the matched lead. Non-null only for hard duplicates. |
+| 11 | `lead_id` | string \| null | yes | — | FK to `LEADS.lead_id` of *this* row after import. Non-null only in `imported` status. |
+| 12 | `import_decision` | enum \| null | yes | — | Business decision. `imported` / `rejected_error` / `rejected_duplicate` / `pending_review`. |
+| 13 | `decision_reason` | string \| null | yes | — | Human-readable reason code (e.g. `HARD_DUP_ICO`, `MISSING_BUSINESS_NAME`). |
 | 14 | `created_at` | string (ISO 8601 UTC) | yes | — | Row insert timestamp. Immutable. |
 | 15 | `updated_at` | string (ISO 8601 UTC) | yes | — | Last mutation timestamp. Equals `created_at` at insert. |
 | 16 | `processed_by` | enum | yes | `scraper` | Component that last wrote. `scraper` / `normalizer` / `dedupe` / `import_writer` / `manual`. |
+
+16 fields total. All 16 required (must be explicitly present in every row; nullable fields use explicit `null`). Design decision: consistent with A-01 contract — explicit null over missing key for serialization consistency.
 
 **Immutable after insert (7):** 1–6, 14.
 **Update-in-place (9):** 7–13, 15, 16.

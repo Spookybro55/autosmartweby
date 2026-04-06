@@ -13,7 +13,12 @@
     "scraped_at",
     "raw_payload_json",
     "normalized_status",
+    "normalization_error",
     "duplicate_candidate",
+    "duplicate_of_lead_id",
+    "lead_id",
+    "import_decision",
+    "decision_reason",
     "created_at",
     "updated_at",
     "processed_by"
@@ -22,6 +27,8 @@
     "raw_import_id": {
       "type": "string",
       "pattern": "^RAW-[0-9a-f]{10}-\\d{6}$",
+      "minLength": 21,
+      "maxLength": 21,
       "description": "Unique id. Format: RAW-{source_job_id_hash10}-{seq6}. Deterministic within a job. Immutable."
     },
     "source_job_id": {
