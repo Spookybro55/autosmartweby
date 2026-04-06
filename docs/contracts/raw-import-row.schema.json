@@ -33,7 +33,7 @@
     },
     "source_job_id": {
       "type": "string",
-      "description": "FK to ScrapingJobInput.source_job_id (A-01). Immutable."
+      "description": "FK to ScrapingJobInput.source_job_id (A-01). Format validation is the responsibility of the A-01 contract and the producer (scraper); A-02 does not duplicate the regex/minLength rules to avoid double-maintenance. Immutable."
     },
     "source_portal": {
       "type": "string",

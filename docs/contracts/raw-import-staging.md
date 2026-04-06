@@ -27,18 +27,18 @@
 | # | Field | Type | Required | Default | Description |
 |---|---|---|---|---|---|
 | 1 | `raw_import_id` | string | yes | — | Unique row id. Format: `RAW-{source_job_id_hash10}-{seq6}`. Deterministic within a job. Immutable. |
-| 2 | `source_job_id` | string | yes | — | FK to A-01 job. Immutable. |
+| 2 | `source_job_id` | string | yes | — | FK to A-01 ScrapingJobInput.source_job_id. Format validation is A-01's responsibility; A-02 treats it as opaque string FK. Immutable. |
 | 3 | `source_portal` | enum | yes | — | `firmy.cz` or `zivefirmy.cz`. Denormalized. Immutable. |
 | 4 | `source_url` | string (URL) | yes | — | Detail page URL on the portal. Immutable. |
 | 5 | `scraped_at` | string (ISO 8601 UTC) | yes | — | Extraction timestamp. Immutable. |
 | 6 | `raw_payload_json` | string (serialized JSON) | yes | — | Full raw scrape output as JSON string. Shape defined by A-04. Immutable. |
 | 7 | `normalized_status` | enum | yes | `raw` | Technical lifecycle. `raw` / `normalized` / `duplicate_candidate` / `error` / `imported`. |
-| 8 | `normalization_error` | string \| null | yes | — | Technical error message. Non-null only when `import_decision = rejected_error`. |
+| 8 | `normalization_error` | string \| null | yes | `null` | Technical error message. Non-null only when `import_decision = rejected_error`. |
 | 9 | `duplicate_candidate` | boolean | yes | `FALSE` | TRUE if dedupe found any match (hard or soft). |
-| 10 | `duplicate_of_lead_id` | string \| null | yes | — | FK to `LEADS.lead_id` of the matched lead. Non-null only for hard duplicates. |
-| 11 | `lead_id` | string \| null | yes | — | FK to `LEADS.lead_id` of *this* row after import. Non-null only in `imported` status. |
-| 12 | `import_decision` | enum \| null | yes | — | Business decision. `imported` / `rejected_error` / `rejected_duplicate` / `pending_review`. |
-| 13 | `decision_reason` | string \| null | yes | — | Human-readable reason code (e.g. `HARD_DUP_ICO`, `MISSING_BUSINESS_NAME`). |
+| 10 | `duplicate_of_lead_id` | string \| null | yes | `null` | FK to `LEADS.lead_id` of the matched lead. Non-null only for hard duplicates. |
+| 11 | `lead_id` | string \| null | yes | `null` | FK to `LEADS.lead_id` of *this* row after import. Non-null only in `imported` status. |
+| 12 | `import_decision` | enum \| null | yes | `null` | Business decision. `imported` / `rejected_error` / `rejected_duplicate` / `pending_review`. |
+| 13 | `decision_reason` | string \| null | yes | `null` | Human-readable reason code (e.g. `HARD_DUP_ICO`, `MISSING_BUSINESS_NAME`). |
 | 14 | `created_at` | string (ISO 8601 UTC) | yes | — | Row insert timestamp. Immutable. |
 | 15 | `updated_at` | string (ISO 8601 UTC) | yes | — | Last mutation timestamp. Equals `created_at` at insert. |
 | 16 | `processed_by` | enum | yes | `scraper` | Component that last wrote. `scraper` / `normalizer` / `dedupe` / `import_writer` / `manual`. |

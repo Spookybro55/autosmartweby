@@ -32,7 +32,7 @@ export interface RawImportRow {
   /** Unique id. Format: `RAW-{source_job_id_hash10}-{seq6}`. Immutable. */
   raw_import_id: string;
 
-  /** FK to ScrapingJobInput.source_job_id (A-01). Immutable. */
+  /** FK to ScrapingJobInput.source_job_id (A-01). Format validation is A-01's responsibility. Immutable. */
   source_job_id: string;
 
   /** Copy of portal from job input (denormalized). Immutable. */
