@@ -77,6 +77,7 @@ CI validuje aktuálnost generated files a existenci governance souboru. Nevalidu
 ## Specifikace
 
 - **Lead Lifecycle State Machine (C-01):** Autoritativni specifikace end-to-end lifecycle stavu leadu — viz `docs/21-business-process.md`. Definuje 18 canonical stavu (4 terminal, 3 review), 24 povolenych prechodu, derivacni pravidla z existujicich stage poli. Scope: od importu po reakci; WON/LOST jsou downstream mimo lifecycle. Implementace sloupce `lifecycle_state` neni soucasti C-01.
+- **Workflow Orchestrator (C-02):** Logicka orchestracni vrstva nad lifecycle — viz `docs/24-automation-workflows.md`. Hybrid model (poll + manual + reactive), 17 eventu, formalni step kontrakt, run history design. Kompatibilni s existujicimi Apps Script triggery.
 
 ## Co je rozpracovane
 

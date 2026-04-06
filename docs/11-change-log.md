@@ -32,6 +32,12 @@
 - **Scope:** Implementace externi sluzby pro generovani preview webu z briefu. Napojeni na existujici webhook pipeline.
 - **Docs:** docs/20-current-state.md, docs/22-technical-architecture.md, docs/26-offer-generation.md, docs/27-infrastructure-storage.md
 
+### [C/C-02] Navrhnout workflow orchestrator — co spousti co po zmene stavu leadu — DONE
+- **Scope:** Logicka orchestracni vrstva nad C-01 lifecycle. Definuje co se stane po kazde zmene lifecycle_state, formalni workflow step kontrakt, event katalog, run history design a orchestration model (hybrid: poll + manual + reactive). Specifikace — ne implementace.
+- **Owner:** Claude
+- **Code:** *(zadne code changes)* (—)
+- **Docs:** docs/24-automation-workflows.md, docs/20-current-state.md
+
 ### [C/C-01] Definovat end-to-end lifecycle leadu jako state machine — DONE
 - **Scope:** Definice jedineho kanonicky lifecycle stavu (`lifecycle_state`) pro kazdy lead v systemu. Pokryva cestu od importu az po reakci leadu (REPLIED/BOUNCED/UNSUBSCRIBED) nebo diskvalifikaci. WON/LOST jsou downstream sales outcome mimo scope C-01. Specifikace — ne implementace.
 - **Owner:** Claude
