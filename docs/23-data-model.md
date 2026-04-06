@@ -86,4 +86,4 @@ Kanonicke datove kontrakty zive v `docs/contracts/`. TypeScript typy jsou v `crm
 |----------|-------|--------|------|
 | Scraping Job Input | 1.0 | [contracts/scraping-job-input.schema.json](contracts/scraping-job-input.schema.json) | [contracts/scraping-job-input.md](contracts/scraping-job-input.md) |
 
-Scraping Job Input definuje vstupni payload pro jeden scraping job (1 job = 1 query na 1 portalu v 1 meste/segmentu). `source_job_id` je deterministicky odvozen z (portal, segment, city, district, max_results, creation second) pres SHA-256, coz zajistuje idempotenci re-runu stejneho scope.
+Scraping Job Input definuje vstupni payload pro jeden scraping job (1 job = 1 query na 1 portalu v 1 meste/segmentu). 12 poli, vsechna required (nullable pole pouzivaji explicitni null, ne chybejici klic). `source_job_id` je deterministicky odvozen z (portal, segment, city, district, max_results, creation second) pres SHA-256, coz zajistuje idempotenci re-runu stejneho scope.

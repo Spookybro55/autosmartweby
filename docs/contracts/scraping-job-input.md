@@ -20,19 +20,20 @@ Contract for a **single scraping job**. One job = one query on one portal in one
 | `portal` | enum | yes | — | `firmy.cz` \| `zivefirmy.cz`. |
 | `segment` | string | yes | — | Lowercase ASCII business segment, e.g. `instalater`. |
 | `city` | string | yes | — | Czech city name with diacritics, Title Case. Example: `Plzeň`. |
-| `district` | string \| null | yes | — | District or `null` for whole-city job. |
+| `district` | string \| null | yes | — | District or `null` for whole-city job. Required key, nullable value (design decision: explicit null over missing key for serialization consistency). |
 | `max_results` | integer | yes | — | 1..500. |
 | `job_created_at` | string (ISO 8601 UTC) | yes | — | `YYYY-MM-DDTHH:mm:ssZ`. |
 | `job_status` | enum | yes | `"created"` | `created` \| `running` \| `completed` \| `failed`. |
 | `job_started_at` | string \| null | yes | — | Set when entering `running`, otherwise `null`. |
 | `job_completed_at` | string \| null | yes | — | Set when entering `completed`/`failed`, otherwise `null`. |
+| `error_message` | string \| null | yes | — | Error detail when `failed`. `null` for non-failed jobs. Max 1024 chars. |
 
-11 fields total. All 11 required (must be explicitly present). No nested objects.
+12 fields total. All 12 required (must be explicitly present). No nested objects.
 
 ## 3. Validation rules
 
 ### Required
-All 11 fields must be explicitly present. `additionalProperties: false`.
+All 12 fields must be explicitly present. `additionalProperties: false`.
 
 ### Enums
 - `portal` in `{firmy.cz, zivefirmy.cz}`. New portals require a schema version bump.
@@ -51,6 +52,9 @@ All 11 fields must be explicitly present. `additionalProperties: false`.
   - `job_started_at >= job_created_at`
   - `job_completed_at >= job_started_at`
   - `job_created_at` in the future by >5 min is invalid (clock skew guard).
+
+### Error message
+- `error_message`: `null` or string up to 1024 chars. Semantically expected to be non-null when `job_status = "failed"`, `null` otherwise.
 
 ### Numeric
 - `max_results`: integer 1..500. Non-integer is invalid.
@@ -126,7 +130,8 @@ Deterministic. Same input yields the same `source_job_id`. Normalization before 
   "job_created_at": "2026-04-05T14:30:22Z",
   "job_status": "completed",
   "job_started_at": "2026-04-05T14:30:25Z",
-  "job_completed_at": "2026-04-05T14:31:47Z"
+  "job_completed_at": "2026-04-05T14:31:47Z",
+  "error_message": null
 }
 ```
 Canonical hash input: `firmy.cz|instalater|Plzeň||50`
@@ -144,7 +149,8 @@ Canonical hash input: `firmy.cz|instalater|Plzeň||50`
   "job_created_at": "2026-04-05T09:00:00Z",
   "job_status": "created",
   "job_started_at": null,
-  "job_completed_at": null
+  "job_completed_at": null,
+  "error_message": null
 }
 ```
 Canonical hash input: `zivefirmy.cz|elektrikar-rev|Hradec Králové|Nový Hradec Králové|500`
@@ -164,7 +170,8 @@ Borderline because `max_results = 500` is at the maximum (soft warning on Serper
   "job_created_at": "2026-04-05 14:30:22+02:00",
   "job_status": "failed",
   "job_started_at": null,
-  "job_completed_at": null
+  "job_completed_at": null,
+  "error_message": null
 }
 ```
 
@@ -177,6 +184,7 @@ Violations:
 6. `max_results = 0` violates minimum 1.
 7. `job_created_at` has a space instead of `T` and a timezone offset instead of `Z`.
 8. `job_status = "failed"` requires `job_started_at` and `job_completed_at` to be non-null.
+9. `error_message = null` is semantically incorrect for `failed` status (expected non-null error detail).
 
 ## 6. Related artifacts
 

@@ -4,7 +4,7 @@
 //
 // This TypeScript type mirrors the JSON Schema. Keep both in sync.
 // A job = 1 query on 1 portal in 1 city/segment.
-// All 11 fields are required (must be explicitly present in every payload).
+// All 12 fields are required (must be explicitly present in every payload).
 
 export type ScrapingJobPortal = "firmy.cz" | "zivefirmy.cz";
 
@@ -36,7 +36,7 @@ export interface ScrapingJobInput {
   /** Czech city name, Title Case, UTF-8 with diacritics. Example: "Plzeň". */
   city: string;
 
-  /** District or borough. `null` for whole-city job. Empty string is invalid. */
+  /** District or borough. Required key, nullable value. `null` for whole-city job. Empty string is invalid. */
   district: string | null;
 
   /** Integer, max results to scrape. 1..500. */
@@ -53,4 +53,7 @@ export interface ScrapingJobInput {
 
   /** ISO 8601 UTC. `null` until job reaches "completed" or "failed". Milliseconds optional. */
   job_completed_at: string | null;
+
+  /** Error detail when job_status is "failed". `null` for non-failed jobs. Max 1024 chars. */
+  error_message: string | null;
 }
