@@ -75,6 +75,22 @@ Next.js frontend — sledovani pipeline, follow-upu, editace stavu.
 
 ---
 
+### Lifecycle State Scope Clarification
+
+The lifecycle state machine describes the conceptual journey of a lead across the system.
+
+In the current implementation:
+
+- States RAW_IMPORTED, NORMALIZED, and DEDUPED exist only within the A2 ingestion pipeline (`_raw_import` table).
+- Leads become observable in the LEADS table only after A3 import, at which point they are already normalized and deduplicated.
+- Therefore, the first physically observable lifecycle state in LEADS is effectively at the DEDUPED / WEB_CHECKED boundary.
+
+These early ingest states are included in the lifecycle model for completeness and future alignment.
+
+They will become physically observable in LEADS only after the `lifecycle_state` column is implemented.
+
+---
+
 ### 1. Ucel a scope
 
 **Co tato state machine resi:**
