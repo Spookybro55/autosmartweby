@@ -13,7 +13,7 @@ const RECORDS_DIR = join(ROOT, 'docs', '30-task-records');
 const CHANGELOG = join(ROOT, 'docs', '11-change-log.md');
 
 function parseTaskRecord(filePath) {
-  const content = readFileSync(filePath, 'utf-8');
+  const content = readFileSync(filePath, 'utf-8').replace(/\r\n/g, '\n');
   const get = (label) => {
     const re = new RegExp(`\\| \\*\\*${label}\\*\\* \\| (.+?) \\|`);
     const m = content.match(re);
