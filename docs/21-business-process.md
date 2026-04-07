@@ -67,10 +67,10 @@ Next.js frontend — sledovani pipeline, follow-upu, editace stavu.
 
 ---
 
-## Lead Lifecycle State Machine — C-01
+## Lead Lifecycle State Machine — CS1
 
 > **Autoritativni specifikace.** Definuje jediny kanonicky lifecycle stav pro kazdy lead.
-> **Task ID:** C-01
+> **Task ID:** CS1
 > **Vytvoreno:** 2026-04-05
 
 ---
@@ -84,14 +84,14 @@ Next.js frontend — sledovani pipeline, follow-upu, editace stavu.
 - Stanovuje povolene prechody mezi stavy a zakazuje nevalidni.
 
 **Co tato state machine NERESI:**
-- Neimplementuje workflow engine ani orchestrator (to je C-02).
+- Neimplementuje workflow engine ani orchestrator (to je CS2).
 - Neimplementuje emailing, UI dashboard ani preview generovani.
 - Nemeni existujici kod — toto je specifikace, ne implementace.
 - Nedefinuje detailni logiku kvalifikace (ta zustava v evaluateQualification_).
-- Nedefinuje retry/idempotency pravidla (to je C-03).
+- Nedefinuje retry/idempotency pravidla (to je CS3).
 
 **Scope boundary:**
-- Canonical lifecycle C-01 konci na REPLIED / BOUNCED / UNSUBSCRIBED / DISQUALIFIED.
+- Canonical lifecycle CS1 konci na REPLIED / BOUNCED / UNSUBSCRIBED / DISQUALIFIED.
 - Obchodni vysledky po reakci (WON, LOST v aktualnim outreach_stage) jsou **downstream sales outcome** mimo scope tohoto lifecycle. Jsou zdokumentovany v sekci 10.2 jako mapping na aktualni system, ale nejsou soucasti canonical lifecycle states.
 - Stav FAILED je non-terminal review stav pro chyby v preview/outreach vrstvach — lead v nem ceka na lidsky zasah, ktery ho vrati do flow (→ BRIEF_READY nebo → EMAIL_QUEUED).
 
@@ -155,8 +155,8 @@ Tyto osy fungujici nezavisle zpusobuji, ze lead muze mit napr. `lead_stage=QUALI
 
 **Zmeny oproti doporucenemu seznamu ze zadani:**
 - **Vsech 18 doporucenych stavu zachovano** beze zmeny nazvu.
-- **WON a LOST vyrazeny z canonical lifecycle.** Existuji v aktualnim outreach_stage, ale jsou downstream sales outcome mimo scope C-01 ("od importu po reakci"). V sekci 10.2 jsou zdokumentovany jako mapping na aktualni system.
-- **REPLIED je terminal** — scope C-01 konci na reakci leadu; dalsi obchodni zpracovani (WON/LOST) je mimo tento lifecycle.
+- **WON a LOST vyrazeny z canonical lifecycle.** Existuji v aktualnim outreach_stage, ale jsou downstream sales outcome mimo scope CS1 ("od importu po reakci"). V sekci 10.2 jsou zdokumentovany jako mapping na aktualni system.
+- **REPLIED je terminal** — scope CS1 konci na reakci leadu; dalsi obchodni zpracovani (WON/LOST) je mimo tento lifecycle.
 - **FAILED je review state, ne terminal** — lead v nem ceka na lidsky zasah a navrat do flow. Terminal by znamenal "konci nadobro", ale FAILED je opravitelny stav.
 
 ---
@@ -199,7 +199,7 @@ Terminal stav = lead v nem konci nadobro. Z terminal stavu nevede ZADNY dalsi po
 | State | Proc je terminal |
 |-------|------------------|
 | **DISQUALIFIED** | Lead nesplnuje kriteria pro osloveni (ma dobry web, chybi kontakt, chybi jmeno). Z tohoto stavu nevede zadna cesta zpet. Pokud se data leadu zmeni (napr. web prestane fungovat), je to novy podnet mimo tento lifecycle — ne pokracovani stavajiciho. |
-| **REPLIED** | Lead odpoveděl na email. Scope C-01 konci na reakci. Dalsi obchodni zpracovani (vyhodnoceni odpovedi jako WON/LOST) je downstream sales outcome mimo canonical lifecycle C-01. |
+| **REPLIED** | Lead odpoveděl na email. Scope CS1 konci na reakci. Dalsi obchodni zpracovani (vyhodnoceni odpovedi jako WON/LOST) je downstream sales outcome mimo canonical lifecycle CS1. |
 | **BOUNCED** | Email je nedorucitelny. Kontaktni udaje jsou neplatne. Dalsi odesilani by poskodilo sender reputation. |
 | **UNSUBSCRIBED** | Lead explicitne odmitnul komunikaci. Dalsi kontaktovani je pravni poruseni (GDPR, zakon o elektronickych komunikacich). |
 
@@ -227,7 +227,7 @@ RAW_IMPORTED → NORMALIZED → DEDUPED → WEB_CHECKED → QUALIFIED
 → OUTREACH_READY → EMAIL_QUEUED → EMAIL_SENT → REPLIED
 ```
 
-Firma bez webu je importovana, projde validaci, neni duplikat, web check potvrdil absenci webu. Kvalifikace projde. Brief a email draft se vygeneruji, preview web se vytvori a automaticky schvali. Lead je pripraven k osloveni, email se odesle, firma odpovi. Lifecycle C-01 konci na REPLIED — dalsi obchodni zpracovani (WON/LOST) je downstream.
+Firma bez webu je importovana, projde validaci, neni duplikat, web check potvrdil absenci webu. Kvalifikace projde. Brief a email draft se vygeneruji, preview web se vytvori a automaticky schvali. Lead je pripraven k osloveni, email se odesle, firma odpovi. Lifecycle CS1 konci na REPLIED — dalsi obchodni zpracovani (WON/LOST) je downstream.
 
 **7.2 Disqualified path (diskvalifikace)**
 
@@ -280,14 +280,14 @@ Riziko: Obejiti kvalifikace by zpusobilo:
 |--------|------|------------------|
 | **Ingest** | Import, validace, deduplikace | Oddeluje "surova data" od "cista data". Umoznuje sledovat kvalitu vstupu nezavisle na dalsim zpracovani. Ruzni dodavatele dat (portaly, manualni vstup) konci ve stejnem normalizo-vanem stavu. |
 | **Enrichment** | Overeni webove prezence | Enrichment je externi zavislost (Serper API). Muze selhat, ma rate limity, muze byt docasne nedostupny. Oddeleni umoznuje retry enrichmentu bez opakovani ingestu. |
-| **Qualification** | Rozhodnuti o vhodnosti leadu | Kvalifikacni pravidla se meni v case (C-01 zadani). Oddeleni umoznuje menit pravidla bez dopadu na ingest nebo preview pipeline. Review stavy existuji jen v teto vrstve. |
+| **Qualification** | Rozhodnuti o vhodnosti leadu | Kvalifikacni pravidla se meni v case (CS1 zadani). Oddeleni umoznuje menit pravidla bez dopadu na ingest nebo preview pipeline. Review stavy existuji jen v teto vrstve. |
 | **Preview** | Generovani a schvalovani materialu | Preview pipeline ma vlastni zivotni cyklus (brief → generovani → review → schvaleni). Muze selhat, vyzadovat regeneraci nebo lidsky zasah. Oddeleni zabranuje tomu, aby chyba v generovani preview ovlivnila kvalifikacni stav leadu. |
-| **Outreach** | Kontaktovani a sledovani reakce | Outreach vrstva ma externi zavislosti (Gmail, ESP) a pravni omezeni (GDPR, unsubscribe). Oddeleni umoznuje sledovat outreach performance nezavisle na kvalite preview. Obchodni vyhodnoceni reakce (WON/LOST) je mimo scope C-01. |
+| **Outreach** | Kontaktovani a sledovani reakce | Outreach vrstva ma externi zavislosti (Gmail, ESP) a pravni omezeni (GDPR, unsubscribe). Oddeleni umoznuje sledovat outreach performance nezavisle na kvalite preview. Obchodni vyhodnoceni reakce (WON/LOST) je mimo scope CS1. |
 
 **Proc to pomaha:**
 1. **Rizeni procesu:** Kazda vrstva ma jasneho ownera a jasne gatekeeping podminky. Lead nemuze preskocit vrstvu.
 2. **Auditovatelnost:** V kazdem okamziku je zrejme, ve ktere vrstve a stavu se lead nachazi. Audit trail je jednoznacny.
-3. **Budouci orchestrace:** Vrstvy umoznuji nezavisle skalovani (napr. paralelni enrichment, batch preview generovani, queue-based outreach). Orchestrator (C-02) muze ridit kazdou vrstvu jako nezavisly krok.
+3. **Budouci orchestrace:** Vrstvy umoznuji nezavisle skalovani (napr. paralelni enrichment, batch preview generovani, queue-based outreach). Orchestrator (CS2) muze ridit kazdou vrstvu jako nezavisly krok.
 
 ---
 
@@ -335,12 +335,12 @@ NONE, REPLY, BOUNCE, OOO, UNKNOWN
 | email_reply_type=BOUNCE | BOUNCED | Dnes bounce neaktualizuje outreach_stage (issue M-8) |
 | email_reply_type=OOO | *(neni lifecycle stav)* | OOO je metadata, ne lifecycle zmena |
 
-**Downstream sales outcomes (mimo scope C-01):**
+**Downstream sales outcomes (mimo scope CS1):**
 
 | Current field.value | Pozice v lifecycle | Poznamka |
 |---------------------|-------------------|----------|
-| outreach_stage=WON | Downstream po REPLIED | Obchodni vysledek — lead projevil zajem. Neni soucasti canonical lifecycle C-01; zustava jako auxiliary hodnota v outreach_stage. |
-| outreach_stage=LOST | Downstream po REPLIED | Obchodni vysledek — lead odmitnul. Neni soucasti canonical lifecycle C-01; zustava jako auxiliary hodnota v outreach_stage. |
+| outreach_stage=WON | Downstream po REPLIED | Obchodni vysledek — lead projevil zajem. Neni soucasti canonical lifecycle CS1; zustava jako auxiliary hodnota v outreach_stage. |
+| outreach_stage=LOST | Downstream po REPLIED | Obchodni vysledek — lead odmitnul. Neni soucasti canonical lifecycle CS1; zustava jako auxiliary hodnota v outreach_stage. |
 
 #### 10.3 Nesoulady a naming konflikty
 
@@ -377,7 +377,7 @@ Dokud neni implementovan sloupec `lifecycle_state`, lifecycle stav se **odhaduje
 14. lead_stage = NEW                               → RAW_IMPORTED *
 ```
 
-**Poznamka k outreach_stage WON/LOST:** Tyto hodnoty existuji v aktualnim systemu, ale nejsou soucasti canonical lifecycle C-01. Pokud outreach_stage=WON nebo LOST, derivace vraci REPLIED (lead odpoveděl; WON/LOST je downstream obchodni vyhodnoceni).
+**Poznamka k outreach_stage WON/LOST:** Tyto hodnoty existuji v aktualnim systemu, ale nejsou soucasti canonical lifecycle CS1. Pokud outreach_stage=WON nebo LOST, derivace vraci REPLIED (lead odpoveděl; WON/LOST je downstream obchodni vyhodnoceni).
 
 **Omezeni fallback mappingu:**
 

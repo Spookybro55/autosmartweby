@@ -1,10 +1,10 @@
-# Task Record: C-03
+# Task Record: CS3
 
 ## Metadata
 
 | Pole | Hodnota |
 |------|---------|
-| **Task ID** | C-03 |
+| **Task ID** | CS3 |
 | **Title** | Definovat idempotency keys, retry politiku a dead-letter handling |
 | **Owner** | Claude |
 | **Status** | done |
@@ -13,7 +13,7 @@
 
 ## Scope
 
-Reliability vrstva nad C-02 orchestratorem. Definuje idempotency key pro kazdy automaticky krok, retry matici (transient/permanent/ambiguous failures, max_attempts, backoff), dead-letter handling v _asw_logs, locking pravidla pro LockService. Specifikace — ne implementace.
+Reliability vrstva nad CS2 orchestratorem. Definuje idempotency key pro kazdy automaticky krok, retry matici (transient/permanent/ambiguous failures, max_attempts, backoff), dead-letter handling v _asw_logs, locking pravidla pro LockService. Specifikace — ne implementace.
 
 ## Code Changes
 
@@ -25,8 +25,8 @@ Reliability vrstva nad C-02 orchestratorem. Definuje idempotency key pro kazdy a
 
 | Dokument | Typ zmeny | Proc |
 |----------|-----------|------|
-| docs/24-automation-workflows.md | modified | Pridana kompletni C-03 reliability specifikace (10 sekci) |
-| docs/20-current-state.md | modified | Zminka o existenci C-03 specifikace |
+| docs/24-automation-workflows.md | modified | Pridana kompletni CS3 reliability specifikace (10 sekci) |
+| docs/20-current-state.md | modified | Zminka o existenci CS3 specifikace |
 
 ## Contracts Changed
 
@@ -68,5 +68,5 @@ Autoritativni reliability specifikace v docs/24-automation-workflows.md obsahuji
 
 C-04 (Sendability gate) muze vyuzit idempotency key design pro send_email.
 C-05 (Outbound queue) prebira retry matici pro process_email_queue.
-C-06 (Provider abstraction) mapuje provider-specific errory na failure classes z C-03.
+C-06 (Provider abstraction) mapuje provider-specific errory na failure classes z CS3.
 C-09 (Exception queue) formalizuje operator workflow pro dead-letter resolution.

@@ -106,11 +106,11 @@ Mezi raw vstupem a LEADS zapisem bezi normalizacni vrstva. Kontrakt: `docs/contr
 
 ---
 
-## Workflow Orchestrator — C-02
+## Workflow Orchestrator — CS2
 
-> **Autoritativni specifikace.** Definuje logickou orchestracni vrstvu nad lifecycle state machine (C-01).
-> **Task ID:** C-02
-> **Dependency:** C-01 (canonical lifecycle_state)
+> **Autoritativni specifikace.** Definuje logickou orchestracni vrstvu nad lifecycle state machine (CS1).
+> **Task ID:** CS2
+> **Dependency:** CS1 (canonical lifecycle_state)
 > **Vytvoreno:** 2026-04-05
 
 ---
@@ -126,7 +126,7 @@ Mezi raw vstupem a LEADS zapisem bezi normalizacni vrstva. Kontrakt: `docs/contr
 
 **Co orchestrator NERESI:**
 - Neimplementuje plny workflow engine ani runtime (to je implementacni ukol, ne spec).
-- Neimplementuje retry/idempotency politiky (C-03).
+- Neimplementuje retry/idempotency politiky (CS3).
 - Neimplementuje sendability gate (C-04).
 - Neimplementuje outbound queue (C-05).
 - Neimplementuje provider abstraction (C-06).
@@ -144,7 +144,7 @@ Orchestrator rozhoduje vzdy nad `effective_lifecycle_state`, ktery se urcuje tak
 effective_lifecycle_state =
   IF sloupec lifecycle_state existuje AND neni prazdny
     THEN stored lifecycle_state            (primy zdroj)
-    ELSE best-effort transitional fallback mapping podle C-01 sekce 10.4
+    ELSE best-effort transitional fallback mapping podle CS1 sekce 10.4
          (derivace z lead_stage, preview_stage, outreach_stage, email_reply_type)
 ```
 
@@ -282,7 +282,7 @@ Pravidla:
     error_field:          string   // Kam se zapise chybova informace
   }
   write_targets:      string[]     // LEADS sloupce, do kterych step zapisuje
-  retry_eligibility:  string       // Popis retry chovani (handoff na C-03)
+  retry_eligibility:  string       // Popis retry chovani (handoff na CS3)
   observability: {
     log_level:        string       // INFO / WARN / ERROR
     log_fields:       string[]     // Co se loguje do _asw_logs
@@ -337,7 +337,7 @@ failure_output:     {
 write_targets:      ["template_type", "preview_slug", "preview_brief_json",
                      "preview_stage", "email_subject_draft", "email_body_draft",
                      "outreach_stage", "personalization_level", "last_processed_at"]
-retry_eligibility:  "Bezpecne opakovatelne — brief se prepise. Handoff na C-03 pro retry politiku."
+retry_eligibility:  "Bezpecne opakovatelne — brief se prepise. Handoff na CS3 pro retry politiku."
 observability:      { log_level: "INFO", log_fields: ["lead_id", "template_type",
                       "personalization_level", "dry_run"] }
 ```
@@ -364,7 +364,7 @@ failure_output:     {
 }
 write_targets:      ["outreach_stage", "email_sync_status", "last_email_sent_at",
                      "email_last_error"]
-retry_eligibility:  "Opatrne — double-send guard nutny (kontrola outreach_stage). Handoff na C-03."
+retry_eligibility:  "Opatrne — double-send guard nutny (kontrola outreach_stage). Handoff na CS3."
 observability:      { log_level: "INFO", log_fields: ["lead_id", "email", "method (draft/send)"] }
 ```
 
@@ -678,10 +678,10 @@ Legenda:
 
 #### 10.2 Current state vs proposed target
 
-| Oblast | Current state | Proposed target (C-02) |
+| Oblast | Current state | Proposed target (CS2) |
 |--------|--------------|----------------------|
 | **Rozhodovaci logika** | Rozptylena v kazde funkci; kazda funkce si sama overuje stav a rozhoduje | Orchestrator spec definuje rozhodovaci pravidla centralne; funkce implementuji kroky |
-| **State transitions** | Pres lead_stage / preview_stage / outreach_stage nezavisle | Pres canonical lifecycle_state (C-01); auxiliary fields zachovany |
+| **State transitions** | Pres lead_stage / preview_stage / outreach_stage nezavisle | Pres canonical lifecycle_state (CS1); auxiliary fields zachovany |
 | **Event tracking** | aswLog_ do _asw_logs (timestamp, level, function, lead_id, message, payload) | Rozsireny payload v _asw_logs o run_id, event_name, state_before, state_after, outcome |
 | **Ingest pipeline** | Neexistuje jako samostatny krok; qualifyLeads() dela vse | Specifikovany kroky RAW→NORMALIZED→DEDUPED→WEB_CHECKED (future A-stream) |
 | **Anti-cycling** | preview_stage guard (skip if already BRIEF_READY+) + dedupe_flag guard | Formalni preconditions per step + last_processed_at + batch run_id |
@@ -704,36 +704,36 @@ Legenda:
 
 #### 10.4 Co bude potrebovat navazny task, ale zatim se NEimplementuje
 
-| Task | Co potrebuje od C-02 | Stav |
+| Task | Co potrebuje od CS2 | Stav |
 |------|---------------------|------|
-| C-03 (Idempotency & retry) | Step kontrakt definuje retry_eligibility per step; C-03 definuje presne politiky | Handoff pripraveny |
+| CS3 (Idempotency & retry) | Step kontrakt definuje retry_eligibility per step; CS3 definuje presne politiky | Handoff pripraveny |
 | C-04 (Sendability gate) | Orchestrator definuje OUTREACH_READY preconditions; C-04 je formalizuje | Handoff pripraveny |
 | C-05 (Outbound queue) | EMAIL_QUEUED stav specifikovan; C-05 implementuje frontu a bulk send | Handoff pripraveny |
 | C-06 (Provider abstraction) | Step kontrakt odděluje akci od providera; C-06 abstrahuje GmailApp/ESP | Handoff pripraveny |
-| C-08 (Follow-up engine) | REPLIED terminal v C-01; follow-up je downstream proces | Mimo scope C-02 |
+| C-08 (Follow-up engine) | REPLIED terminal v CS1; follow-up je downstream proces | Mimo scope CS2 |
 | C-09 (Exception queue) | FAILED review state a resolution paths specifikovany; C-09 formalizuje queue | Handoff pripraveny |
 
 ---
 
-## Reliability & Idempotency — C-03
+## Reliability & Idempotency — CS3
 
 > **Autoritativni specifikace.** Definuje idempotency keys, retry politiku, dead-letter handling a locking pro vsechny automaticke workflow kroky.
-> **Task ID:** C-03
-> **Dependency:** C-01 (canonical lifecycle_state), C-02 (orchestrator model, step contract, run history)
+> **Task ID:** CS3
+> **Dependency:** CS1 (canonical lifecycle_state), CS2 (orchestrator model, step contract, run history)
 > **Vytvoreno:** 2026-04-05
 
 ---
 
 ### 1. Ucel a scope
 
-**Co C-03 resi:**
+**Co CS3 resi:**
 - Idempotency key pro kazdy automaticky krok — co dela operaci unikatni a jak se detekuje duplikat.
 - Retry politiku — kolikrat, s jakym backoffem, pro jake typy failu.
 - Dead-letter handling — kam jdou kroky po vycerpani pokusu, jak se dohledaji.
 - Locking pravidla — jak zabranit soubehu (double-run) pri concurrent triggeru.
 - Formalni oddeleni run correlation, idempotency, lock a retry jako nezavislych vrstev.
 
-**Co C-03 NERESI:**
+**Co CS3 NERESI:**
 - Neimplementuje outbound queue schema (C-05).
 - Neimplementuje provider abstraction (C-06).
 - Neimplementuje full exception queue UX ani resolution workflow (C-09).
@@ -741,19 +741,19 @@ Legenda:
 - Nepridava novou infrastrukturu (message bus, distributed lock) — pracuje s Apps Script LockService + Sheets.
 - Neimplementuje runtime kod — toto je specifikace.
 
-**Vztah k C-02:**
-C-02 definuje orchestrator model a step contract s polem `retry_eligibility` per step. C-03 formalizuje retry_eligibility do konkretni matice, definuje idempotency keys, ktere C-02 nezavedl, a pridava dead-letter design. C-03 je reliability vrstva NAD C-02 orchestratorem.
+**Vztah k CS2:**
+CS2 definuje orchestrator model a step contract s polem `retry_eligibility` per step. CS3 formalizuje retry_eligibility do konkretni matice, definuje idempotency keys, ktere CS2 nezavedl, a pridava dead-letter design. CS3 je reliability vrstva NAD CS2 orchestratorem.
 
 **Vztah k budoucim taskum:**
-- C-05 (Outbound queue): prebira retry matici pro email send krok; queue schema je scope C-05, ne C-03.
-- C-06 (Provider abstraction): C-03 definuje failure classes nezavisle na provideru; C-06 mapuje konkretni provider errory na tyto classes.
-- C-09 (Exception queue): C-03 definuje dead-letter zaznam; C-09 formalizuje operator workflow pro resolvovani dead-letter.
+- C-05 (Outbound queue): prebira retry matici pro email send krok; queue schema je scope C-05, ne CS3.
+- C-06 (Provider abstraction): CS3 definuje failure classes nezavisle na provideru; C-06 mapuje konkretni provider errory na tyto classes.
+- C-09 (Exception queue): CS3 definuje dead-letter zaznam; C-09 formalizuje operator workflow pro resolvovani dead-letter.
 
 ---
 
 ### 2. Reliability principles
 
-1. **run_id != idempotency key.** run_id (z C-02) je korelacni identifikator jednoho vyvolani funkce. Idempotency key identifikuje konkretni operaci a jeji side effect. Jeden run_id muze obsahovat desitky ruznych idempotency keys (jeden per lead per step).
+1. **run_id != idempotency key.** run_id (z CS2) je korelacni identifikator jednoho vyvolani funkce. Idempotency key identifikuje konkretni operaci a jeji side effect. Jeden run_id muze obsahovat desitky ruznych idempotency keys (jeden per lead per step).
 
 2. **Idempotency je per step, per side effect.** Kazdy krok ma vlastni idempotency key vztazenou k jeho specificke operaci. generate_brief a send_email maji RUZNE idempotency keys i pro stejny lead.
 
@@ -767,13 +767,13 @@ C-02 definuje orchestrator model a step contract s polem `retry_eligibility` per
 
 7. **Manual action neni automaticky retry.** Operatorove rucni akce (menu items) NEJSOU subject retry politiky. Retry se tyka jen automatickych/trigger-driven kroku.
 
-8. **State guard je prvni linie obrany.** Pred kontrolou idempotency key musi krok overit lifecycle preconditions (C-02 step contract). State guard je efektivnejsi nez key lookup — vetsi rychlost, nizsi komplexita.
+8. **State guard je prvni linie obrany.** Pred kontrolou idempotency key musi krok overit lifecycle preconditions (CS2 step contract). State guard je efektivnejsi nez key lookup — vetsi rychlost, nizsi komplexita.
 
 ---
 
 ### 3. Katalog automatickych kroku
 
-Kroky relevantni pro C-03 reliability design. Vychazi z realneho kodu (apps-script/) a C-02 step contract.
+Kroky relevantni pro CS3 reliability design. Vychazi z realneho kodu (apps-script/) a CS2 step contract.
 
 | # | step_name | current_or_target | trigger_source | subject_type | side_effect_type | fully_automatic |
 |---|-----------|-------------------|----------------|--------------|------------------|-----------------|
@@ -790,7 +790,7 @@ Kroky relevantni pro C-03 reliability design. Vychazi z realneho kodu (apps-scri
 | S11 | dedupe_lead | target | auto (future ingest) | lead | sheet write: dedupe_flag | Ano (budouci) |
 | S12 | process_email_queue | target | scheduled (future C-05) | lead (batch) | Gmail send (IREVERZIBILNI) + sheet write | Ano (budouci) |
 
-**Poznamka:** S1, S4, S5, S6, S7, S9 jsou manual-trigger kroky. C-03 retry matice se na ne vztahuje jen v kontextu ROW-LEVEL failu UVNITR batch runu (napr. qualifyLeads zpracovava 200 leadu, 1 failne — retry se tyka toho 1 leadu, ne celeho batch runu). Rucni re-spusteni celeho menu itemu je rozhodnuti operatora, ne automaticky retry.
+**Poznamka:** S1, S4, S5, S6, S7, S9 jsou manual-trigger kroky. CS3 retry matice se na ne vztahuje jen v kontextu ROW-LEVEL failu UVNITR batch runu (napr. qualifyLeads zpracovava 200 leadu, 1 failne — retry se tyka toho 1 leadu, ne celeho batch runu). Rucni re-spusteni celeho menu itemu je rozhodnuti operatora, ne automaticky retry.
 
 ---
 
@@ -819,9 +819,9 @@ Dva idempotency mody:
 
 | Pojem | Co resi | Priklad |
 |-------|---------|---------|
-| **run_id** (C-02) | Korelace: "tento beh processPreviewQueue" | `run-processPreviewQueue-20260405-143000` — 50 leadu v jednom behu |
-| **idempotency key** (C-03) | Deduplikace: "tato operace pro tento lead s timto obsahem" | `brief:ASW-001` nebo `send:ASW-001:{hash}` |
-| **LockService** (C-03 sekce 7) | Soubehovost: "nikdo jiny nesmi bezet soucasne" | ScriptLock.tryLock(10000) na processPreviewQueue |
+| **run_id** (CS2) | Korelace: "tento beh processPreviewQueue" | `run-processPreviewQueue-20260405-143000` — 50 leadu v jednom behu |
+| **idempotency key** (CS3) | Deduplikace: "tato operace pro tento lead s timto obsahem" | `brief:ASW-001` nebo `send:ASW-001:{hash}` |
+| **LockService** (CS3 sekce 7) | Soubehovost: "nikdo jiny nesmi bezet soucasne" | ScriptLock.tryLock(10000) na processPreviewQueue |
 
 Kazda vrstva resi jiny problem. Zadna nenahrazuje ostatni.
 
@@ -915,7 +915,7 @@ retry_count pro (lead_id, step_name) =
 
 Dead-letter zaznamy se zapisuji do dedickovaneho `_asw_dead_letters` sheetu. Tento sheet je **append-only** a **nikdy se neprunuje**.
 
-`_asw_logs` (C-02 run history) zustava source of truth pro bezne run zaznamy (outcome=success/failed/skipped/blocked/waiting_review) a zachovava si existujici pruning (1000 radku pri >5000). Dead-letter zaznamy do _asw_logs NEPATRI.
+`_asw_logs` (CS2 run history) zustava source of truth pro bezne run zaznamy (outcome=success/failed/skipped/blocked/waiting_review) a zachovava si existujici pruning (1000 radku pri >5000). Dead-letter zaznamy do _asw_logs NEPATRI.
 
 **Proc separatni sheet, ne _asw_logs:**
 - _asw_logs ma log rotation (Helpers.gs:300-303): prune 1000 radku pri >5000. Otevrene dead-letter zaznamy by mohly byt smazany pred resolution — to je neprijatelne pro audit.
@@ -1174,7 +1174,7 @@ Sync je nativne idempotentni — prepisuje metadata aktualnimi hodnotami. Gmail 
 | Retry count tracking | Zadny retry counter; FAILED leady se retryuji bez limitu | Mozna nekonecna smycka pro permanentni fail | Medium — derivovat z _asw_logs nebo pridat runtime counter |
 | Dead-letter recording | Chybi `_asw_dead_letters` sheet a dead-letter zapis | FAILED leady nejsou eskalovany; zustavaji v FAILED navzdy | Low — vytvorit sheet (analogicky k ensureLogSheet_) + zapis pri max_attempts |
 | max_attempts enforcement | Neexistuje; FAILED lead je retryovan pri kazdem cyklu | Zbytecne CPU; trigger budget spotrebovava | Medium — pridat retry_count check pred zpracovanim |
-| outcome pole v logu | _asw_logs nema structured outcome (C-02 design, neimplementovano) | Run history dohledavani neni mozne | Medium — implementovat C-02 run history contract |
+| outcome pole v logu | _asw_logs nema structured outcome (CS2 design, neimplementovano) | Run history dohledavani neni mozne | Medium — implementovat CS2 run history contract |
 
 #### 10.3 Co je target-state design
 
@@ -1194,9 +1194,9 @@ Sync je nativne idempotentni — prepisuje metadata aktualnimi hodnotami. Gmail 
 
 #### 10.5 Casti zavisle na dalsich taskech
 
-| C-03 cast | Zavisi na | Task |
+| CS3 cast | Zavisi na | Task |
 |-----------|-----------|------|
-| Email send idempotency key lookup v _asw_logs | C-02 run history implementace (structured payload) | Implementacni task |
+| Email send idempotency key lookup v _asw_logs | CS2 run history implementace (structured payload) | Implementacni task |
 | process_email_queue retry (S12) | C-05 outbound queue schema | C-05 |
 | Provider-specific error classification | C-06 provider abstraction | C-06 |
 | Dead-letter resolution operator workflow | C-09 exception queue UX | C-09 |
