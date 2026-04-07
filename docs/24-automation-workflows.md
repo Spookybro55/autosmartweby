@@ -106,11 +106,11 @@ Mezi raw vstupem a LEADS zapisem bezi normalizacni vrstva. Kontrakt: `docs/contr
 
 ---
 
-## Workflow Orchestrator — C-02
+## Workflow Orchestrator — CS2
 
-> **Autoritativni specifikace.** Definuje logickou orchestracni vrstvu nad lifecycle state machine (C-01).
-> **Task ID:** C-02
-> **Dependency:** C-01 (canonical lifecycle_state)
+> **Autoritativni specifikace.** Definuje logickou orchestracni vrstvu nad lifecycle state machine (CS1).
+> **Task ID:** CS2
+> **Dependency:** CS1 (canonical lifecycle_state)
 > **Vytvoreno:** 2026-04-05
 
 ---
@@ -126,7 +126,7 @@ Mezi raw vstupem a LEADS zapisem bezi normalizacni vrstva. Kontrakt: `docs/contr
 
 **Co orchestrator NERESI:**
 - Neimplementuje plny workflow engine ani runtime (to je implementacni ukol, ne spec).
-- Neimplementuje retry/idempotency politiky (C-03).
+- Neimplementuje retry/idempotency politiky (CS3).
 - Neimplementuje sendability gate (C-04).
 - Neimplementuje outbound queue (C-05).
 - Neimplementuje provider abstraction (C-06).
@@ -144,7 +144,7 @@ Orchestrator rozhoduje vzdy nad `effective_lifecycle_state`, ktery se urcuje tak
 effective_lifecycle_state =
   IF sloupec lifecycle_state existuje AND neni prazdny
     THEN stored lifecycle_state            (primy zdroj)
-    ELSE best-effort transitional fallback mapping podle C-01 sekce 10.4
+    ELSE best-effort transitional fallback mapping podle CS1 sekce 10.4
          (derivace z lead_stage, preview_stage, outreach_stage, email_reply_type)
 ```
 
@@ -282,7 +282,7 @@ Pravidla:
     error_field:          string   // Kam se zapise chybova informace
   }
   write_targets:      string[]     // LEADS sloupce, do kterych step zapisuje
-  retry_eligibility:  string       // Popis retry chovani (handoff na C-03)
+  retry_eligibility:  string       // Popis retry chovani (handoff na CS3)
   observability: {
     log_level:        string       // INFO / WARN / ERROR
     log_fields:       string[]     // Co se loguje do _asw_logs
@@ -337,7 +337,7 @@ failure_output:     {
 write_targets:      ["template_type", "preview_slug", "preview_brief_json",
                      "preview_stage", "email_subject_draft", "email_body_draft",
                      "outreach_stage", "personalization_level", "last_processed_at"]
-retry_eligibility:  "Bezpecne opakovatelne — brief se prepise. Handoff na C-03 pro retry politiku."
+retry_eligibility:  "Bezpecne opakovatelne — brief se prepise. Handoff na CS3 pro retry politiku."
 observability:      { log_level: "INFO", log_fields: ["lead_id", "template_type",
                       "personalization_level", "dry_run"] }
 ```
@@ -364,7 +364,7 @@ failure_output:     {
 }
 write_targets:      ["outreach_stage", "email_sync_status", "last_email_sent_at",
                      "email_last_error"]
-retry_eligibility:  "Opatrne — double-send guard nutny (kontrola outreach_stage). Handoff na C-03."
+retry_eligibility:  "Opatrne — double-send guard nutny (kontrola outreach_stage). Handoff na CS3."
 observability:      { log_level: "INFO", log_fields: ["lead_id", "email", "method (draft/send)"] }
 ```
 
@@ -678,10 +678,10 @@ Legenda:
 
 #### 10.2 Current state vs proposed target
 
-| Oblast | Current state | Proposed target (C-02) |
+| Oblast | Current state | Proposed target (CS2) |
 |--------|--------------|----------------------|
 | **Rozhodovaci logika** | Rozptylena v kazde funkci; kazda funkce si sama overuje stav a rozhoduje | Orchestrator spec definuje rozhodovaci pravidla centralne; funkce implementuji kroky |
-| **State transitions** | Pres lead_stage / preview_stage / outreach_stage nezavisle | Pres canonical lifecycle_state (C-01); auxiliary fields zachovany |
+| **State transitions** | Pres lead_stage / preview_stage / outreach_stage nezavisle | Pres canonical lifecycle_state (CS1); auxiliary fields zachovany |
 | **Event tracking** | aswLog_ do _asw_logs (timestamp, level, function, lead_id, message, payload) | Rozsireny payload v _asw_logs o run_id, event_name, state_before, state_after, outcome |
 | **Ingest pipeline** | Neexistuje jako samostatny krok; qualifyLeads() dela vse | Specifikovany kroky RAW→NORMALIZED→DEDUPED→WEB_CHECKED (future A-stream) |
 | **Anti-cycling** | preview_stage guard (skip if already BRIEF_READY+) + dedupe_flag guard | Formalni preconditions per step + last_processed_at + batch run_id |
@@ -704,13 +704,13 @@ Legenda:
 
 #### 10.4 Co bude potrebovat navazny task, ale zatim se NEimplementuje
 
-| Task | Co potrebuje od C-02 | Stav |
+| Task | Co potrebuje od CS2 | Stav |
 |------|---------------------|------|
-| C-03 (Idempotency & retry) | Step kontrakt definuje retry_eligibility per step; C-03 definuje presne politiky | Handoff pripraveny |
+| CS3 (Idempotency & retry) | Step kontrakt definuje retry_eligibility per step; CS3 definuje presne politiky | Handoff pripraveny |
 | C-04 (Sendability gate) | Orchestrator definuje OUTREACH_READY preconditions; C-04 je formalizuje | Handoff pripraveny |
 | C-05 (Outbound queue) | EMAIL_QUEUED stav specifikovan; C-05 implementuje frontu a bulk send | Handoff pripraveny |
 | C-06 (Provider abstraction) | Step kontrakt odděluje akci od providera; C-06 abstrahuje GmailApp/ESP | Handoff pripraveny |
-| C-08 (Follow-up engine) | REPLIED terminal v C-01; follow-up je downstream proces | Mimo scope C-02 |
+| C-08 (Follow-up engine) | REPLIED terminal v CS1; follow-up je downstream proces | Mimo scope CS2 |
 | C-09 (Exception queue) | FAILED review state a resolution paths specifikovany; C-09 formalizuje queue | Handoff pripraveny |
 
 ---

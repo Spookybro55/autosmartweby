@@ -1,10 +1,10 @@
-# Task Record: C-01
+# Task Record: CS1
 
 ## Metadata
 
 | Pole | Hodnota |
 |------|---------|
-| **Task ID** | C-01 |
+| **Task ID** | CS1 |
 | **Title** | Definovat end-to-end lifecycle leadu jako state machine |
 | **Owner** | Claude |
 | **Status** | done |
@@ -13,7 +13,7 @@
 
 ## Scope
 
-Definice jedineho kanonicky lifecycle stavu (`lifecycle_state`) pro kazdy lead v systemu. Pokryva cestu od importu az po reakci leadu (REPLIED/BOUNCED/UNSUBSCRIBED) nebo diskvalifikaci. WON/LOST jsou downstream sales outcome mimo scope C-01. Specifikace — ne implementace.
+Definice jedineho kanonicky lifecycle stavu (`lifecycle_state`) pro kazdy lead v systemu. Pokryva cestu od importu az po reakci leadu (REPLIED/BOUNCED/UNSUBSCRIBED) nebo diskvalifikaci. WON/LOST jsou downstream sales outcome mimo scope CS1. Specifikace — ne implementace.
 
 ## Code Changes
 
@@ -60,5 +60,5 @@ Autoritativni specifikace v docs/21-business-process.md obsahujici:
 
 ## Next Dependency
 
-C-02 (Workflow orchestrator design) zavisi na teto state machine.
-C-03 (Idempotency & retry pravidla) zavisi na FAILED stavu a retry semantice.
+CS2 (Workflow orchestrator design) zavisi na teto state machine.
+CS3 (Idempotency & retry pravidla) zavisi na FAILED stavu a retry semantice.

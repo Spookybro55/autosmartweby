@@ -1,10 +1,10 @@
-# Task Record: C-02
+# Task Record: CS2
 
 ## Metadata
 
 | Pole | Hodnota |
 |------|---------|
-| **Task ID** | C-02 |
+| **Task ID** | CS2 |
 | **Title** | Navrhnout workflow orchestrator — co spousti co po zmene stavu leadu |
 | **Owner** | Claude |
 | **Status** | done |
@@ -13,7 +13,7 @@
 
 ## Scope
 
-Logicka orchestracni vrstva nad C-01 lifecycle. Definuje co se stane po kazde zmene lifecycle_state, formalni workflow step kontrakt, event katalog, run history design a orchestration model (hybrid: poll + manual + reactive). Specifikace — ne implementace.
+Logicka orchestracni vrstva nad CS1 lifecycle. Definuje co se stane po kazde zmene lifecycle_state, formalni workflow step kontrakt, event katalog, run history design a orchestration model (hybrid: poll + manual + reactive). Specifikace — ne implementace.
 
 ## Code Changes
 
@@ -58,10 +58,10 @@ Autoritativni orchestrator specifikace v docs/24-automation-workflows.md obsahuj
 - Webhook callback (PREVIEW_GENERATING→PREVIEW_APPROVED) neni testovany v produkci.
 - Event payloady jsou specifikace, ne implementovany kod.
 - Run ID korelace v _asw_logs neni dosud implementovana.
-- Task ID C-02 vs C2: CLAUDE.md (radek 34) definuje naming `docs/30-task-records/{TASK_ID}.md` bez omezeni formatu TASK_ID. Script `create-task-record.mjs` (radek 25) pouziva `${taskId}.md` bez validace. Registry script (radek 61-63) cte vsechny `.md` soubory a extrahuje Task ID z metadat — rozlisuje C2 a C-02 jako odlisne zaznamy. Oba formaty jsou platne. Zadna dvojznacnost v toolingu ani v registry.
+
 
 ## Next Dependency
 
-C-03 (Idempotency & retry) zavisi na step kontraktu a retry_eligibility definici.
+CS3 (Idempotency & retry) zavisi na step kontraktu a retry_eligibility definici.
 C-05 (Outbound queue) zavisi na EMAIL_QUEUED specifikaci.
 C-09 (Exception queue) zavisi na FAILED resolution paths.
