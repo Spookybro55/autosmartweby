@@ -91,6 +91,7 @@ They will become physically observable in LEADS only after the `lifecycle_state`
 
 ---
 
+
 ### 1. Ucel a scope
 
 **Co tato state machine resi:**
@@ -279,7 +280,7 @@ Riziko: Odeslani emailu nekvalifikovanemu leadu (napr. firme s dobrym webem, dup
 
 **8.2 DISQUALIFIED → OUTREACH_READY (zakazano)**
 
-Proc je zakazany: Diskvalifikovany lead NESMI byt primo zarazen do outreach. DISQUALIFIED je terminal stav (sekce 5) — z nej nevede zadny povoleny lifecycle prechod. Pokud by se data leadu zmenila (napr. web prestane fungovat), je to novy podnet mimo tento lifecycle, ne pokracovani stavajiciho.
+Proc je zakazany: DISQUALIFIED je terminal stav (sekce 5) — z nej nevede zadny povoleny lifecycle prechod. Primo ani neprimo se z DISQUALIFIED nelze dostat do OUTREACH_READY ani do zadneho jineho stavu. Pokud se okolnosti zmeni (napr. web firmy prestane fungovat), je to novy podnet mimo tento lifecycle, ne pokracovani stavajiciho.
 
 Riziko: Obejiti kvalifikace by zpusobilo:
 - Osloveni firem, ktere nespadaji do cilove skupiny (maji web, nejsou zivnostnici)
