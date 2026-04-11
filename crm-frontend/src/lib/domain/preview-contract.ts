@@ -283,4 +283,271 @@ export interface TargetRenderResponseError {
 
 export type TargetRenderResponse = TargetRenderResponseOk | TargetRenderResponseError;
 
-export type PreviewRenderResponse = TargetRenderResponse;
+// ============================================================================
+// PreviewRenderResponse alias — REMOVED
+// Previously: export type PreviewRenderResponse = TargetRenderResponse;
+//
+// Removed because it was misleading: docs recommend Minimal Compatible first,
+// Target only after MVP. A generic alias pointing to Target could confuse
+// downstream tasks into treating Target as the current runtime contract.
+//
+// Downstream tasks should reference explicitly:
+//   - MinimalRenderResponse  (for B-04, first implementation)
+//   - TargetRenderResponse   (for post-MVP iteration)
+// ============================================================================
+
+// ============================================================================
+// Section Render Mapping Contract — PROPOSED CONTRACT
+//
+// Defines which PreviewBrief fields feed each render section, including
+// primary sources, fallbacks, renderability conditions, and degraded states.
+//
+// This is a SOURCE-OF-TRUTH SPECIFICATION for downstream renderer tasks.
+// The actual rendering logic is NOT part of B-01 — it belongs to B-02+.
+//
+// Renderability tiers:
+//   FULL      — all primary fields present and non-empty
+//   DEGRADED  — section renders with reduced content (fallback used)
+//   HIDDEN    — section must be omitted from output
+//
+// A section is HIDDEN when it is not listed in suggested_sections OR
+// when its hard-required fields are all empty.
+// ============================================================================
+
+export type SectionRenderability = 'full' | 'degraded' | 'hidden';
+
+/**
+ * Contract for mapping a PreviewBrief field to a render section.
+ * PROPOSED CONTRACT — implementation is a downstream task.
+ */
+export interface SectionFieldMapping {
+  /** Brief field name */
+  readonly field: keyof PreviewBrief;
+  /** Role of this field for the section */
+  readonly role: 'primary' | 'fallback';
+  /** Is this field required for the section to render at all? */
+  readonly required_for_render: boolean;
+}
+
+/**
+ * Contract for one render section's data dependencies.
+ * PROPOSED CONTRACT — implementation is a downstream task.
+ */
+export interface SectionMappingContract {
+  /** Section identifier */
+  readonly section: SectionId;
+  /** Fields that feed this section, ordered by priority */
+  readonly fields: readonly SectionFieldMapping[];
+  /** When is the section renderable at FULL quality? */
+  readonly full_when: string;
+  /** When does the section degrade? */
+  readonly degraded_when: string;
+  /** When must the section be hidden/omitted? */
+  readonly hidden_when: string;
+}
+
+/**
+ * PROPOSED CONTRACT — Brief → Render Section Mapping
+ *
+ * Source-of-truth specification. Renderer implementation must follow
+ * these rules. The mapping is based on the verified PreviewBrief shape
+ * and the verified suggested_sections logic in buildPreviewBrief_().
+ *
+ * IMPORTANT: A section is only considered for rendering if it appears
+ * in suggested_sections. This array is the primary gate. The field
+ * mappings below define what happens WITHIN a section that passed the gate.
+ */
+export const SECTION_MAPPING_CONTRACT: readonly SectionMappingContract[] = [
+  {
+    section: 'hero',
+    fields: [
+      { field: 'headline', role: 'primary', required_for_render: true },
+      { field: 'subheadline', role: 'primary', required_for_render: false },
+      { field: 'cta', role: 'primary', required_for_render: false },
+      { field: 'business_name', role: 'fallback', required_for_render: false },
+    ],
+    full_when: 'headline + subheadline + cta all non-empty',
+    degraded_when: 'subheadline empty → hero shows only H1; cta empty → fallback "Kontaktujte nás"',
+    hidden_when: 'headline empty (HARD FAIL — entire render rejected before this point)',
+  },
+  {
+    section: 'services',
+    fields: [
+      { field: 'key_benefits', role: 'primary', required_for_render: false },
+      { field: 'service_type', role: 'primary', required_for_render: false },
+      { field: 'segment', role: 'fallback', required_for_render: false },
+    ],
+    full_when: 'key_benefits non-empty array AND service_type non-empty',
+    degraded_when: 'key_benefits empty → section without benefit cards; service_type empty → generic heading',
+    hidden_when: 'not in suggested_sections (always included by GAS, so effectively never hidden)',
+  },
+  {
+    section: 'contact',
+    fields: [
+      { field: 'contact_phone', role: 'primary', required_for_render: false },
+      { field: 'contact_email', role: 'primary', required_for_render: false },
+      { field: 'contact_name', role: 'primary', required_for_render: false },
+      { field: 'cta', role: 'fallback', required_for_render: false },
+    ],
+    full_when: 'at least one of contact_phone or contact_email non-empty',
+    degraded_when: 'both phone and email empty → section shows only CTA text',
+    hidden_when: 'not in suggested_sections (always included by GAS, so effectively never hidden)',
+  },
+  {
+    section: 'location',
+    fields: [
+      { field: 'city', role: 'primary', required_for_render: true },
+      { field: 'area', role: 'primary', required_for_render: false },
+    ],
+    full_when: 'city non-empty AND area non-empty',
+    degraded_when: 'area empty → location shows only city',
+    hidden_when: 'not in suggested_sections — GAS adds only when city OR area non-empty',
+  },
+  {
+    section: 'reviews',
+    fields: [
+      { field: 'rating', role: 'primary', required_for_render: true },
+      { field: 'reviews_count', role: 'primary', required_for_render: false },
+    ],
+    full_when: 'rating non-empty AND numeric >= 3.5 AND reviews_count non-empty',
+    degraded_when: 'reviews_count empty → show rating without count',
+    hidden_when: 'not in suggested_sections — GAS adds only when rating >= 3.5',
+  },
+  {
+    section: 'faq',
+    fields: [
+      { field: 'pain_point', role: 'primary', required_for_render: true },
+      { field: 'service_type', role: 'fallback', required_for_render: false },
+      { field: 'segment', role: 'fallback', required_for_render: false },
+    ],
+    full_when: 'pain_point non-empty',
+    degraded_when: 'pain_point present but generic — section renders with generic FAQ',
+    hidden_when: 'not in suggested_sections — GAS adds only when pain_point non-empty',
+  },
+] as const;
+
+// ============================================================================
+// Preview Slug Contract — PROPOSED CONTRACT
+//
+// Defines the SOURCE-OF-TRUTH rules for preview_slug format, generation
+// constraints, and uniqueness guarantees. The actual slug generation
+// function (buildSlug_() in PreviewPipeline.gs) is the runtime
+// implementation — this contract specifies WHAT it must produce.
+//
+// VERIFIED IN REPO:
+//   - buildSlug_() exists in PreviewPipeline.gs
+//   - preview_slug is written to LEADS column
+//   - preview_slug is MISSING from webhook payload (known gap, fix = B-05)
+//
+// Classification:
+//   - Format/normalization rules = PROPOSED CONTRACT (formalized here)
+//   - Uniqueness/collision rules = PROPOSED CONTRACT (formalized here)
+//   - Runtime implementation = IMPLEMENTATION NOTE (not B-01 scope)
+// ============================================================================
+
+/**
+ * PROPOSED CONTRACT — Preview Slug Rules
+ *
+ * These rules define the contractual guarantees for preview_slug values.
+ * Any slug generator (current buildSlug_ or future replacement) MUST
+ * conform to these rules. Downstream tasks (renderer, URL routing) MAY
+ * rely on these guarantees.
+ */
+export interface PreviewSlugContract {
+  // --- Format rules ---
+
+  /**
+   * Slug format: lowercase alphanumeric + hyphens only.
+   * Regex: /^[a-z0-9]+(-[a-z0-9]+)*$/
+   * Min length: 3, Max length: 80.
+   */
+  readonly format: 'lowercase-hyphenated';
+
+  /**
+   * URL-safe: slug must be valid as a URL path segment without encoding.
+   * Only characters: a-z, 0-9, hyphen (-).
+   * No leading/trailing hyphens. No consecutive hyphens.
+   */
+  readonly url_safe: true;
+
+  /**
+   * Casing: always lowercase. Input is lowercased before any processing.
+   */
+  readonly casing: 'lowercase';
+
+  /**
+   * Separator: hyphen (-) only. Spaces, underscores, dots → hyphen.
+   */
+  readonly separator: '-';
+
+  /**
+   * Diacritics: removed (transliterated to ASCII).
+   * Czech-specific: ě→e, š→s, č→c, ř→r, ž→z, ý→y, á→a, í→i, é→e, ú→u, ů→u, ď→d, ť→t, ň→n.
+   * Other non-ASCII characters: removed.
+   */
+  readonly diacritics: 'transliterate-to-ascii';
+
+  /**
+   * Disallowed characters: anything not [a-z0-9-] after normalization
+   * is stripped (not replaced).
+   */
+  readonly disallowed_chars: 'strip';
+
+  // --- Composition rules ---
+
+  /**
+   * Slug is derived from: business_name + city (at minimum).
+   * IMPLEMENTATION NOTE: exact composition logic is in buildSlug_().
+   * Contract guarantees: slug contains business identity + locality.
+   */
+  readonly derived_from: 'business_name + city (minimum)';
+
+  // --- Stability rules ---
+
+  /**
+   * Slug is STABLE: once generated and written to LEADS, it MUST NOT
+   * change for the same lead. Re-running preview pipeline on an existing
+   * lead with a slug must preserve the original slug.
+   *
+   * IMPLEMENTATION NOTE: enforcement mechanism is a downstream task.
+   * This contract defines the guarantee, not the implementation.
+   */
+  readonly stable: true;
+
+  // --- Uniqueness rules ---
+
+  /**
+   * Slug MUST be unique across all LEADS rows.
+   * Collision resolution: append numeric suffix (-2, -3, ...).
+   * Max collision attempts: implementation-defined (recommended: 10).
+   *
+   * IMPLEMENTATION NOTE: collision detection mechanism (sheet scan,
+   * index, or DB lookup) is a downstream task.
+   */
+  readonly unique: true;
+
+  /**
+   * Collision resolution strategy.
+   * On collision: slug-2, slug-3, ... slug-N.
+   * Suffix starts at 2 (first instance has no suffix).
+   */
+  readonly collision_resolution: 'numeric-suffix';
+}
+
+/**
+ * PROPOSED CONTRACT — Canonical slug validation regex.
+ * Any slug that does not match this pattern is invalid.
+ *
+ * Rules encoded:
+ * - Lowercase alphanumeric and hyphens only
+ * - No leading/trailing hyphens
+ * - No consecutive hyphens
+ * - Length 3-80
+ */
+export const PREVIEW_SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){1,78}[a-z0-9]$/;
+
+/**
+ * PROPOSED CONTRACT — Slug length constraints.
+ */
+export const PREVIEW_SLUG_MIN_LENGTH = 3;
+export const PREVIEW_SLUG_MAX_LENGTH = 80;

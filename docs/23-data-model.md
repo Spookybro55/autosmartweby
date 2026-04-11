@@ -88,6 +88,21 @@ Formalni TypeScript kontrakt zije v `crm-frontend/src/lib/domain/preview-contrac
 - **preview_slug** — existuje v LEADS (generuje `buildSlug_()`), ale **CHYBI ve webhook payloadu** (`processPreviewQueue()` ho do payloadu nepridava). Fix je scope B-05.
 - **preview_quality_score** — scale formalne uzamcen na **0–1** (GAS porovnava `< 0.7` pro urceni needs_review).
 
+### Preview Slug Contract (B-01)
+
+Formalni pravidla pro preview_slug format jsou definovana v `preview-contract.ts`:
+- Lowercase, hyphen-separated, URL-safe: `/^[a-z0-9](...)[a-z0-9]$/`
+- Diakritika transliterovana do ASCII
+- Stabilni (po vygenerovani se nesmi menit)
+- Unikatni (kolize reseny numerickim suffixem)
+- Delka 3–80 znaku
+
+Implementace generatoru je v `buildSlug_()` — B-01 definuje pouze contractual rules.
+
+### Section Mapping Contract (B-01)
+
+Mapping brief → render sections je formalizovan v `preview-contract.ts` jako `SECTION_MAPPING_CONTRACT`. Kazda ze 6 sections (hero, services, contact, location, reviews, faq) ma specifikovane primary/fallback fields a renderability conditions (full/degraded/hidden).
+
 ### Preview-related LEADS sloupce a jejich stav
 
 | Sloupec | Kdo plni | Stav dnes |

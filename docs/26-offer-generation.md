@@ -56,16 +56,39 @@ Sample fixtures: `crm-frontend/src/lib/mock/preview-brief.minimal.json`, `previe
 
 2. **Recommended Target** — cistsi verze bez internich GAS metadat, s `contract_version` a strukturovanymi error kody. Ma prijit az po uspesnem MVP / E2E, protoze vyzaduje restrukturalizaci GAS payloadu (odstraneni internich poli, pridani contract_version, prejmenovani timestamp na requested_at).
 
+### Preview Slug Contract (B-01)
+
+Formalni pravidla pro `preview_slug` jsou definovana v `preview-contract.ts` jako `PreviewSlugContract` interface a `PREVIEW_SLUG_PATTERN` regex. Klicove garance:
+
+- **Format:** lowercase, hyphenated, URL-safe (`/^[a-z0-9](...)[a-z0-9]$/`)
+- **Diakritika:** transliterovana do ASCII (ceske znaky)
+- **Stabilita:** slug se po vygenerovani nesmi menit
+- **Unikatnost:** garantovana, kolize reseny numerickim suffixem (-2, -3, ...)
+- **Delka:** 3–80 znaku
+
+Samotna implementace slug generatoru (`buildSlug_()`) neni soucasti B-01 — kontrakt definuje pouze pravidla, ktera musi generator splnovat.
+
+### Section Mapping Contract (B-01)
+
+Explicitni mapping brief fields → render sections je definovan v `preview-contract.ts` jako `SECTION_MAPPING_CONTRACT`. Pro kazdou ze 6 sections specifikuje:
+- ktere fields ji napaji (primary / fallback)
+- kdy je section renderovatelna (full / degraded / hidden)
+- ktere fields jsou required pro render
+
+Gate pravidlo: section se renderuje pouze pokud je v `suggested_sections`. Field mapping rozhoduje o kvalite renderovani uvnitr section.
+
 ### Adoption path
 
 | Task | Co pouziva z B-01 |
 |------|-------------------|
-| B-02 | PreviewBrief + template_type + preview_slug |
+| B-02 | PreviewBrief + template_type + preview_slug + SECTION_MAPPING_CONTRACT |
 | B-03 | TemplateType (mapovani na render sablony) |
 | B-04 | MinimalRenderRequest + MinimalRenderResponse |
-| B-05 | Response schema + preview_slug gap fix v GAS |
+| B-05 | Response schema + preview_slug gap fix v GAS + PreviewSlugContract |
 
 **Doporuceni:** Minimal Compatible first → Target po MVP.
+
+**POZOR:** Alias `PreviewRenderResponse` byl odstranen — downstream tasky musi referencovat explicitne `MinimalRenderResponse` nebo `TargetRenderResponse`.
 
 ## Cilovy model
 
