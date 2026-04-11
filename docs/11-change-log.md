@@ -26,19 +26,6 @@
 - **Code:** docs/contracts/normalization-raw-to-leads.md (new), docs/contracts/raw-to-leads-mapping.json (new)
 - **Docs:** docs/20-current-state.md, docs/23-data-model.md, docs/24-automation-workflows.md, docs/30-task-records/A3.md
 
-### [T (Tools / Internal)/T1] Internal task orchestrator MVP — DONE
-- **Scope:** Novy interni nastroj pro orchestraci task loopu: task input -> Claude execution -> audit -> repair -> verdict.
-Nastroj je oddelen od produktu v `tools/task-orchestrator/`.
-Neni to CRM feature, neni to zmena business logiky.
-- **Code:** tools/task-orchestrator/package.json (new), tools/task-orchestrator/tsconfig.json (new), tools/task-orchestrator/src/types.ts (new), tools/task-orchestrator/src/storage.ts (new), tools/task-orchestrator/src/prompts.ts (new), tools/task-orchestrator/src/orchestrator.ts (new), tools/task-orchestrator/src/cli.ts (new), tools/task-orchestrator/src/adapters/manual.ts (new), tools/task-orchestrator/src/adapters/file.ts (new), tools/task-orchestrator/examples/sample-task.json (new), tools/task-orchestrator/.gitignore (new), tools/task-orchestrator/README.md (new)
-- **Docs:** docs/30-task-records/T1.md
-
-### [T (Tools / Internal)/T2] Task orchestrator — output publishing layer — DONE
-- **Scope:** Doplneni output publishing vrstvy do interniho task orchestratoru (tools/task-orchestrator/).
-Po dokonceni orchestracniho loopu nastroj automaticky vytvori ciste publikacni artefakty do cilove slozky.
-- **Code:** tools/task-orchestrator/src/types.ts (modified), tools/task-orchestrator/src/publisher.ts (new), tools/task-orchestrator/src/orchestrator.ts (modified), tools/task-orchestrator/src/cli.ts (modified), tools/task-orchestrator/examples/sample-task.json (modified), tools/task-orchestrator/.gitignore (modified), tools/task-orchestrator/README.md (modified)
-- **Docs:** docs/30-task-records/T2.md
-
 ## 2026-04-05
 
 ### [B/B1] Preview brief data contract — formalizace datoveho kontraktu — DONE
