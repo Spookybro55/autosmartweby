@@ -1,0 +1,24 @@
+{
+  "business_name": "Řemesla Dvořák",
+  "contact_name": "Příklad Jméno",
+  "city": "Praha",
+  "area": "Praha-západ",
+  "service_type": "instalatér",
+  "segment": "instalater",
+  "pain_point": "Firma nemá webovou prezentaci",
+  "headline": "Řemesla Dvořák | instalatér v Praze",
+  "subheadline": "Firma nemá webovou prezentaci",
+  "key_benefits": [
+    "Lokální služby v Praze",
+    "Online poptávka e-mailem",
+    "instalatér"
+  ],
+  "suggested_sections": ["hero", "location", "services", "contact", "faq"],
+  "cta": "Napište nám na kontakt@example.com",
+  "contact_phone": "",
+  "contact_email": "kontakt@example.com",
+  "website_status": "no_website",
+  "rating": "",
+  "reviews_count": "",
+  "confidence_level": "high"
+}

@@ -28,9 +28,11 @@
 
 ## 2026-04-05
 
-### [B/B1] [SAMPLE] Preview web generator — webhook service — DRAFT
-- **Scope:** Implementace externi sluzby pro generovani preview webu z briefu. Napojeni na existujici webhook pipeline.
-- **Docs:** docs/20-current-state.md, docs/22-technical-architecture.md, docs/26-offer-generation.md, docs/27-infrastructure-storage.md
+### [B/B1] Preview brief data contract — formalizace datoveho kontraktu — DONE
+- **Scope:** Formalizace datoveho kontraktu mezi Apps Script CRM backendem a preview renderer. Pouze specifikace a typy — zadna implementace endpointu, routu, nebo webhooku.
+- **Owner:** —
+- **Code:** crm-frontend/src/lib/domain/preview-contract.ts (new), crm-frontend/src/lib/mock/preview-brief.minimal.json (new), crm-frontend/src/lib/mock/preview-brief.rich.json (new)
+- **Docs:** docs/23-data-model.md, docs/26-offer-generation.md, docs/30-task-records/B1.md
 
 ### [C/C2] Hardening audit — přepis sekce Souhrn v docs/20 — DONE
 - **Scope:** Nahrazení sekce „Souhrn" v docs/20-current-state.md schváleným textem z hardening auditu. Text explicitně rozlišuje commitnutý kód, governance vrstvu (definovaná/validovaná/nevynucovaná) a uncommitted změny v working tree.
