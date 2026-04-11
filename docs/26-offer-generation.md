@@ -81,7 +81,7 @@ Gate pravidlo: section se renderuje pouze pokud je v `suggested_sections`. Field
 
 | Task | Co pouziva z B-01 |
 |------|-------------------|
-| B-02 | PreviewBrief + template_type + preview_slug + SECTION_MAPPING_CONTRACT |
+| B-02 | PreviewBrief + template_type + preview_slug + SECTION_MAPPING_CONTRACT — **DONE**: MVP renderer v `/preview/[slug]`, 6 sekci, hardcoded sample brief |
 | B-03 | TemplateType (mapovani na render sablony) |
 | B-04 | MinimalRenderRequest + MinimalRenderResponse |
 | B-05 | Response schema + preview_slug gap fix v GAS + PreviewSlugContract |
@@ -89,6 +89,12 @@ Gate pravidlo: section se renderuje pouze pokud je v `suggested_sections`. Field
 **Doporuceni:** Minimal Compatible first → Target po MVP.
 
 **POZOR:** Alias `PreviewRenderResponse` byl odstranen — downstream tasky musi referencovat explicitne `MinimalRenderResponse` nebo `TargetRenderResponse`.
+
+## Preview Renderer (B-02)
+
+MVP preview renderer je implementovan jako Next.js App Router route `/preview/[slug]`. Renderuje landing page z hardcoded sample briefu. Sekce se renderuji vyhradne podle `brief.suggested_sections`. Nepouziva API endpoint ani runtime validaci — data jsou staticky importovana z B-01 fixture souboru.
+
+Dostupne sample previews: `remesla-dvorak` (rich fixture, 5 sekci), `sluzby-priklad` (minimal fixture, 4 sekce).
 
 ## Cilovy model
 
