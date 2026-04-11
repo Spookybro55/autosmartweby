@@ -16,5 +16,7 @@
 | C3 | C | Repo governance hardening — CLAUDE.md, branch p... | claude | done | 2026-04-05 | CLAUDE.md, docs/13-doc-update-rules.md, docs/github-collaboration-setup.md, docs/00-folder-inventory.md, docs/00-project-map.md, docs/CRM-SYSTEM-MAP.md | CLAUDE.md, scripts |
 | C4 | C | Post-audit docs corrections — docs/20, docs/23,... | claude | done | 2026-04-05 | docs/20-current-state.md, docs/23-data-model.md, CLAUDE.md, docs/13-doc-update-rules.md | — |
 | CS1 | C | Definovat end-to-end lifecycle leadu jako state... | Claude | done | 2026-04-05 | docs/21-business-process.md, docs/23-data-model.md, docs/20-current-state.md, docs/11-change-log.md, docs/29-task-registry.md | *(zadne code changes)* |
+| CS2 | C | Navrhnout workflow orchestrator — co spousti co... | Claude | done | 2026-04-05 | docs/24-automation-workflows.md, docs/20-current-state.md | *(zadne code changes)* |
+| CS3 | C | Definovat idempotency keys, retry politiku a de... | Claude | done | 2026-04-05 | docs/24-automation-workflows.md, docs/20-current-state.md | *(zadne code changes)* |
 
-*8 tasks total.*
+*10 tasks total.*

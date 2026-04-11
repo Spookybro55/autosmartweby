@@ -63,3 +63,15 @@
 - **Owner:** Claude
 - **Code:** *(zadne code changes)* (—)
 - **Docs:** docs/21-business-process.md, docs/23-data-model.md, docs/20-current-state.md, docs/11-change-log.md, docs/29-task-registry.md
+
+### [C/CS2] Navrhnout workflow orchestrator — co spousti co po zmene stavu leadu — DONE
+- **Scope:** Logicka orchestracni vrstva nad CS1 lifecycle. Definuje co se stane po kazde zmene lifecycle_state, formalni workflow step kontrakt, event katalog, run history design a orchestration model (hybrid: poll + manual + reactive). Specifikace — ne implementace.
+- **Owner:** Claude
+- **Code:** *(zadne code changes)* (—)
+- **Docs:** docs/24-automation-workflows.md, docs/20-current-state.md
+
+### [C/CS3] Definovat idempotency keys, retry politiku a dead-letter handling — DONE
+- **Scope:** Reliability vrstva nad CS2 orchestratorem. Definuje idempotency key pro kazdy automaticky krok, retry matici (transient/permanent/ambiguous failures, max_attempts, backoff), dead-letter handling v _asw_logs, locking pravidla pro LockService. Specifikace — ne implementace.
+- **Owner:** Claude
+- **Code:** *(zadne code changes)* (—)
+- **Docs:** docs/24-automation-workflows.md, docs/20-current-state.md
