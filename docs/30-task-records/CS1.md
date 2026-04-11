@@ -15,6 +15,12 @@
 
 Definice jedineho kanonicky lifecycle stavu (`lifecycle_state`) pro kazdy lead v systemu. Pokryva cestu od importu az po reakci leadu (REPLIED/BOUNCED/UNSUBSCRIBED) nebo diskvalifikaci. WON/LOST jsou downstream sales outcome mimo scope CS1. Specifikace — ne implementace.
 
+**Explicitni scope disclaimer:**
+- Tento PR nezavadi runtime enforcement lifecycle_state.
+- Tento PR nevytvari fyzickou migraci na sloupec lifecycle_state.
+- Tento PR nemeni aktualni chovani systemu.
+- Tento PR je ciste autoritativni specifikace — zadny kod, zadna migrace, zadna zmena runtime.
+
 ## Code Changes
 
 | Soubor | Typ zmeny | Popis |
@@ -27,7 +33,9 @@ Definice jedineho kanonicky lifecycle stavu (`lifecycle_state`) pro kazdy lead v
 |----------|-----------|------|
 | docs/21-business-process.md | modified | Pridana kompletni lifecycle state machine specifikace (10 sekci) |
 | docs/23-data-model.md | modified | Pridana poznamka o canonical lifecycle a auxiliary roli existujicich state machines |
-| docs/20-current-state.md | modified | Zminka o existenci lifecycle specifikace |
+| docs/20-current-state.md | modified | Zminka o existenci lifecycle specifikace v sekci Specifikace |
+| docs/11-change-log.md | regenerated | Auto-generated z task records (build-changelog.mjs) |
+| docs/29-task-registry.md | regenerated | Auto-generated z task records (build-task-registry.mjs) |
 
 ## Contracts Changed
 
