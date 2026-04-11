@@ -45,6 +45,8 @@ Definovane v EXTENSION_COLUMNS (Config.gs):
 
 ## State machines
 
+> **Canonical lifecycle:** Autoritativni end-to-end lifecycle state machine je definovana v `docs/21-business-process.md`, sekce "Lead Lifecycle State Machine — CS1". Nize uvedene state machines jsou **auxiliary** vrstvove detaily; kanonicky stav leadu (`lifecycle_state`) je vzdy prave 1 a odvozuje se z kombinace techto poli.
+
 ### lead_stage
 NEW → QUALIFIED / DISQUALIFIED / REVIEW → IN_PIPELINE → PREVIEW_SENT
 

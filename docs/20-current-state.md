@@ -74,6 +74,11 @@ CI validuje aktuálnost generated files a existenci governance souboru. Nevalidu
 - Frontend deployment (Vercel/Netlify)
 - Apps Script Web App doPost handler (frontend writer existuje, server handler ne)
 
+## Specifikace
+
+- **Lead Lifecycle State Machine (CS1):** Autoritativni specifikace end-to-end lifecycle stavu leadu — viz `docs/21-business-process.md`. Definuje 18 canonical stavu (4 terminal, 3 review), 24 povolenych prechodu, derivacni pravidla z existujicich stage poli. Scope: od importu po reakci; WON/LOST jsou downstream mimo lifecycle. Implementace sloupce `lifecycle_state` neni soucasti CS1.
+- CS2 (Workflow Orchestrator) and CS3 (Idempotency & Retry) are being designed in separate branches and are out of scope for this PR.
+
 ## Co je rozpracovane
 
 - Webhook pipeline pro preview weby — kod pripraveny, ENABLE_WEBHOOK=false, zadna cilova sluzba

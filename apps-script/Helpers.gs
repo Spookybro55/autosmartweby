@@ -144,10 +144,12 @@ function buildHeaderResolver(headerRow) {
    ═══════════════════════════════════════════════════════════════ */
 
 function openCrmSpreadsheet_() {
+  var spreadsheetId = getSpreadsheetId_();
+  try { envGuard_(spreadsheetId); } catch (e) { throw e; }
   try {
-    return SpreadsheetApp.openById(SPREADSHEET_ID);
+    return SpreadsheetApp.openById(spreadsheetId);
   } catch (e) {
-    throw new Error('Cannot open spreadsheet ' + SPREADSHEET_ID + ': ' + e.message);
+    throw new Error('Cannot open spreadsheet ' + spreadsheetId + ': ' + e.message);
   }
 }
 
@@ -293,6 +295,10 @@ function validateLegacyColHeaders_(sourceSheet) {
 
 function aswLog_(level, fnName, message, opts) {
   opts = opts || {};
+  // Prefix all log messages with environment label [TEST] / [PROD]
+  var envLabel = '';
+  try { envLabel = getEnvConfig_().label + ' '; } catch (e) { /* EnvConfig not available */ }
+  var prefixedMessage = envLabel + String(message).substring(0, 990);
   try {
     var logSheet = ensureLogSheet_();
 
@@ -308,11 +314,11 @@ function aswLog_(level, fnName, message, opts) {
       fnName,
       opts.row || '',
       opts.leadId || '',
-      String(message).substring(0, 1000),
+      prefixedMessage,
       opts.payload ? JSON.stringify(opts.payload).substring(0, 1000) : ''
     ]);
   } catch (e) {
-    Logger.log('[' + level + '] ' + fnName + ': ' + message);
+    Logger.log('[' + level + '] ' + fnName + ': ' + prefixedMessage);
   }
 }
 
