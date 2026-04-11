@@ -140,6 +140,10 @@ Novy system sheet ve stejnem SPREADSHEET_ID jako LEADS. Konvence leading undersc
 - **Hard duplicate** (ICO / domain / business email domain match) jde rovnou do `error` s `rejected_duplicate`. Status `duplicate_candidate` je vyhrazen vyhradne pro soft dup cekajici na manualni review.
 - **Retry:** `error` je terminalni. Opakovani = novy radek s novym `raw_import_id`; puvodni error radek zustava trvale jako audit.
 
+### Producer (A-04)
+
+Nove radky do `_raw_import` produkuje **scraper runtime** (`scripts/scraper/firmy-cz.mjs`, viz task A-04). Pro 1 A-01 `ScrapingJobInput` vraci pole validnich `RawImportRow` objektu s `normalized_status="raw"`, `processed_by="scraper"` a `raw_payload_json` ve tvaru klicu odpovidajicich A-03 mappingu. Zapis do Sheets (append-only) je samostatny downstream krok, zatim neimplementovano.
+
 ## Normalization: raw -> LEADS (A-03)
 
 Pravidla pro transformaci `_raw_import.raw_payload_json` na validni LEADS radek. Cely kontrakt v `docs/contracts/normalization-raw-to-leads.md`, strojove citelny mapping v `docs/contracts/raw-to-leads-mapping.json`.
