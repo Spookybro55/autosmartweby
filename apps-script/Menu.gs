@@ -16,7 +16,7 @@
  *    - LegacyWebCheck.gs: setSerperApiKey, runWebsiteCheck20/50/100
  *
  *  installMenuTrigger(): installs an installable onOpen trigger
- *    on the PRODUCTION spreadsheet so the custom menu appears
+ *    on the spreadsheet for the CURRENT environment
  *    even when the script is standalone (not container-bound).
  * ============================================================
  */
@@ -34,61 +34,68 @@ function onOpen() {
   }
 
   ui.createMenu('Autosmartweby CRM')
-    .addItem('Setup preview extension',            'setupPreviewExtension')
-    .addItem('Ensure lead IDs',                    'ensureLeadIds')
+    .addItem('Setup preview extension', 'setupPreviewExtension')
+    .addItem('Ensure lead IDs', 'ensureLeadIds')
     .addSeparator()
-    .addItem('Qualify leads',                      'qualifyLeads')
-    .addItem('Process preview queue',              'processPreviewQueue')
-    .addItem('Rebuild drafts',                     'buildEmailDrafts')
+    .addItem('Qualify leads', 'qualifyLeads')
+    .addItem('Process preview queue', 'processPreviewQueue')
+    .addItem('Rebuild drafts', 'buildEmailDrafts')
     .addSeparator()
-    .addItem('Simulace + z\u00e1pis (dry run)',    'simulateAndWrite')
-    .addItem('Audit sheet structure (read-only)',   'auditCurrentSheetStructure')
-    .addItem('Audit lead IDs (read-only)',         'auditLeadIds')
+    .addItem('Simulace + zápis (dry run)', 'simulateAndWrite')
+    .addItem('Audit sheet structure (read-only)', 'auditCurrentSheetStructure')
+    .addItem('Audit lead IDs (read-only)', 'auditLeadIds')
     .addSeparator()
-    .addItem('Webhook pilot test (5-10 rows)',     'runWebhookPilotTest')
+    .addItem('Webhook pilot test (5-10 rows)', 'runWebhookPilotTest')
     .addSeparator()
-    .addSubMenu(ui.createMenu('Ke kontaktov\u00e1n\u00ed')
-      .addItem('Evaluate contact readiness',       'evaluateContactReadiness')
-      .addItem('Refresh "Ke kontaktov\u00e1n\u00ed"', 'refreshContactingSheet'))
+    .addSubMenu(
+      ui.createMenu('Ke kontaktování')
+        .addItem('Evaluate contact readiness', 'evaluateContactReadiness')
+        .addItem('Refresh "Ke kontaktování"', 'refreshContactingSheet')
+    )
     .addSeparator()
-    .addSubMenu(ui.createMenu('E-mail')
-      .addItem('Create draft pro vybran\u00fd lead',   'createCrmDraft')
-      .addItem('Odeslat e-mail pro vybran\u00fd lead', 'sendCrmEmail')
-      .addSeparator()
-      .addItem('Sync mailbox metadata',                'syncMailboxMetadata')
-      .addItem('Ensure CRM labels (ASW/CRM)',          'ensureCrmLabels'))
+    .addSubMenu(
+      ui.createMenu('E-mail')
+        .addItem('Create draft pro vybraný lead', 'createCrmDraft')
+        .addItem('Odeslat e-mail pro vybraný lead', 'sendCrmEmail')
+        .addSeparator()
+        .addItem('Sync mailbox metadata', 'syncMailboxMetadata')
+        .addItem('Ensure CRM labels (ASW/CRM)', 'ensureCrmLabels')
+    )
     .addSeparator()
-    .addItem('Install ALL triggers',               'installProjectTriggers')
+    .addItem('Install ALL triggers', 'installProjectTriggers')
     .addToUi();
 
   ui.createMenu('Web check')
-    .addItem('Ulo\u017eit Serper API key',    'setSerperApiKey')
+    .addItem('Uložit Serper API key', 'setSerperApiKey')
     .addSeparator()
-    .addItem('Zkontrolovat 20 \u0159\u00e1dk\u016f',    'runWebsiteCheck20')
-    .addItem('Zkontrolovat 50 \u0159\u00e1dk\u016f',    'runWebsiteCheck50')
-    .addItem('Zkontrolovat 100 \u0159\u00e1dk\u016f',   'runWebsiteCheck100')
+    .addItem('Zkontrolovat 20 řádků', 'runWebsiteCheck20')
+    .addItem('Zkontrolovat 50 řádků', 'runWebsiteCheck50')
+    .addItem('Zkontrolovat 100 řádků', 'runWebsiteCheck100')
     .addToUi();
 }
 
 
 /**
- * Installs an installable onOpen trigger on the PRODUCTION CRM
- * spreadsheet so that the custom menu appears even though the
- * script is standalone (not container-bound).
+ * Installs an installable onOpen trigger on the spreadsheet
+ * for the CURRENT environment so that the custom menu appears
+ * even though the script is standalone (not container-bound).
  *
  * Run this ONCE from the Apps Script editor.
- * Requires authorization to access the production spreadsheet.
+ * Requires authorization to access the current environment spreadsheet.
  */
 function installMenuTrigger() {
-  // Guard: ensure trigger is installed on the correct env's spreadsheet
-  try { envGuard_(SPREADSHEET_ID); } catch (e) { throw e; }
-  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var spreadsheetId = getSpreadsheetId_();
+  try { envGuard_(spreadsheetId); } catch (e) { throw e; }
+
+  var ss = SpreadsheetApp.openById(spreadsheetId);
 
   // Remove any existing onOpen triggers to avoid duplicates
   var triggers = ScriptApp.getUserTriggers(ss);
   for (var i = 0; i < triggers.length; i++) {
-    if (triggers[i].getHandlerFunction() === 'onOpen'
-        && triggers[i].getEventType() === ScriptApp.EventType.ON_OPEN) {
+    if (
+      triggers[i].getHandlerFunction() === 'onOpen' &&
+      triggers[i].getEventType() === ScriptApp.EventType.ON_OPEN
+    ) {
       ScriptApp.deleteTrigger(triggers[i]);
     }
   }
@@ -98,8 +105,12 @@ function installMenuTrigger() {
     .onOpen()
     .create();
 
+  var envLabel = 'CURRENT';
+  try { envLabel = getEnvConfig_().env; } catch (e) { /* ignore */ }
+
   safeAlert_(
     'Menu trigger installed.\n' +
-    'Installable onOpen trigger was created for the production CRM.\n' +
-    'The custom menu will now appear when you open the spreadsheet.');
+    'Installable onOpen trigger was created for environment: ' + envLabel + '.\n' +
+    'The custom menu will now appear when you open the spreadsheet.'
+  );
 }

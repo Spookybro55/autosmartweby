@@ -144,12 +144,12 @@ function buildHeaderResolver(headerRow) {
    ═══════════════════════════════════════════════════════════════ */
 
 function openCrmSpreadsheet_() {
-  // Run environment guard before opening — prevents cross-env contamination
-  try { envGuard_(SPREADSHEET_ID); } catch (e) { throw e; }
+  var spreadsheetId = getSpreadsheetId_();
+  try { envGuard_(spreadsheetId); } catch (e) { throw e; }
   try {
-    return SpreadsheetApp.openById(SPREADSHEET_ID);
+    return SpreadsheetApp.openById(spreadsheetId);
   } catch (e) {
-    throw new Error('Cannot open spreadsheet ' + SPREADSHEET_ID + ': ' + e.message);
+    throw new Error('Cannot open spreadsheet ' + spreadsheetId + ': ' + e.message);
   }
 }
 
