@@ -22,6 +22,9 @@
  */
 
 function onOpen() {
+  // Show environment banner on spreadsheet open
+  try { showEnvBanner_(); } catch (e) { /* EnvConfig not available */ }
+
   var ui;
   try {
     ui = SpreadsheetApp.getUi();
@@ -77,6 +80,8 @@ function onOpen() {
  * Requires authorization to access the production spreadsheet.
  */
 function installMenuTrigger() {
+  // Guard: ensure trigger is installed on the correct env's spreadsheet
+  try { envGuard_(SPREADSHEET_ID); } catch (e) { throw e; }
   var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
 
   // Remove any existing onOpen triggers to avoid duplicates

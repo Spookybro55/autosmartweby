@@ -6,9 +6,23 @@
  */
 
 /* ── Spreadsheet identity ─────────────────────────────────── */
-// TEST: '13fyA63p6g9eLMdy9KhBUO6lrbdtMhsL0kbHOVafvmyo'
-// ROLLBACK COPY: '14U9CC0q5gpFr2p7CD1s4rf3i0lCettIVYIqrO8lsj9c' (NEDOTÝKAT SE)
-var SPREADSHEET_ID = '1RBcLZkn3AruiqaQdJ7PHIxvCcoO5SC9Qnlw_NiLnpYc';
+// Environment-aware: resolved via EnvConfig.gs + Script Properties.
+// PROD sheet: '1RBcLZkn3AruiqaQdJ7PHIxvCcoO5SC9Qnlw_NiLnpYc'
+// TEST sheet: '14U9CC0q5gpFr2p7CD1s4rf3i0lCettIVYIqrO8lsj9c'
+// Legacy ref:  '13fyA63p6g9eLMdy9KhBUO6lrbdtMhsL0kbHOVafvmyo' (old test/parent)
+//
+// SPREADSHEET_ID is now resolved at runtime from Script Properties.
+// Each Apps Script cloud project (TEST / PROD) has its own Script Properties
+// with ASW_ENV and ASW_SPREADSHEET_ID set appropriately.
+// Fallback: if Script Properties are not set, defaults to PROD ID (backward compat).
+var SPREADSHEET_ID = (function() {
+  try {
+    return getSpreadsheetId_();
+  } catch (e) {
+    // EnvConfig.gs not loaded yet or Script Properties unavailable — use PROD default
+    return '1RBcLZkn3AruiqaQdJ7PHIxvCcoO5SC9Qnlw_NiLnpYc';
+  }
+})();
 var MAIN_SHEET_NAME    = 'LEADS';
 var CONTACT_SHEET_NAME = 'Ke kontaktování';
 var LOG_SHEET_NAME     = '_asw_logs';
