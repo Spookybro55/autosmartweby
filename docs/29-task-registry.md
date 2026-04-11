@@ -19,4 +19,4 @@
 | CS1 | C | Definovat end-to-end lifecycle leadu jako state... | Claude | done | 2026-04-05 | docs/21-business-process.md, docs/23-data-model.md, docs/20-current-state.md, docs/11-change-log.md, docs/29-task-registry.md | *(zadne code changes)* |
 | CS2 | C | Navrhnout workflow orchestrator — co spousti co... | Claude | done | 2026-04-05 | docs/24-automation-workflows.md, docs/20-current-state.md | *(zadne code changes)* |
 
-*9 tasks total.*
+*10 tasks total.*
