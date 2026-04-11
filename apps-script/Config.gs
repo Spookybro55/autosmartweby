@@ -6,9 +6,13 @@
  */
 
 /* ── Spreadsheet identity ─────────────────────────────────── */
-// TEST: '13fyA63p6g9eLMdy9KhBUO6lrbdtMhsL0kbHOVafvmyo'
-// ROLLBACK COPY: '14U9CC0q5gpFr2p7CD1s4rf3i0lCettIVYIqrO8lsj9c' (NEDOTÝKAT SE)
+// Runtime environment is resolved via EnvConfig.gs + Script Properties.
+// IMPORTANT:
+// - Do not use SPREADSHEET_ID directly in runtime-sensitive code.
+// - Use getSpreadsheetId_() instead.
+// This constant remains only as a legacy PROD fallback/reference.
 var SPREADSHEET_ID = '1RBcLZkn3AruiqaQdJ7PHIxvCcoO5SC9Qnlw_NiLnpYc';
+
 var MAIN_SHEET_NAME    = 'LEADS';
 var CONTACT_SHEET_NAME = 'Ke kontaktování';
 var LOG_SHEET_NAME     = '_asw_logs';

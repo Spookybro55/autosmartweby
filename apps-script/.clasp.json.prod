@@ -1,10 +1,9 @@
 {
-  "scriptId": "1SjdUXQc4i2RzYkRVKldp8q6Z7JtGrsY5TQwaBl4b_93hj8aD4_p-ScrT",
+  "scriptId": "1fnL4hKsueYG0HPci2wSE2NNgIyuXiVf9ESUClKQT63rNqfCfSGlql_qf",
   "rootDir": "",
-  "parentId": "13fyA63p6g9eLMdy9KhBUO6lrbdtMhsL0kbHOVafvmyo",
   "scriptExtensions": [
-    ".gs",
-    ".js"
+    ".js",
+    ".gs"
   ],
   "htmlExtensions": [
     ".html"
