@@ -1,0 +1,22 @@
+{
+  "business_name": "Služby Příklad",
+  "contact_name": "",
+  "city": "Brno",
+  "area": "",
+  "service_type": "",
+  "segment": "",
+  "pain_point": "",
+  "headline": "Služby Příklad – Brno",
+  "subheadline": "Lokální služby – Brno",
+  "key_benefits": [
+    "Lokální služby v Brně"
+  ],
+  "suggested_sections": ["hero", "location", "services", "contact"],
+  "cta": "Napište nám na info@example.com",
+  "contact_phone": "",
+  "contact_email": "info@example.com",
+  "website_status": "no_website",
+  "rating": "",
+  "reviews_count": "",
+  "confidence_level": "medium"
+}

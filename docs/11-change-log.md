@@ -28,9 +28,11 @@
 
 ## 2026-04-05
 
-### [B/B1] [SAMPLE] Preview web generator — webhook service — DRAFT
-- **Scope:** Implementace externi sluzby pro generovani preview webu z briefu. Napojeni na existujici webhook pipeline.
-- **Docs:** docs/20-current-state.md, docs/22-technical-architecture.md, docs/26-offer-generation.md, docs/27-infrastructure-storage.md
+### [B/B1] Preview brief data contract — formalizace datoveho kontraktu — DONE
+- **Scope:** Formalizace datoveho kontraktu mezi Apps Script CRM backendem a preview renderer. Pouze specifikace a typy — zadna implementace endpointu, routu, nebo webhooku.
+- **Owner:** —
+- **Code:** crm-frontend/src/lib/domain/preview-contract.ts (new), crm-frontend/src/lib/mock/preview-brief.minimal.json (new), crm-frontend/src/lib/mock/preview-brief.rich.json (new)
+- **Docs:** docs/23-data-model.md, docs/26-offer-generation.md, docs/30-task-records/B1.md
 
 ### [C/C2] Hardening audit — přepis sekce Souhrn v docs/20 — DONE
 - **Scope:** Nahrazení sekce „Souhrn" v docs/20-current-state.md schváleným textem z hardening auditu. Text explicitně rozlišuje commitnutý kód, governance vrstvu (definovaná/validovaná/nevynucovaná) a uncommitted změny v working tree.
@@ -52,18 +54,12 @@
 
 ### [C/CS1] Definovat end-to-end lifecycle leadu jako state machine — DONE
 - **Scope:** Definice jedineho kanonicky lifecycle stavu (`lifecycle_state`) pro kazdy lead v systemu. Pokryva cestu od importu az po reakci leadu (REPLIED/BOUNCED/UNSUBSCRIBED) nebo diskvalifikaci. WON/LOST jsou downstream sales outcome mimo scope CS1. Specifikace — ne implementace.
-- **Owner:** Claude
-- **Code:** *(zadne code changes)* (—)
-- **Docs:** docs/21-business-process.md, docs/23-data-model.md, docs/20-current-state.md
 
-### [C/CS2] Navrhnout workflow orchestrator — co spousti co po zmene stavu leadu — DONE
-- **Scope:** Logicka orchestracni vrstva nad CS1 lifecycle. Definuje co se stane po kazde zmene lifecycle_state, formalni workflow step kontrakt, event katalog, run history design a orchestration model (hybrid: poll + manual + reactive). Specifikace — ne implementace.
+**Explicitni scope disclaimer:**
+- Tento PR nezavadi runtime enforcement lifecycle_state.
+- Tento PR nevytvari fyzickou migraci na sloupec lifecycle_state.
+- Tento PR nemeni aktualni chovani systemu.
+- Tento PR je ciste autoritativni specifikace — zadny kod, zadna migrace, zadna zmena runtime.
 - **Owner:** Claude
 - **Code:** *(zadne code changes)* (—)
-- **Docs:** docs/24-automation-workflows.md, docs/20-current-state.md
-
-### [C/CS3] Definovat idempotency keys, retry politiku a dead-letter handling — DONE
-- **Scope:** Reliability vrstva nad CS2 orchestratorem. Definuje idempotency key pro kazdy automaticky krok, retry matici (transient/permanent/ambiguous failures, max_attempts, backoff), dead-letter handling v _asw_logs, locking pravidla pro LockService. Specifikace — ne implementace.
-- **Owner:** Claude
-- **Code:** *(zadne code changes)* (—)
-- **Docs:** docs/24-automation-workflows.md, docs/20-current-state.md
+- **Docs:** docs/21-business-process.md, docs/23-data-model.md, docs/20-current-state.md, docs/11-change-log.md, docs/29-task-registry.md
