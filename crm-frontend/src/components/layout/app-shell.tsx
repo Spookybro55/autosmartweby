@@ -8,7 +8,7 @@ interface AppShellProps {
   children: React.ReactNode;
 }
 
-const FULL_PAGE_ROUTES = ["/login"];
+const FULL_PAGE_ROUTES = ["/login", "/preview"];
 
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
