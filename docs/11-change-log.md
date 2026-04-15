@@ -19,6 +19,20 @@ mimo scope (downstream krok).
 - **Code:** scripts/scraper/firmy-cz.mjs (new), scripts/scraper/lib/job-id.mjs (new), scripts/scraper/lib/raw-row.mjs (new), scripts/scraper/lib/html-extract.mjs (new), scripts/scraper/lib/firmy-cz-parser.mjs (new), scripts/scraper/lib/fetch-polite.mjs (new), scripts/scraper/README.md (new), scripts/scraper/samples/job.sample.json (new), scripts/scraper/samples/fixtures/firmy-cz-listing.html (new), scripts/scraper/samples/fixtures/firmy-cz-detail-01-novak.html (new), scripts/scraper/samples/fixtures/firmy-cz-detail-02-svoboda.html (new), scripts/scraper/samples/fixtures/firmy-cz-detail-03-dvorak.html (new), scripts/scraper/samples/fixtures/firmy-cz-detail-04-horak.html (new), scripts/scraper/samples/fixtures/firmy-cz-detail-05-prochazka.html (new), scripts/scraper/samples/fixtures/firmy-cz-detail-06-kamarad.html (new), scripts/scraper/samples/fixtures/firmy-cz-detail-07-zeleny.html (new), scripts/scraper/samples/fixtures/firmy-cz-detail-08-broken.html (new), scripts/scraper/samples/output.sample.json (new)
 - **Docs:** docs/20-current-state.md, docs/23-data-model.md, docs/24-automation-workflows.md, docs/30-task-records/A4.md
 
+## 2026-04-08
+
+### [B/B2] Preview renderer na sample briefu — DONE
+- **Scope:** MVP preview renderer nad B-01 contractem. Vykresli route `/preview/[slug]`, ktera nacte hardcoded sample brief a vyrenderuje landing page pro remeslnika. Pouziva `PreviewBrief` a `SectionId` z B-01 bez redefinice.
+
+### Route intent vs MVP implementace
+
+- **Cilovy intent:** `/[slug]`
+- **B-02 MVP implementace:** `/preview/[slug]`
+- **Duvod:** Docasna implementacni ochrana. Root `[slug]` by kolidoval s existujicimi CRM routes (`/dashboard`, `/leads`, atd.) v soucasne single-app architekture. Prefix `/preview/` umoznuje bezpecny middleware bypass, AppShell bypass a izolaci preview layoutu. Toto neni finalni produktove rozhodnuti.
+- **Owner:** —
+- **Code:** crm-frontend/src/middleware.ts (modified), crm-frontend/src/components/layout/app-shell.tsx (modified), crm-frontend/src/app/preview/layout.tsx (new), crm-frontend/src/app/preview/[slug]/page.tsx (new), crm-frontend/src/app/preview/[slug]/not-found.tsx (new), crm-frontend/src/lib/mock/sample-brief-loader.ts (new), crm-frontend/src/components/preview/hero-section.tsx (new), crm-frontend/src/components/preview/services-section.tsx (new), crm-frontend/src/components/preview/contact-section.tsx (new), crm-frontend/src/components/preview/reviews-section.tsx (new), crm-frontend/src/components/preview/location-section.tsx (new), crm-frontend/src/components/preview/faq-section.tsx (new)
+- **Docs:** docs/20-current-state.md, docs/22-technical-architecture.md, docs/26-offer-generation.md, docs/30-task-records/B2.md
+
 ## 2026-04-06
 
 ### [A/A1] Scraping Job Input Contract — DONE

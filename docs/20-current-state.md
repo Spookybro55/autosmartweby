@@ -49,6 +49,7 @@ CI validuje aktuálnost generated files a existenci governance souboru. Nevalidu
 - Editace 5 poli per lead se zapisem zpet do Sheets
 - Data: Google Sheets pres service account (read), Apps Script Web App (write — doPost chybi)
 - Mock service pro lokalni vyvoj bez Sheets pripojeni
+- Preview renderer (B-02): route `/preview/[slug]`, renderuje MVP landing page z hardcoded sample briefu. 6 sekci (hero, services, contact, reviews, location, faq) rizenych polem `suggested_sections` z B-01 contractu. Verejne pristupny bez auth.
 - Bezi lokalne, neni nasazen na verejne URL
 
 ### Datove kontrakty a staging

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const PUBLIC_PATHS = ['/login', '/api/auth'];
+const PUBLIC_PATHS = ['/login', '/api/auth', '/preview'];
 const SESSION_SECRET = process.env.NEXTAUTH_SECRET || '';
 
 async function verifyToken(token: string): Promise<{ email: string; ts: number } | null> {
