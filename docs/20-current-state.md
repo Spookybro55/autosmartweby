@@ -56,7 +56,8 @@ CI validuje aktuálnost generated files a existenci governance souboru. Nevalidu
 - Scraping Job Input v1.0 (`docs/contracts/scraping-job-input.schema.json`) — kanonicky kontrakt pro jeden scraping job (1 job = 1 query na 1 portalu v 1 meste/segmentu). Definuje 12 poli, deterministicky `source_job_id` a lifecycle stavy.
 - RAW_IMPORT staging layer v1.0 (`docs/contracts/raw-import-staging.md`) — kontrakt pro `_raw_import` system sheet, staging buffer mezi scraperem a LEADS. 16 sloupcu, 5-stavovy status model, 4-hodnotovy decision model.
 - Normalization raw -> LEADS rules v1.0 (`docs/contracts/normalization-raw-to-leads.md`) — kontrakt pro transformaci surovych dat z `_raw_import` na LEADS radek. 23-field mapping, cleaning rules, reject policy, lead_id generation, 6 novych source_* metadata sloupcu.
-- Kod jeste neni implementovan — pouze kontrakty a dokumentace.
+- **Scraper runtime A-04 (firmy.cz)** (`scripts/scraper/firmy-cz.mjs`) — Node ESM CLI, cte A-01 job input a produkuje pole A-02 RAW_IMPORT rows. Parsing strategy: JSON-LD schema.org primary + Open Graph a regex fallbacks. Per-record try/catch, rate-limited live mode, fixture mode pro deterministicky offline test. Zapis do `_raw_import` sheetu je mimo scope A-04.
+- Zbyvajici automatizace (normalizer, dedupe, import writer, sheet bootstrap, zivefirmy.cz scraper) nejsou jeste implementovane — existuji jen kontrakty (A-02, A-03) a task records.
 
 ### Dokumentace
 - Governance s validacnim scriptem

@@ -11,6 +11,7 @@
 | A1 | A | Scraping Job Input Contract | Stream A | done | 2026-04-06 | docs/23-data-model.md, docs/20-current-state.md, docs/24-automation-workflows.md, docs/30-task-records/A1.md | docs, crm-frontend |
 | A2 | A | RAW_IMPORT Staging Layer | Stream A | done | 2026-04-06 | docs/20-current-state.md, docs/23-data-model.md, docs/24-automation-workflows.md, docs/30-task-records/A2.md | docs, crm-frontend |
 | A3 | A | Normalization Raw to LEADS Rules | Stream A | done | 2026-04-06 | docs/20-current-state.md, docs/23-data-model.md, docs/24-automation-workflows.md, docs/30-task-records/A3.md | docs |
+| A4 | A | firmy.cz scraper — 1 portal runtime | Stream A | done | 2026-04-11 | docs/20-current-state.md, docs/23-data-model.md, docs/24-automation-workflows.md, docs/30-task-records/A4.md | scripts |
 | B1 | B | Preview brief data contract — formalizace datov... | — | done | 2026-04-05 | docs/23-data-model.md, docs/26-offer-generation.md, docs/30-task-records/B1.md | crm-frontend |
 | B2 | B | Preview renderer na sample briefu | — | done | 2026-04-08 | docs/20-current-state.md, docs/22-technical-architecture.md, docs/26-offer-generation.md, docs/30-task-records/B2.md | crm-frontend |
 | C2 | C | Hardening audit — přepis sekce Souhrn v docs/20 | claude | done | 2026-04-05 | docs/20-current-state.md | — |
@@ -19,4 +20,4 @@
 | CS1 | C | Definovat end-to-end lifecycle leadu jako state... | Claude | done | 2026-04-05 | docs/21-business-process.md, docs/23-data-model.md, docs/20-current-state.md, docs/11-change-log.md, docs/29-task-registry.md | *(zadne code changes)* |
 | CS2 | C | Navrhnout workflow orchestrator — co spousti co... | Claude | done | 2026-04-05 | docs/24-automation-workflows.md, docs/20-current-state.md | *(zadne code changes)* |
 
-*10 tasks total.*
+*11 tasks total.*
