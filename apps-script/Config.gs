@@ -133,6 +133,26 @@ var LEAD_STAGES = {
   PREVIEW_SENT:  'PREVIEW_SENT'
 };
 
+/* ── A-05: Dedupe decision reasons ───────────────────────── */
+var DEDUPE_BUCKET = {
+  HARD_DUPLICATE: 'HARD_DUPLICATE',
+  SOFT_DUPLICATE: 'SOFT_DUPLICATE',
+  REVIEW:         'REVIEW',
+  NEW_LEAD:       'NEW_LEAD'
+};
+
+var DEDUPE_REASON = {
+  HARD_DUP_ICO:              'HARD_DUP_ICO',
+  HARD_DUP_DOMAIN:           'HARD_DUP_DOMAIN',
+  SOFT_DUP_EMAIL_DOMAIN:     'SOFT_DUP_EMAIL_DOMAIN',
+  SOFT_DUP_NAME_CITY:        'SOFT_DUP_NAME_CITY',
+  REVIEW_CONFLICTING_ICO_DOMAIN: 'REVIEW_CONFLICTING_ICO_DOMAIN',
+  REVIEW_INTRA_BATCH_T3:     'REVIEW_INTRA_BATCH_T3',
+  REVIEW_INTRA_BATCH_T4:     'REVIEW_INTRA_BATCH_T4',
+  NEW_LEAD_NO_MATCH:         'NEW_LEAD_NO_MATCH',
+  NEW_LEAD_NO_KEY:           'NEW_LEAD_NO_KEY'
+};
+
 /* ── Qualification keywords ───────────────────────────────── */
 var WEAK_WEBSITE_KEYWORDS = [
   'none','no','missing','poor','weak','bad','broken',

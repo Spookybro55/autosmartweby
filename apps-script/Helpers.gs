@@ -369,9 +369,42 @@ function extractDomainFromUrl_(url) {
 
 function normalizeBusinessName_(name) {
   var s = removeDiacritics_(trimLower_(name));
-  s = s.replace(/\b(s\.?r\.?o\.?|spol\.?\s*s\s*r\.?\s*o\.?|a\.?\s*s\.?|v\.?\s*o\.?\s*s\.?|k\.?\s*s\.?)\b/g, '');
+  s = s.replace(/\b(s\.?r\.?o\.?|spol\.?\s*s\s*r\.?\s*o\.?|a\.?\s*s\.?|v\.?\s*o\.?\s*s\.?|k\.?\s*s\.?|se|z\.?\s*s\.?|z\.?\s*u\.?|druzstvo|o\.?\s*p\.?\s*s\.?)\b/g, '');
   s = s.replace(/[^a-z0-9]+/g, ' ').trim();
   return s;
+}
+
+
+/* --- A-05: IČO normalization --- */
+
+function normalizeIco_(val) {
+  var digits = String(val == null ? '' : val).replace(/\D/g, '');
+  if (digits.length === 8) return digits;
+  if (digits.length === 9 && digits.charAt(0) === '0') return digits.substring(1);
+  return '';
+}
+
+
+/* --- A-05: City normalization for dedupe --- */
+
+function normalizeCityForDedupe_(city) {
+  var s = removeDiacritics_(trimLower_(city));
+  if (!s) return '';
+  s = s.replace(/^praha[\s\-]+([\d]+|.*$)/, 'praha');
+  s = s.replace(/[^a-z0-9]+/g, ' ').trim();
+  return s;
+}
+
+
+/* --- A-05: Blocked domain check for dedupe --- */
+
+function isBlockedDomain_(domain) {
+  if (!domain) return true;
+  var d = domain.toLowerCase();
+  for (var i = 0; i < BLOCKED_HOST_FRAGMENTS.length; i++) {
+    if (d.indexOf(BLOCKED_HOST_FRAGMENTS[i]) !== -1) return true;
+  }
+  return false;
 }
 
 function isBlockedResult_(url) {

@@ -1,7 +1,7 @@
 # Automation Workflows — Autosmartweby
 
 > **Kanonicky dokument.** Aktualizuje se pri zmene automatizacnich procesu.
-> **Posledni aktualizace:** 2026-04-05
+> **Posledni aktualizace:** 2026-04-16
 
 ---
 
@@ -62,7 +62,7 @@ Scraping Job Input kontrakt definuje vstupni payload pro jeden scraping job. RAW
 
 ## Ingest flow (scraper -> _raw_import -> LEADS)
 
-Staging-based ingest pipeline. Navrh v A-02 (RAW_IMPORT staging layer). Runtime implementace je castecna — **scraper (A-04) je hotovy** jako Node ESM skript v `scripts/scraper/`, normalizer / dedupe / import writer jsou zatim pouze kontraktualne definovane (A-03, A-05, open).
+Staging-based ingest pipeline. Navrh v A-02 (RAW_IMPORT staging layer). Runtime implementace je castecna — **scraper (A-04) je hotovy** jako Node ESM skript v `scripts/scraper/`, **dedupe engine (A-05) je hotovy** v `apps-script/DedupeEngine.gs` (callable, tested with synthetic batch), normalizer a import writer jsou zatim pouze kontraktualne definovane (A-03, open).
 
 ```
 1. Scraper (A-04)      -> insert do _raw_import [status: raw]

@@ -363,17 +363,31 @@ function qualifyLeads() {
 /* --- Company key computation --- */
 
 function computeCompanyKey_(hr, row) {
-  var ico = trimLower_(hr.get(row, 'ičo'));
-  if (ico && ico.replace(/\D/g, '').length >= 5) {
-    return 'ico:' + ico.replace(/\D/g, '');
-  }
+  var ico = normalizeIco_(hr.get(row, 'ičo'));
+  if (ico) return 'ico:' + ico;
   var domain = extractDomainFromUrl_(hr.get(row, 'website_url'));
-  if (domain) return 'dom:' + domain;
+  if (domain && !isBlockedDomain_(domain)) return 'dom:' + domain;
   var emailDomain = extractBusinessDomainFromEmail_(hr.get(row, 'email'));
-  if (emailDomain) return 'edom:' + emailDomain;
+  if (emailDomain && !isBlockedDomain_(emailDomain)) return 'edom:' + emailDomain;
   var name = normalizeBusinessName_(hr.get(row, 'business_name'));
-  var city = removeDiacritics_(trimLower_(hr.get(row, 'city')));
-  if (name) return 'name:' + name + (city ? '|' + city : '');
+  var city = normalizeCityForDedupe_(hr.get(row, 'city'));
+  if (name && city) return 'name:' + name + '|' + city;
+  return '';
+}
+
+
+/* --- A-05: Standalone company key from plain object --- */
+
+function computeCompanyKeyFromRecord_(record) {
+  var ico = normalizeIco_(record.ico);
+  if (ico) return 'ico:' + ico;
+  var domain = extractDomainFromUrl_(record.website_url || record.website || '');
+  if (domain && !isBlockedDomain_(domain)) return 'dom:' + domain;
+  var emailDomain = extractBusinessDomainFromEmail_(record.email || '');
+  if (emailDomain && !isBlockedDomain_(emailDomain)) return 'edom:' + emailDomain;
+  var name = normalizeBusinessName_(record.business_name || '');
+  var city = normalizeCityForDedupe_(record.city || '');
+  if (name && city) return 'name:' + name + '|' + city;
   return '';
 }
 

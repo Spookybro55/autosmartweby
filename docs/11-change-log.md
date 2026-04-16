@@ -6,6 +6,26 @@
 
 ---
 
+## 2026-04-16
+
+### [A/A5] Dedupe & company_key matching — DONE
+- **Scope:** Formalizace a rozšíření existující dedupe logiky v Apps Script. Cílem je:
+- deterministický company_key algoritmus se strict IČO validací (8 číslic)
+- rozlišení HARD_DUPLICATE / SOFT_DUPLICATE / REVIEW / NEW_LEAD
+- decision_reason audit trail pro každé rozhodnutí
+- blocked domain check v company_key computation
+- povinné city pro T4 (name+city) — eliminace name-only false positives
+- izolovaný dedupe engine připravený na _raw_import integraci
+- synthetic batch test (50 záznamů) s vyhodnocením
+
+Scope explicitně NEOBSAHUJE:
+- runtime _raw_import sheet (ten dosud neexistuje v runtime kódu)
+- review UI
+- fuzzy matching
+- IČO checksum mod 11 (připraveno jako poznámka, ne blocker)
+- **Owner:** Stream A
+- **Code:** apps-script/DedupeEngine.gs (new), apps-script/Helpers.gs (edit), apps-script/PreviewPipeline.gs (edit), apps-script/Config.gs (edit), docs/contracts/dedupe-decision.md (new), docs/23-data-model.md (edit), docs/24-automation-workflows.md (edit), docs/30-task-records/A5.md (new)
+
 ## 2026-04-11
 
 ### [A/A4] firmy.cz scraper — 1 portal runtime — DONE
