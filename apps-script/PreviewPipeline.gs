@@ -1342,6 +1342,7 @@ function installProjectTriggers() {
   var hasTime = false;
   var hasOnOpen = false;
   var hasOnEdit = false;
+  var hasWebCheck = false;
 
   for (var i = 0; i < existing.length; i++) {
     var fn = existing[i].getHandlerFunction();
@@ -1356,6 +1357,9 @@ function installProjectTriggers() {
     if (fn === 'onContactSheetEdit' && evType === ScriptApp.EventType.ON_EDIT) {
       hasOnEdit = true;
     }
+    if (fn === 'autoWebCheckTrigger' && evType === ScriptApp.EventType.CLOCK) {
+      hasWebCheck = true;
+    }
   }
 
   var installed = [];
@@ -1366,6 +1370,14 @@ function installProjectTriggers() {
       .everyMinutes(15)
       .create();
     installed.push('Timer: processPreviewQueue (15 min)');
+  }
+
+  if (!hasWebCheck) {
+    ScriptApp.newTrigger('autoWebCheckTrigger')
+      .timeBased()
+      .everyMinutes(15)
+      .create();
+    installed.push('Timer: autoWebCheckTrigger (15 min) — A-06');
   }
 
   if (!hasOnOpen) {
