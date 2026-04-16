@@ -116,3 +116,9 @@ mimo scope (downstream krok).
 - **Owner:** Claude
 - **Code:** *(zadne code changes)* (—)
 - **Docs:** docs/24-automation-workflows.md, docs/20-current-state.md
+
+### [C/CS3] Definovat idempotency keys, retry politiku a dead-letter handling — DONE
+- **Scope:** Reliability vrstva nad CS2 orchestratorem. Definuje idempotency key pro kazdy automaticky krok, retry matici (transient/permanent/ambiguous failures, max_attempts, backoff), dead-letter handling v dedickovany `_asw_dead_letters` sheet (append-only, separatni od `_asw_logs` run history), locking pravidla pro LockService. Specifikace — ne implementace.
+- **Owner:** Claude
+- **Code:** *(zadne code changes)* (—)
+- **Docs:** docs/24-automation-workflows.md, docs/20-current-state.md

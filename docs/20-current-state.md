@@ -80,6 +80,7 @@ CI validuje aktuálnost generated files a existenci governance souboru. Nevalidu
 
 - **Lead Lifecycle State Machine (CS1):** Autoritativni specifikace end-to-end lifecycle stavu leadu — viz `docs/21-business-process.md`. Definuje 18 canonical stavu (4 terminal, 3 review), 24 povolenych prechodu, derivacni pravidla z existujicich stage poli. Scope: od importu po reakci; WON/LOST jsou downstream mimo lifecycle. Implementace sloupce `lifecycle_state` neni soucasti CS1.
 - **Workflow Orchestrator (CS2):** Logicka orchestracni vrstva nad lifecycle — viz `docs/24-automation-workflows.md`. Hybrid model (poll + manual + reactive), 17 eventu, formalni step kontrakt, run history design. Kompatibilni s existujicimi Apps Script triggery.
+- **Reliability & Idempotency (CS3):** Idempotency keys, retry politika, dead-letter handling a locking pro vsechny automaticke workflow kroky — viz `docs/24-automation-workflows.md`. Definuje 12 kroku s idempotency strategii, retry matici (transient/permanent/ambiguous), dead-letter design v dedickovany `_asw_dead_letters` sheet (append-only, separatni od `_asw_logs` run history), lock pravidla pro Apps Script LockService.
 
 ## Co je rozpracovane
 
