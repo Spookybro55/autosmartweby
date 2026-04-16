@@ -223,6 +223,20 @@ function processRawImportBatch_(opts) {
         updated_at: now,
         processed_by: 'import_writer'
       });
+      if (!stats._importedLeadIds) stats._importedLeadIds = [];
+      stats._importedLeadIds.push(leadsRow.lead_id);
+    }
+  }
+
+  // A-06: auto web check for newly imported leads
+  if (!dryRun && stats._importedLeadIds && stats._importedLeadIds.length > 0) {
+    try {
+      var webCheckStats = runWebCheckForImportedLeads_(stats._importedLeadIds);
+      stats.webCheckStats = webCheckStats;
+      aswLog_('INFO', 'RawImportWriter', 'A-06 auto web check: ' + JSON.stringify(webCheckStats));
+    } catch (e) {
+      aswLog_('WARN', 'RawImportWriter', 'A-06 auto web check failed (non-fatal): ' + e.message);
+      stats.webCheckError = e.message;
     }
   }
 

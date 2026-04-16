@@ -10,6 +10,7 @@
 | Trigger | Typ | Frekvence | Funkce | Stav |
 |---------|-----|-----------|--------|------|
 | processPreviewQueue | Time-based | 15 min | Zpracovani kvalifikovanych leadu | Aktivni (DRY_RUN=true) |
+| autoWebCheckTrigger | Time-based | 15 min | Auto web check pro nove leady bez website_url (A-06) | Pripraveno (auto-install pres installProjectTriggers, ceka na clasp push) |
 | onOpen | Spreadsheet | Pri otevreni | Menu | Aktivni |
 | onContactSheetEdit | Spreadsheet | Pri editu | Write-back | Aktivni |
 
@@ -146,6 +147,26 @@ Mezi raw vstupem a LEADS zapisem bezi normalizacni vrstva. Kontrakt: `docs/contr
 **Null vs empty policy:** `phone`, `email`, `website_url` jsou vzdy string — `""` pokud invalid, nikdy `null`. Ostatni optional pole (`ico`, `contact_name`, `district`, `rating`, `reviews_count` atd.) zustavaji `null` pri chybejicim vstupu.
 
 **LEADS schema extension:** 6 novych sloupcu append-only na konec `EXTENSION_COLUMNS` v `Config.gs:63`. Legacy 1-20 nedotceno.
+
+## Auto web check hook (A-06)
+
+Automaticky web check pro LEADS radky bez `website_url`. Reusuje `findWebsiteForLead_()` z `LegacyWebCheck.gs`.
+
+**Soubor:** `apps-script/AutoWebCheckHook.gs`
+
+| Funkce | Ucel |
+|--------|------|
+| `runAutoWebCheck_(opts)` | Hlavni vstup: acquire lock, filtruj, spust web check, zapis vysledky |
+| `autoWebCheckTrigger()` | Entry point pro casovy trigger (auto-install pres installProjectTriggers) |
+| `runWebCheckForImportedLeads_(leadIds)` | Post-import hook volany z processRawImportBatch_() |
+
+**Filtrovaci pravidla:** `website_url` prazdny, `website_checked_at` prazdny (double-run prevence), `business_name` neprazdny.
+
+**Batch:** max 20 leadu per run (150ms rate limit × 20 = ~3s, bezpecne v 6min GAS limitu).
+
+**Fail handling:** Per-row try/catch, LockService guard, header validation guard.
+
+**Stav:** Lokalne overeno (9 testu, 31 asserti). Live Serper API a Sheets runtime NOT VERIFIED.
 
 ## Chybejici automatizace
 

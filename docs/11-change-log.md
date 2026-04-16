@@ -47,6 +47,34 @@ Scope explicitně NEOBSAHUJE:
 - **Owner:** Stream A
 - **Code:** apps-script/DedupeEngine.gs (new), apps-script/Helpers.gs (edit), apps-script/PreviewPipeline.gs (edit), apps-script/Config.gs (edit), docs/contracts/dedupe-decision.md (new), docs/23-data-model.md (edit), docs/24-automation-workflows.md (edit), docs/30-task-records/A5.md (new)
 
+### [A/A6] Auto web check hook — PARTIAL
+- **Scope:** Automatic web check hook that runs Serper-based website discovery on new LEADS rows without manual menu interaction. Reuses existing `findWebsiteForLead_()` from LegacyWebCheck.gs.
+
+What this task delivers:
+- `AutoWebCheckHook.gs` — GAS module with `runAutoWebCheck_(opts)`, `autoWebCheckTrigger()`, `runWebCheckForImportedLeads_(leadIds)`
+- **Automatic trigger installation** via `installProjectTriggers()` in PreviewPipeline.gs — trigger is auto-installed alongside processPreviewQueue, onOpen, onContactSheetEdit (no manual ScriptApp.newTrigger needed)
+- **Ingest pipeline wiring** — `processRawImportBatch_()` in RawImportWriter.gs calls `runWebCheckForImportedLeads_()` after importing leads (A-06 ← A-10 integration)
+- Filtering logic: skip leads with existing website_url, skip already-checked leads (website_checked_at), skip empty business_name
+- Batch size guard (default 20, configurable)
+- Per-row error isolation (one Serper failure does not abort batch)
+- LockService guard (prevents concurrent runs)
+- Double-run prevention via website_checked_at column
+- lead_id targeting mode for post-import hook integration
+- DRY_RUN support
+- Local proof harness with 9 evidence scenarios, 31 assertions, all passing
+
+What this task does NOT deliver:
+- Live Serper API verification (requires API key in Script Properties — not available locally)
+- Google Sheets runtime verification (requires clasp push after merge)
+- LEADS append in processRawImportBatch_ is still TODO (A-10 gap) — the web check hook IS wired, but the import step that feeds it lead_ids does not yet write to LEADS
+
+**Status rationale:** partial because:
+1. Trigger auto-install code exists in installProjectTriggers() — but clasp push + running installProjectTriggers() has not happened yet (requires merge to main first)
+2. Ingest pipeline hook IS wired in processRawImportBatch_() — but upstream LEADS append is TODO (A-10 gap), so the hook path cannot fire end-to-end yet
+3. Time-trigger path (autoWebCheckTrigger) works independently of ingest — it scans all LEADS for missing websites — but requires deployed trigger
+- **Owner:** Stream A
+- **Code:** apps-script/AutoWebCheckHook.gs (new), apps-script/PreviewPipeline.gs (edit), apps-script/RawImportWriter.gs (edit), scripts/test-a06-webcheck-hook.mjs (new), docs/30-task-records/A6.md (new), docs/20-current-state.md (edit), docs/24-automation-workflows.md (edit)
+
 ## 2026-04-11
 
 ### [A/A4] firmy.cz scraper — 1 portal runtime — DONE
