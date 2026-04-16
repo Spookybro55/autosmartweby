@@ -1,7 +1,7 @@
 # Data Model — Autosmartweby
 
 > **Kanonicky dokument.** Aktualizuje se pri zmene sloupcu, sheetu nebo datoveho toku.
-> **Posledni aktualizace:** 2026-04-05
+> **Posledni aktualizace:** 2026-04-16
 
 ---
 
@@ -33,7 +33,7 @@ Dalsi: source, ico, contact_name, segment, service_type, area, atd.
 
 ### Extension sloupce (45 sloupcu, append-only)
 Definovane v EXTENSION_COLUMNS (Config.gs):
-- **Deduplikace:** company_key, branch_key, dedupe_group, dedupe_flag
+- **Deduplikace:** company_key, branch_key, dedupe_group, dedupe_flag (A-05: company_key uses strict 8-digit IČO, blocked domain filter, required city for T4; see `docs/contracts/dedupe-decision.md`)
 - **Pipeline:** lead_stage, preview_stage, outreach_stage, qualified_for_preview, qualification_reason
 - **Template:** template_type, preview_slug, preview_url, preview_screenshot_url, preview_generated_at, preview_version, preview_brief_json
 - **Personalizace:** preview_headline, preview_subheadline, preview_cta, preview_quality_score, preview_needs_review
