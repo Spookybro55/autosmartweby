@@ -189,3 +189,97 @@ function runWebCheckForImportedLeads_(leadIds) {
     batchSize: leadIds.length
   });
 }
+
+/**
+ * TEST-ONLY diagnostic: captures BEFORE, runs A-06 inner logic with
+ * dryRun=false on 3 leads, captures AFTER, logs structured delta.
+ * Calls runAutoWebCheckInner_ directly to avoid lock contention.
+ * Normal trigger path (runAutoWebCheck_ with lock) is NOT changed.
+ * DELETE after A-06 verification is complete.
+ */
+function diagA06LiveDelta() {
+  var ss = openCrmSpreadsheet_();
+  var sheet = getExternalSheet_(ss);
+  var helperCols = ensureLegacyHelperColumns_(sheet);
+  var hr = getHeaderResolver_(sheet);
+  var leadIdIdx = hr.idxOrNull('lead_id');
+
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  var values = sheet.getRange(DATA_START_ROW, 1, lastRow - HEADER_ROW, lastCol).getValues();
+
+  var candidates = [];
+  for (var r = 0; r < values.length && candidates.length < 3; r++) {
+    var row = values[r];
+    var biz = String(row[LEGACY_COL.BUSINESS_NAME - 1] || '').trim();
+    if (!biz) continue;
+    var web = String(row[LEGACY_COL.WEBSITE - 1] || '').trim();
+    if (web) continue;
+    var chk = String(row[helperCols.checkedAtCol - 1] || '').trim();
+    if (chk) continue;
+    candidates.push({
+      sheetRow: DATA_START_ROW + r,
+      leadId: leadIdIdx !== null ? String(row[leadIdIdx] || '').trim() : '',
+      businessName: biz
+    });
+  }
+
+  if (candidates.length === 0) {
+    var result = { error: 'No eligible rows found (all have website_url or website_checked_at)' };
+    Logger.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(result, null, 2));
+    return result;
+  }
+
+  function readRow(sheetRow) {
+    var rv = sheet.getRange(sheetRow, 1, 1, lastCol).getValues()[0];
+    return {
+      website_url: String(rv[LEGACY_COL.WEBSITE - 1] || ''),
+      has_website: String(rv[LEGACY_COL.HAS_WEBSITE - 1] || ''),
+      website_check_note: String(rv[helperCols.noteCol - 1] || ''),
+      website_check_confidence: String(rv[helperCols.confidenceCol - 1] || ''),
+      website_checked_at: String(rv[helperCols.checkedAtCol - 1] || '')
+    };
+  }
+
+  var before = {};
+  for (var i = 0; i < candidates.length; i++) {
+    before[candidates[i].sheetRow] = readRow(candidates[i].sheetRow);
+  }
+
+  var stats = runAutoWebCheckInner_(3, false, null);
+
+  var after = {};
+  for (var i = 0; i < candidates.length; i++) {
+    after[candidates[i].sheetRow] = readRow(candidates[i].sheetRow);
+  }
+
+  var evidence = [];
+  for (var i = 0; i < candidates.length; i++) {
+    var c = candidates[i];
+    var b = before[c.sheetRow];
+    var a = after[c.sheetRow];
+    var changed = [];
+    for (var k in b) {
+      if (b[k] !== a[k]) changed.push(k);
+    }
+    evidence.push({
+      sheetRow: c.sheetRow,
+      leadId: c.leadId,
+      businessName: c.businessName,
+      before: b,
+      after: a,
+      changedFields: changed
+    });
+  }
+
+  var result = {
+    timestamp: new Date().toISOString(),
+    stats: stats,
+    evidence: evidence
+  };
+
+  Logger.log(JSON.stringify(result, null, 2));
+  console.log(JSON.stringify(result, null, 2));
+  return result;
+}

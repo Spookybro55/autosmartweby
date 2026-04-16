@@ -33,7 +33,7 @@ CI validuje aktuálnost generated files a existenci governance souboru. Nevalidu
 - Preview brief generovani (JSON: headline, subheadline, CTA, benefits, sections) — cesky s lokativy
 - Email draft generovani (personalizovany predmet + telo, situacne zavisly uvod)
 - Web check pres Serper API (hledani chybejicich webu) — manualni z menu
-- **Auto web check hook A-06** (`apps-script/AutoWebCheckHook.gs`) — automaticky web check pro nove LEADS radky bez website_url. Reusuje `findWebsiteForLead_()`, batch size 20, LockService guard, double-run prevence pres `website_checked_at`, per-row error isolation. Dva trigger mody: casovy (15min, auto-install pres installProjectTriggers) a post-import (lead_id cileny z processRawImportBatch_). **Stav: lokalne overeno** (9 testu, 31 asserti). **Neverifikovano:** live Serper API, Sheets runtime.
+- **Auto web check hook A-06** (`apps-script/AutoWebCheckHook.gs`) — automaticky web check pro nove LEADS radky bez website_url. Reusuje `findWebsiteForLead_()`, batch size 20, LockService guard, double-run prevence pres `website_checked_at`, per-row error isolation. Dva trigger mody: casovy (15min, auto-install pres installProjectTriggers) a post-import (lead_id cileny z processRawImportBatch_). **Stav: TEST runtime overeno** (2026-04-17, kontrolovany delta test na 3 radcich: 1 FOUND + 2 NOT_FOUND, live Serper API + Sheets zapis potvrzeny).
 - Odvozeny list "Ke kontaktovani" s KPI dashboardem, prioritou, editovatelnymi sloupci
 - Write-back Varianta B (lead_id lookup, imunni vuci posunu radku)
 - Per-lead Gmail draft/send z "Ke kontaktovani" sheetu
