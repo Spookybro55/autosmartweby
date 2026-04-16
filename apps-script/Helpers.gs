@@ -361,7 +361,9 @@ function extractDomainFromUrl_(url) {
     if (s.indexOf('://') === -1) s = 'https://' + s;
     var match = s.match(/^https?:\/\/([^\/\?#]+)/);
     if (!match) return '';
-    return match[1].replace(/^www\./, '');
+    var dom = match[1].replace(/^www\./, '');
+    if (dom.indexOf('.') === -1) return '';
+    return dom;
   } catch (e) {
     return '';
   }

@@ -33,7 +33,7 @@ What this task does NOT deliver:
 - **Owner:** Stream A
 - **Code:** apps-script/AutoWebCheckHook.gs (new), apps-script/PreviewPipeline.gs (edit), apps-script/RawImportWriter.gs (edit), scripts/test-a06-webcheck-hook.mjs (new), docs/30-task-records/A6.md (new), docs/20-current-state.md (edit), docs/24-automation-workflows.md (edit)
 
-### [A/A7] Auto qualify hook — PARTIAL
+### [A/A7] Auto qualify hook — DONE
 - **Scope:** Automatic qualification hook that runs `evaluateQualification_()` on LEADS rows after web check completes. Eliminates the need for manual "Qualify leads" menu action for newly web-checked leads.
 
 What this task delivers:
@@ -52,9 +52,9 @@ What this task does NOT deliver:
 - Within-LEADS batch dedupe recalculation (handled separately by existing `qualifyLeads()`)
 - Live TEST runtime verification (requires clasp push + SERPER_API_KEY in TEST project)
 
-**Status rationale:** partial — code complete and locally verified. Same pattern as A-06 (timer trigger + post-hook). TEST runtime verification not yet performed.
+**Status rationale:** done — code complete, locally verified (23 assertions), TEST runtime verified (QUALIFIED, DISQUALIFIED, REVIEW, SKIPPED guard). Failure isolation proven by code structure + local harness (not by live forced exception). Bug fix: `extractDomainFromUrl_` now requires dot in domain (prevents `dom:nenalezeno`).
 - **Owner:** Stream A
-- **Code:** apps-script/AutoQualifyHook.gs (new), apps-script/AutoWebCheckHook.gs (edit), apps-script/PreviewPipeline.gs (edit), scripts/test-a07-qualify-hook.mjs (new), docs/30-task-records/A7.md (new), docs/20-current-state.md (edit), docs/24-automation-workflows.md (edit)
+- **Code:** apps-script/AutoQualifyHook.gs (new), apps-script/AutoWebCheckHook.gs (edit), apps-script/PreviewPipeline.gs (edit), scripts/test-a07-qualify-hook.mjs (new), docs/30-task-records/A7.md (new), apps-script/Helpers.gs (edit), docs/20-current-state.md (edit), docs/24-automation-workflows.md (edit)
 - **Docs:** docs/20-current-state.md, docs/24-automation-workflows.md
 
 ## 2026-04-16

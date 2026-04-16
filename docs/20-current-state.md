@@ -38,7 +38,7 @@ CI validuje aktuálnost generated files a existenci governance souboru. Nevalidu
 - Write-back Varianta B (lead_id lookup, imunni vuci posunu radku)
 - Per-lead Gmail draft/send z "Ke kontaktovani" sheetu
 - Mailbox sync (read-only: thread_id, reply_type, timestamps, CRM labely)
-- **Auto qualify hook A-07** (`apps-script/AutoQualifyHook.gs`) — automaticka kvalifikace po web checku. Reusuje `evaluateQualification_()`, batch size 20, LockService guard, double-run prevence pres `lead_stage`. Dva trigger mody: casovy (15min, auto-install pres installProjectTriggers) a post-web-check (volany z A-06 runAutoWebCheckInner_). **Stav: lokalne overeno** (23 asserti, 6 scenaru). **Neverifikovano:** Google Sheets runtime.
+- **Auto qualify hook A-07** (`apps-script/AutoQualifyHook.gs`) — automaticka kvalifikace po web checku. Reusuje `evaluateQualification_()`, batch size 20, LockService guard, double-run prevence pres `lead_stage`. Dva trigger mody: casovy (15min, auto-install pres installProjectTriggers) a post-web-check (volany z A-06 runAutoWebCheckInner_). **Stav: TEST runtime overeno** (2026-04-17, QUALIFIED + DISQUALIFIED + REVIEW + SKIPPED guard provereny diagnostickymi funkcemi, 23 lokalnich asserti). Bug fix: `extractDomainFromUrl_` vyzaduje tecku v domene (prevence `dom:nenalezeno`).
 - Triggery: 15min timer (processPreviewQueue, autoWebCheckTrigger, autoQualifyTrigger), onOpen (menu), onEdit (write-back)
 - DRY_RUN defaultne zapnuty
 

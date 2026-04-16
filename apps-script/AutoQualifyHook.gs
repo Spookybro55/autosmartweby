@@ -179,105 +179,68 @@ function runQualifyForWebCheckedLeads_(leadIds) {
 }
 
 /**
- * TEST-ONLY diagnostic: captures BEFORE, runs auto qualify with dryRun=false
- * on up to 5 leads, captures AFTER, logs structured delta.
- * Calls runAutoQualifyInner_ directly to avoid lock contention.
+ * TEST-ONLY: DISQUALIFIED proof.
+ * Finds first eligible row with no email AND no phone, qualifies it via
+ * targetLeadIds, captures BEFORE/AFTER delta. Minimal output.
  * DELETE after A-07 verification is complete.
  */
-function diagA07LiveDelta() {
+function diagA07DqProof() {
   var ss = openCrmSpreadsheet_();
   var sheet = getExternalSheet_(ss);
-
-  if (!ensurePreviewExtensionReady_(sheet)) {
-    var result = { error: 'Extension columns not ready' };
-    Logger.log(JSON.stringify(result, null, 2));
-    console.log(JSON.stringify(result, null, 2));
-    return result;
-  }
+  if (!ensurePreviewExtensionReady_(sheet)) return lr_({ error: 'ext not ready' });
 
   var hr = getHeaderResolver_(sheet);
   var bulk = readAllData_(sheet);
   var checkedAtIdx = hr.idxOrNull('website_checked_at');
+  var leadIdIdx = hr.idxOrNull('lead_id');
+  var EF = ['lead_stage','qualified_for_preview','qualification_reason','send_allowed','personalization_level','company_key','branch_key','preview_stage','outreach_stage'];
 
-  var EVIDENCE_FIELDS = [
-    'lead_stage', 'qualified_for_preview', 'qualification_reason',
-    'send_allowed', 'personalization_level', 'company_key',
-    'preview_stage', 'outreach_stage'
-  ];
-
-  var candidates = [];
-  for (var i = 0; i < bulk.data.length && candidates.length < 5; i++) {
+  var dq = null;
+  var eligTotal = 0;
+  var dqTotal = 0;
+  for (var i = 0; i < bulk.data.length; i++) {
     var row = bulk.data[i];
-    var leadStage = trimLower_(hr.get(row, 'lead_stage'));
-    if (leadStage) continue;
-    var businessName = String(hr.get(row, 'business_name') || '').trim();
-    if (!businessName) continue;
-    var checkedAt = checkedAtIdx !== null ? String(row[checkedAtIdx] || '').trim() : '';
-    var hasWebsite = String(hr.get(row, 'has_website') || '').trim();
-    if (!checkedAt && !hasWebsite) continue;
-    var leadIdIdx = hr.idxOrNull('lead_id');
-    candidates.push({
-      sheetRow: DATA_START_ROW + i,
-      leadId: leadIdIdx !== null ? String(row[leadIdIdx] || '').trim() : '',
-      businessName: businessName
-    });
-  }
-
-  if (candidates.length === 0) {
-    var result = { error: 'No eligible rows (all already have lead_stage or missing web check)' };
-    Logger.log(JSON.stringify(result, null, 2));
-    console.log(JSON.stringify(result, null, 2));
-    return result;
-  }
-
-  function readEvidenceRow(sheetRow) {
-    var rv = sheet.getRange(sheetRow, 1, 1, sheet.getLastColumn()).getValues()[0];
-    var obj = {};
-    for (var f = 0; f < EVIDENCE_FIELDS.length; f++) {
-      var idx = hr.idxOrNull(EVIDENCE_FIELDS[f]);
-      obj[EVIDENCE_FIELDS[f]] = idx !== null ? String(rv[idx] || '') : '';
+    var biz = String(hr.get(row, 'business_name') || '').trim();
+    if (!biz) continue;
+    if (trimLower_(hr.get(row, 'lead_stage'))) continue;
+    var ca = checkedAtIdx !== null ? String(row[checkedAtIdx] || '').trim() : '';
+    var hw = String(hr.get(row, 'has_website') || '').trim();
+    if (!ca && !hw) continue;
+    eligTotal++;
+    var em = String(hr.get(row, 'email') || '').trim();
+    var ph = String(hr.get(row, 'phone') || '').trim();
+    if (!em && !ph) {
+      dqTotal++;
+      if (!dq) {
+        var lid = leadIdIdx !== null ? String(row[leadIdIdx] || '').trim() : '';
+        dq = { idx: i, biz: biz, lid: lid };
+      }
     }
-    return obj;
   }
 
-  var before = {};
-  for (var i = 0; i < candidates.length; i++) {
-    before[candidates[i].sheetRow] = readEvidenceRow(candidates[i].sheetRow);
+  if (!dq) return lr_({ noDqCandidates: true, eligTotal: eligTotal, dqTotal: dqTotal, hint: 'All eligible rows have email or phone — no NO_CONTACT DQ possible from current data' });
+  if (!dq.lid) return lr_({ error: 'DQ candidate has no lead_id — cannot target', row: DATA_START_ROW + dq.idx });
+
+  var sr = DATA_START_ROW + dq.idx;
+  function readR() {
+    var rv = sheet.getRange(sr, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var o = {};
+    for (var f = 0; f < EF.length; f++) { var x = hr.idxOrNull(EF[f]); o[EF[f]] = x !== null ? String(rv[x] || '') : ''; }
+    return o;
   }
 
-  var stats = runAutoQualifyInner_(5, false, null);
+  var before = readR();
+  var stats = runAutoQualifyInner_(1, false, [dq.lid]);
+  var after = readR();
+  var ch = [];
+  for (var k in before) { if (before[k] !== after[k]) ch.push(k); }
 
-  var after = {};
-  for (var i = 0; i < candidates.length; i++) {
-    after[candidates[i].sheetRow] = readEvidenceRow(candidates[i].sheetRow);
-  }
+  return lr_({ proof: 'DISQUALIFIED', row: sr, lid: dq.lid, biz: dq.biz, before: before, after: after, changed: ch, stats: stats });
+}
 
-  var evidence = [];
-  for (var i = 0; i < candidates.length; i++) {
-    var c = candidates[i];
-    var b = before[c.sheetRow];
-    var a = after[c.sheetRow];
-    var changed = [];
-    for (var k in b) {
-      if (b[k] !== a[k]) changed.push(k);
-    }
-    evidence.push({
-      sheetRow: c.sheetRow,
-      leadId: c.leadId,
-      businessName: c.businessName,
-      before: b,
-      after: a,
-      changedFields: changed
-    });
-  }
-
-  var result = {
-    timestamp: new Date().toISOString(),
-    stats: stats,
-    evidence: evidence
-  };
-
-  Logger.log(JSON.stringify(result, null, 2));
-  console.log(JSON.stringify(result, null, 2));
-  return result;
+function lr_(obj) {
+  var s = JSON.stringify(obj, null, 2);
+  Logger.log(s);
+  console.log(s);
+  return obj;
 }
