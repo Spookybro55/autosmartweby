@@ -15,6 +15,7 @@
 | A4 | A | firmy.cz scraper — 1 portal runtime | Stream A | done | 2026-04-11 | docs/20-current-state.md, docs/23-data-model.md, docs/24-automation-workflows.md, docs/30-task-records/A4.md | scripts |
 | A5 | A | Dedupe & company_key matching | Stream A | done | 2026-04-16 | - | apps-script, docs |
 | A6 | A | Auto web check hook | Stream A | done | 2026-04-17 | - | apps-script, scripts, docs |
+| A7 | A | Auto qualify hook | Stream A | partial | 2026-04-17 | docs/20-current-state.md, docs/24-automation-workflows.md | apps-script, scripts, docs |
 | B1 | B | Preview brief data contract — formalizace datov... | — | done | 2026-04-05 | docs/23-data-model.md, docs/26-offer-generation.md, docs/30-task-records/B1.md | crm-frontend |
 | B2 | B | Preview renderer na sample briefu | — | done | 2026-04-08 | docs/20-current-state.md, docs/22-technical-architecture.md, docs/26-offer-generation.md, docs/30-task-records/B2.md | crm-frontend |
 | C2 | C | Hardening audit — přepis sekce Souhrn v docs/20 | claude | done | 2026-04-05 | docs/20-current-state.md | — |
@@ -24,4 +25,4 @@
 | CS2 | C | Navrhnout workflow orchestrator — co spousti co... | Claude | done | 2026-04-05 | docs/24-automation-workflows.md, docs/20-current-state.md | *(zadne code changes)* |
 | CS3 | C | Definovat idempotency keys, retry politiku a de... | Claude | done | 2026-04-05 | docs/24-automation-workflows.md, docs/20-current-state.md | *(zadne code changes)* |
 
-*15 tasks total.*
+*16 tasks total.*

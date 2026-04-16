@@ -160,6 +160,23 @@ function runAutoWebCheckInner_(batchSize, dryRun, targetLeadIds) {
     }
   }
 
+  // A-07: auto qualify for web-checked leads
+  if (!dryRun && websiteUpdates.length > 0) {
+    try {
+      var qualifyStats = runQualifyForWebCheckedLeads_(
+        websiteUpdates.map(function(u) {
+          var lid = leadIdIdx !== null ? String(values[u.rowIndex][leadIdIdx] || '').trim() : '';
+          return lid;
+        }).filter(function(id) { return id; })
+      );
+      stats.qualifyStats = qualifyStats;
+      aswLog_('INFO', 'runAutoWebCheck_', 'A-07 auto qualify: ' + JSON.stringify(qualifyStats));
+    } catch (e) {
+      aswLog_('WARN', 'runAutoWebCheck_', 'A-07 auto qualify failed (non-fatal): ' + e.message);
+      stats.qualifyError = e.message;
+    }
+  }
+
   aswLog_('INFO', 'runAutoWebCheck_',
     'Auto web check complete: ' + JSON.stringify(stats));
 

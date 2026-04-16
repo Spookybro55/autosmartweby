@@ -11,6 +11,7 @@
 |---------|-----|-----------|--------|------|
 | processPreviewQueue | Time-based | 15 min | Zpracovani kvalifikovanych leadu | Aktivni (DRY_RUN=true) |
 | autoWebCheckTrigger | Time-based | 15 min | Auto web check pro nove leady bez website_url (A-06) | Pripraveno (auto-install pres installProjectTriggers, ceka na clasp push) |
+| autoQualifyTrigger | Time-based | 15 min | Auto kvalifikace po web checku (A-07) | Pripraveno (auto-install pres installProjectTriggers, ceka na clasp push) |
 | onOpen | Spreadsheet | Pri otevreni | Menu | Aktivni |
 | onContactSheetEdit | Spreadsheet | Pri editu | Write-back | Aktivni |
 
@@ -167,6 +168,28 @@ Automaticky web check pro LEADS radky bez `website_url`. Reusuje `findWebsiteFor
 **Fail handling:** Per-row try/catch, LockService guard, header validation guard.
 
 **Stav:** Lokalne overeno (9 testu, 31 asserti). Live Serper API a Sheets runtime NOT VERIFIED.
+
+## Auto qualify hook (A-07)
+
+Automaticka kvalifikace LEADS radku po web checku. Reusuje `evaluateQualification_()` z `PreviewPipeline.gs`.
+
+**Soubor:** `apps-script/AutoQualifyHook.gs`
+
+| Funkce | Ucel |
+|--------|------|
+| `runAutoQualify_(opts)` | Hlavni vstup: acquire lock, filtruj, spust kvalifikaci, zapis vysledky |
+| `autoQualifyTrigger()` | Entry point pro casovy trigger (auto-install pres installProjectTriggers) |
+| `runQualifyForWebCheckedLeads_(leadIds)` | Post-web-check hook volany z runAutoWebCheckInner_() |
+
+**Filtrovaci pravidla:** `lead_stage` prazdny (double-run prevence), `business_name` neprazdny, `website_checked_at` nastaveny NEBO `has_website` ma hodnotu.
+
+**Vysledky:** QUALIFIED / DISQUALIFIED / REVIEW — s `qualification_reason`. Qualified leady dostanou `preview_stage=NOT_STARTED` a `outreach_stage=NOT_CONTACTED`.
+
+**Batch:** max 20 leadu per run. Zapis pres `writeExtensionColumns_()` (changed-only).
+
+**Fail handling:** Per-row try/catch, LockService guard, extension columns guard.
+
+**Stav:** Lokalne overeno (6 scenaru, 23 asserti). Google Sheets runtime NOT VERIFIED.
 
 ## Chybejici automatizace
 

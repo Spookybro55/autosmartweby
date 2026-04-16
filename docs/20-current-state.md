@@ -26,7 +26,7 @@ CI validuje aktuálnost generated files a existenci governance souboru. Nevalidu
 
 ## Co dnes existuje
 
-### Apps Script backend (10 souboru, ~5000 radku)
+### Apps Script backend (11 souboru, ~5200 radku)
 - Kvalifikace leadu (evaluateQualification_) — rucni spusteni z menu
 - Deduplikace pres company_key (ICO > domena > email > normalizovane jmeno + mesto)
 - Template selection (12+ variant podle segmentu)
@@ -38,7 +38,8 @@ CI validuje aktuálnost generated files a existenci governance souboru. Nevalidu
 - Write-back Varianta B (lead_id lookup, imunni vuci posunu radku)
 - Per-lead Gmail draft/send z "Ke kontaktovani" sheetu
 - Mailbox sync (read-only: thread_id, reply_type, timestamps, CRM labely)
-- Triggery: 15min timer (processPreviewQueue), onOpen (menu), onEdit (write-back)
+- **Auto qualify hook A-07** (`apps-script/AutoQualifyHook.gs`) — automaticka kvalifikace po web checku. Reusuje `evaluateQualification_()`, batch size 20, LockService guard, double-run prevence pres `lead_stage`. Dva trigger mody: casovy (15min, auto-install pres installProjectTriggers) a post-web-check (volany z A-06 runAutoWebCheckInner_). **Stav: lokalne overeno** (23 asserti, 6 scenaru). **Neverifikovano:** Google Sheets runtime.
+- Triggery: 15min timer (processPreviewQueue, autoWebCheckTrigger, autoQualifyTrigger), onOpen (menu), onEdit (write-back)
 - DRY_RUN defaultne zapnuty
 
 ### CRM frontend (Next.js 16 + React 19)
