@@ -8,6 +8,27 @@
 
 ## 2026-04-16
 
+### [A/A10] Ingest runtime bridge — staging writer + normalizer + dedupe handoff — PARTIAL
+- **Scope:** A-02/A-03/A-05 runtime bridge: implements the GAS functions for _raw_import staging, normalization, and dedupe handoff. Locally verified; not yet deployed to Google Sheets.
+
+What this task delivers:
+- `_raw_import` staging sheet creation and row writing functions (A-02 runtime)
+- `normalizeRawImportRow_()` per A-03 contract (field cleaning, reject policy)
+- Pipeline orchestrator: raw → normalize → dedupe → import/reject
+- 6 new `source_*` columns added to EXTENSION_COLUMNS per A-03 contract
+- Local proof harness demonstrating complete ingest lifecycle
+
+What this task does NOT deliver:
+- Live Google Sheets deployment (requires clasp push from main — blocked until merge)
+- LEADS row append (marked TODO in processRawImportBatch_ — the import_writer step updates _raw_import status but does not yet write to LEADS sheet)
+- Google Sheets runtime verification (ensureRawImportSheet_, writeRawImportRows_, updateRawImportRow_ are untested against real Sheets API)
+- Review UI for pending_review rows
+- Fuzzy matching
+
+**Status rationale:** partial because the GAS code is written and logic is locally proven, but Sheets runtime (create sheet, write rows, update status in real spreadsheet) and LEADS append are not verified. This is a runtime bridge, not a complete ingest pipeline.
+- **Owner:** Stream A
+- **Code:** apps-script/Normalizer.gs (new), apps-script/RawImportWriter.gs (new), apps-script/Config.gs (edit), scripts/test-ingest-runtime.mjs (new), scripts/test-wave4-pipeline.mjs (new), docs/30-task-records/A10.md (new)
+
 ### [A/A5] Dedupe & company_key matching — DONE
 - **Scope:** Formalizace a rozšíření existující dedupe logiky v Apps Script. Cílem je:
 - deterministický company_key algoritmus se strict IČO validací (8 číslic)
