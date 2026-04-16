@@ -10,7 +10,8 @@
 | Trigger | Typ | Frekvence | Funkce | Stav |
 |---------|-----|-----------|--------|------|
 | processPreviewQueue | Time-based | 15 min | Zpracovani kvalifikovanych leadu | Aktivni (DRY_RUN=true) |
-| autoWebCheckTrigger | Time-based | 15 min | Auto web check pro nove leady bez website_url (A-06) | Pripraveno (auto-install pres installProjectTriggers, ceka na clasp push) |
+| autoWebCheckTrigger | Time-based | 15 min | Auto web check pro nove leady bez website_url (A-06) | Aktivni (auto-install pres installProjectTriggers, pushed to TEST) |
+| autoQualifyTrigger | Time-based | 15 min | Auto kvalifikace po web checku (A-07) | Aktivni (auto-install pres installProjectTriggers, pushed to TEST) |
 | onOpen | Spreadsheet | Pri otevreni | Menu | Aktivni |
 | onContactSheetEdit | Spreadsheet | Pri editu | Write-back | Aktivni |
 
@@ -167,6 +168,28 @@ Automaticky web check pro LEADS radky bez `website_url`. Reusuje `findWebsiteFor
 **Fail handling:** Per-row try/catch, LockService guard, header validation guard.
 
 **Stav:** Lokalne overeno (9 testu, 31 asserti). Live Serper API a Sheets runtime NOT VERIFIED.
+
+## Auto qualify hook (A-07)
+
+Automaticka kvalifikace LEADS radku po web checku. Reusuje `evaluateQualification_()` z `PreviewPipeline.gs`.
+
+**Soubor:** `apps-script/AutoQualifyHook.gs`
+
+| Funkce | Ucel |
+|--------|------|
+| `runAutoQualify_(opts)` | Hlavni vstup: acquire lock, filtruj, spust kvalifikaci, zapis vysledky |
+| `autoQualifyTrigger()` | Entry point pro casovy trigger (auto-install pres installProjectTriggers) |
+| `runQualifyForWebCheckedLeads_(leadIds)` | Post-web-check hook volany z runAutoWebCheckInner_() |
+
+**Filtrovaci pravidla:** `lead_stage` prazdny (double-run prevence), `business_name` neprazdny, `website_checked_at` nastaveny NEBO `has_website` ma hodnotu.
+
+**Vysledky:** QUALIFIED / DISQUALIFIED / REVIEW — s `qualification_reason`. Qualified leady dostanou `preview_stage=NOT_STARTED` a `outreach_stage=NOT_CONTACTED`.
+
+**Batch:** max 20 leadu per run. Zapis pres `writeExtensionColumns_()` (changed-only).
+
+**Fail handling:** Per-row try/catch, LockService guard, extension columns guard. Lifecycle guard: radky s neprazdnym lead_stage se preskakuji (zadny overwrite).
+
+**Stav:** TEST runtime overeno (QUALIFIED, DISQUALIFIED, REVIEW, SKIPPED guard). Lokalne: 6 scenaru, 23 asserti. Failure isolation: code structure + local harness.
 
 ## Chybejici automatizace
 
@@ -767,7 +790,7 @@ Legenda:
 | # | Mezera | Dopad | Poznamka |
 |---|--------|-------|----------|
 | M1 | **Ingest pipeline neexistuje** — qualifyLeads() dela normalizaci + dedupe + kvalifikaci naraz | Orchestrator nema co orchestrovat v ingest vrstve | Implementace je scope A-stream tasku (A-02, A-03, A-05) |
-| M2 | **Zadna automaticka kvalifikace po web checku** | Po runWebsiteCheck operator musi rucne spustit qualifyLeads | Budouci A-07 (auto qualify hook) |
+| M2 | ~~Zadna automaticka kvalifikace po web checku~~ | Vyreseno | A-07 (auto qualify hook) — implementovano a TEST runtime overeno |
 | M3 | **processPreviewQueue zastava na BRIEF_READY (DRY_RUN)** | Preview/outreach pipeline za BRIEF_READY neni testovana v produkci | Pipeline od BRIEF_READY dal je specifikovana, ne overena |
 | M4 | **Mailbox sync neaktualizuje lifecycle konzistentne** (M-8) | BOUNCED stav se nedostane do outreach_stage | Resi se az implementaci lifecycle_state sloupce |
 | M5 | **Email send je per-lead manual bez fronty** | Hromadne odesilani neexistuje | C-05 (outbound queue) |

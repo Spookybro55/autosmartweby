@@ -33,6 +33,30 @@ What this task does NOT deliver:
 - **Owner:** Stream A
 - **Code:** apps-script/AutoWebCheckHook.gs (new), apps-script/PreviewPipeline.gs (edit), apps-script/RawImportWriter.gs (edit), scripts/test-a06-webcheck-hook.mjs (new), docs/30-task-records/A6.md (new), docs/20-current-state.md (edit), docs/24-automation-workflows.md (edit)
 
+### [A/A7] Auto qualify hook — DONE
+- **Scope:** Automatic qualification hook that runs `evaluateQualification_()` on LEADS rows after web check completes. Eliminates the need for manual "Qualify leads" menu action for newly web-checked leads.
+
+What this task delivers:
+- `AutoQualifyHook.gs` — GAS module with `runAutoQualify_(opts)`, `autoQualifyTrigger()`, `runQualifyForWebCheckedLeads_(leadIds)`
+- **Automatic trigger installation** via `installProjectTriggers()` in PreviewPipeline.gs (15-min timer alongside A-06)
+- **Post-web-check hook** — `runAutoWebCheckInner_` calls `runQualifyForWebCheckedLeads_()` after web check writes complete
+- Eligible row criteria: `lead_stage` empty + `business_name` present + (`website_checked_at` set OR `has_website` has value)
+- Per-row error isolation (one qualification failure does not abort batch)
+- LockService guard (prevents concurrent runs)
+- Double-run prevention via `lead_stage` field (if already set, skip)
+- DRY_RUN support
+- Local proof harness with 23 assertions, all passing
+
+What this task does NOT deliver:
+- Changes to `evaluateQualification_()` logic itself (reused as-is from PreviewPipeline.gs)
+- Within-LEADS batch dedupe recalculation (handled separately by existing `qualifyLeads()`)
+- Live TEST runtime verification (requires clasp push + SERPER_API_KEY in TEST project)
+
+**Status rationale:** done — code complete, locally verified (23 assertions), TEST runtime verified (QUALIFIED, DISQUALIFIED, REVIEW, SKIPPED guard). Failure isolation proven by code structure + local harness (not by live forced exception). Bug fix: `extractDomainFromUrl_` now requires dot in domain (prevents `dom:nenalezeno`).
+- **Owner:** Stream A
+- **Code:** apps-script/AutoQualifyHook.gs (new), apps-script/AutoWebCheckHook.gs (edit), apps-script/PreviewPipeline.gs (edit), scripts/test-a07-qualify-hook.mjs (new), docs/30-task-records/A7.md (new), apps-script/Helpers.gs (edit), docs/20-current-state.md (edit), docs/24-automation-workflows.md (edit)
+- **Docs:** docs/20-current-state.md, docs/24-automation-workflows.md
+
 ## 2026-04-16
 
 ### [A/A10] Ingest runtime bridge — staging writer + normalizer + dedupe handoff — PARTIAL

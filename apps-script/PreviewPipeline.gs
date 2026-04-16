@@ -1343,6 +1343,7 @@ function installProjectTriggers() {
   var hasOnOpen = false;
   var hasOnEdit = false;
   var hasWebCheck = false;
+  var hasAutoQualify = false;
 
   for (var i = 0; i < existing.length; i++) {
     var fn = existing[i].getHandlerFunction();
@@ -1359,6 +1360,9 @@ function installProjectTriggers() {
     }
     if (fn === 'autoWebCheckTrigger' && evType === ScriptApp.EventType.CLOCK) {
       hasWebCheck = true;
+    }
+    if (fn === 'autoQualifyTrigger' && evType === ScriptApp.EventType.CLOCK) {
+      hasAutoQualify = true;
     }
   }
 
@@ -1378,6 +1382,14 @@ function installProjectTriggers() {
       .everyMinutes(15)
       .create();
     installed.push('Timer: autoWebCheckTrigger (15 min) — A-06');
+  }
+
+  if (!hasAutoQualify) {
+    ScriptApp.newTrigger('autoQualifyTrigger')
+      .timeBased()
+      .everyMinutes(15)
+      .create();
+    installed.push('Timer: autoQualifyTrigger (15 min) — A-07');
   }
 
   if (!hasOnOpen) {
