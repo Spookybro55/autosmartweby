@@ -62,7 +62,12 @@ Scraping Job Input kontrakt definuje vstupni payload pro jeden scraping job. RAW
 
 ## Ingest flow (scraper -> _raw_import -> LEADS)
 
-Staging-based ingest pipeline. Navrh v A-02 (RAW_IMPORT staging layer). Runtime implementace je castecna — **scraper (A-04) je hotovy** jako Node ESM skript v `scripts/scraper/`, **dedupe engine (A-05) je hotovy** v `apps-script/DedupeEngine.gs` (callable, tested with synthetic batch), normalizer a import writer jsou zatim pouze kontraktualne definovane (A-03, open).
+Staging-based ingest pipeline. Navrh v A-02 (RAW_IMPORT staging layer). Runtime implementace je kompletni pro lokalni proof:
+- **Scraper (A-04)** je hotovy jako Node ESM skript v `scripts/scraper/`
+- **Dedupe engine (A-05)** je hotovy v `apps-script/DedupeEngine.gs`
+- **Normalizer (A-10)** je implementovany v `apps-script/Normalizer.gs` — `normalizeRawImportRow_()` per A-03 contract (localne overeno)
+- **Staging writer (A-10)** je implementovany v `apps-script/RawImportWriter.gs` — sheet creation, row write, status update, batch orchestrator (localne overeno; Sheets runtime NOT VERIFIED)
+- **Lokalni proof:** `scripts/test-ingest-runtime.mjs` prochazi celou pipeline (7 rows: 1 reject, 2 hard dup, 4 imported). LEADS append je TODO.
 
 ```
 1. Scraper (A-04)      -> insert do _raw_import [status: raw]

@@ -142,7 +142,20 @@ Novy system sheet ve stejnem SPREADSHEET_ID jako LEADS. Konvence leading undersc
 
 ### Producer (A-04)
 
-Nove radky do `_raw_import` produkuje **scraper runtime** (`scripts/scraper/firmy-cz.mjs`, viz task A-04). Pro 1 A-01 `ScrapingJobInput` vraci pole validnich `RawImportRow` objektu s `normalized_status="raw"`, `processed_by="scraper"` a `raw_payload_json` ve tvaru klicu odpovidajicich A-03 mappingu. Zapis do Sheets (append-only) je samostatny downstream krok, zatim neimplementovano.
+Nove radky do `_raw_import` produkuje **scraper runtime** (`scripts/scraper/firmy-cz.mjs`, viz task A-04). Pro 1 A-01 `ScrapingJobInput` vraci pole validnich `RawImportRow` objektu s `normalized_status="raw"`, `processed_by="scraper"` a `raw_payload_json` ve tvaru klicu odpovidajicich A-03 mappingu.
+
+### Runtime writer (A-10)
+
+Zapis do Sheets zajistuje `apps-script/RawImportWriter.gs`:
+- `ensureRawImportSheet_(ss)` — vytvori `_raw_import` sheet s 16-sloupcovymi hlavickami, pokud neexistuje
+- `writeRawImportRows_(sheet, rows)` — append-only batch zapis raw radku
+- `updateRawImportRow_(sheet, id, updates)` — in-place update mutabilnich poli
+- `processRawImportBatch_(opts)` — orchestrator: raw → normalize (A-03) → dedupe (A-05) → import/reject
+
+Normalizaci provadi `apps-script/Normalizer.gs`:
+- `normalizeRawImportRow_(rawRow)` — A-03 field cleaning, reject policy, vraci LEADS-ready objekt nebo error s reason codem
+
+**Stav:** Logika localne overena (`scripts/test-ingest-runtime.mjs`). Sheets runtime ceka na clasp push po merge do main.
 
 ## Normalization: raw -> LEADS (A-03)
 

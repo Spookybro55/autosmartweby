@@ -16,6 +16,7 @@ var SPREADSHEET_ID = '1RBcLZkn3AruiqaQdJ7PHIxvCcoO5SC9Qnlw_NiLnpYc';
 var MAIN_SHEET_NAME    = 'LEADS';
 var CONTACT_SHEET_NAME = 'Ke kontaktování';
 var LOG_SHEET_NAME     = '_asw_logs';
+var RAW_IMPORT_SHEET_NAME = '_raw_import';
 var HEADER_ROW      = 1;
 var DATA_START_ROW  = 2;
 
@@ -109,7 +110,13 @@ var EXTENSION_COLUMNS = [
   'email_reply_type',
   'email_mailbox_account',
   'email_subject_last',
-  'email_last_error'
+  'email_last_error',
+  'source_job_id',
+  'source_portal',
+  'source_url',
+  'source_raw_import_id',
+  'source_scraped_at',
+  'source_imported_at'
 ];
 
 /* ── Preview stage state machine ──────────────────────────── */
