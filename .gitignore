@@ -48,3 +48,7 @@ __pycache__/
 
 # OneDrive lock artifacts
 docs/09-project-control-tower.md.updated
+
+# Scraper live output (A-04) — contains real contact data from firmy.cz, do not commit.
+# Fixture-based output.sample.json stays tracked as reproducible acceptance artefact.
+scripts/scraper/samples/output.live.json

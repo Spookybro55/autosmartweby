@@ -1,7 +1,7 @@
 # Automation Workflows — Autosmartweby
 
 > **Kanonicky dokument.** Aktualizuje se pri zmene automatizacnich procesu.
-> **Posledni aktualizace:** 2026-04-05
+> **Posledni aktualizace:** 2026-04-16
 
 ---
 
@@ -62,7 +62,7 @@ Scraping Job Input kontrakt definuje vstupni payload pro jeden scraping job. RAW
 
 ## Ingest flow (scraper -> _raw_import -> LEADS)
 
-Staging-based ingest pipeline. Navrh v A-02 (RAW_IMPORT staging layer), kod jeste neni implementovan.
+Staging-based ingest pipeline. Navrh v A-02 (RAW_IMPORT staging layer). Runtime implementace je castecna — **scraper (A-04) je hotovy** jako Node ESM skript v `scripts/scraper/`, **dedupe engine (A-05) je hotovy** v `apps-script/DedupeEngine.gs` (callable, tested with synthetic batch), normalizer a import writer jsou zatim pouze kontraktualne definovane (A-03, open).
 
 ```
 1. Scraper (A-04)      -> insert do _raw_import [status: raw]
@@ -78,6 +78,52 @@ Staging-based ingest pipeline. Navrh v A-02 (RAW_IMPORT staging layer), kod jest
 **Boundary:** produkcni lead vznika v jedinem atomickem kroku — import writer appenduje do LEADS a zpetne updatuje `_raw_import` na `imported`. Pred tim data neexistuji v LEADS, nejsou viditelna v downstream pipeline.
 
 Viz `docs/contracts/raw-import-staging.md` pro uplny kontrakt (status model, decision model, invariants matrix, sample rows).
+
+## Scraper runtime (A-04)
+
+Implementovano v `scripts/scraper/firmy-cz.mjs` (Node ESM CLI, bez runtime deps). Pro 1 A-01 `ScrapingJobInput` vytvori pole A-02 `RawImportRow` objektu ve stavu `raw` s `processed_by=scraper`.
+
+**Vstup:** JSON soubor s A-01 job inputem (povinne pole viz `docs/contracts/scraping-job-input.md`).
+**Vystup:** JSON `{ job, summary, rows, errors }` na stdout nebo do `--out` souboru. `rows` je pole validnich `RawImportRow` objektu (16 sloupcu, 1:1 podle A-02 kontraktu).
+
+### CLI
+```
+node scripts/scraper/firmy-cz.mjs --job <path> [--mode fixture|live] [--out <path>]
+```
+
+### Parsing strategie (firmy.cz)
+- **Primary:** JSON-LD schema.org (`LocalBusiness`, `Electrician`, `Plumber`, `HomeAndConstructionBusiness`, `ProfessionalService`, `Store`). Cte `name`, `telephone`, `email`, `url`, `taxID`/`identifier.value`, `address.{addressLocality,addressRegion}`, `contactPoint.name`, `employee[0].name`, `aggregateRating.{ratingValue,reviewCount|ratingCount}`.
+- **Fallback 1:** Open Graph (`og:title` → business_name po odstraneni `| firmy.cz` suffixu, `og:url` → canonical).
+- **Fallback 2:** regex na stable HTML patterns (`href="tel:..."`, `href="mailto:..."`, `IČO: 12345678`, `href="https://..." ... Webove stranky`).
+- **Kategorie:** konkretni `@type` podtyp → `BreadcrumbList` posledni element → `job.segment` fallback.
+
+### Error handling
+- **Per-field fail:** try/catch kolem kazdeho pole — selhani jednoho pole ostatnim nezabrani.
+- **Per-record fail:** exception na detail stranky NEBO prazdna extrakce (business_name + phone + email vsechny null) → `summary.failed++`, **job pokracuje**.
+- **Listing fail:** `job_status=failed` s error_message; prazdne `rows`. Caller rozhodne o retry.
+
+### Modes
+- `fixture` (default): deterministicky offline mod, cte `scripts/scraper/samples/fixtures/*.html`. Slouzi pro unit test parseru a reproducibilni sample output pro audit.
+- `live`: realne HTTP requesty na `https://www.firmy.cz/` s 1.5s rate limit a identifikujicim User-Agent. Vyzaduje overeni firmy.cz ToS pred pouzitim.
+
+### Acceptance test (fixture run)
+```
+node scripts/scraper/firmy-cz.mjs --job scripts/scraper/samples/job.sample.json --mode fixture
+-> attempted=8 extracted=7 failed=1 skipped=0
+```
+Vystup: `scripts/scraper/samples/output.sample.json` (7 validnich A-02 rows + 1 per-record failure kvuli nepouzitelnemu fixture souboru).
+
+### Live smoke test (real firmy.cz)
+Proveden 2026-04-11 proti `https://www.firmy.cz/` se sample job inputem (`segment=elektrikar`, `city=Praha`, `max_results=10`). Vysledek:
+```
+attempted=10 extracted=10 failed=0 skipped=0  job_status=completed  duration=15.4s
+```
+Scraper vratil 10 realnych firem z 10 ruznych mestskych casti Prahy, vsechny 10 A-02 `RawImportRow` compliant. Live output zustava pouze lokalne (`scripts/scraper/samples/output.live.json` je gitignored kvuli realnym kontaktnim udajum).
+
+### Out of scope pro A-04
+- Sheet write path (A-04 neperzistuje do `_raw_import`; je to samostatny downstream krok).
+- zivefirmy.cz parser (pridava se jako sibling v `lib/` az v dalsim tasku).
+- Automaticke spousteni (cron, trigger) — scraper je zatim CLI-only.
 
 ## Normalization step (A-03)
 

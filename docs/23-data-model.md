@@ -1,7 +1,7 @@
 # Data Model — Autosmartweby
 
 > **Kanonicky dokument.** Aktualizuje se pri zmene sloupcu, sheetu nebo datoveho toku.
-> **Posledni aktualizace:** 2026-04-05
+> **Posledni aktualizace:** 2026-04-16
 
 ---
 
@@ -33,7 +33,7 @@ Dalsi: source, ico, contact_name, segment, service_type, area, atd.
 
 ### Extension sloupce (45 sloupcu, append-only)
 Definovane v EXTENSION_COLUMNS (Config.gs):
-- **Deduplikace:** company_key, branch_key, dedupe_group, dedupe_flag
+- **Deduplikace:** company_key, branch_key, dedupe_group, dedupe_flag (A-05: company_key uses strict 8-digit IČO, blocked domain filter, required city for T4; see `docs/contracts/dedupe-decision.md`)
 - **Pipeline:** lead_stage, preview_stage, outreach_stage, qualified_for_preview, qualification_reason
 - **Template:** template_type, preview_slug, preview_url, preview_screenshot_url, preview_generated_at, preview_version, preview_brief_json
 - **Personalizace:** preview_headline, preview_subheadline, preview_cta, preview_quality_score, preview_needs_review
@@ -139,6 +139,10 @@ Novy system sheet ve stejnem SPREADSHEET_ID jako LEADS. Konvence leading undersc
 - **Decision model:** `import_decision` (nullable enum) je oddeleny od `normalized_status`. Hodnoty: `imported`, `rejected_error`, `rejected_duplicate`, `pending_review`.
 - **Hard duplicate** (ICO / domain / business email domain match) jde rovnou do `error` s `rejected_duplicate`. Status `duplicate_candidate` je vyhrazen vyhradne pro soft dup cekajici na manualni review.
 - **Retry:** `error` je terminalni. Opakovani = novy radek s novym `raw_import_id`; puvodni error radek zustava trvale jako audit.
+
+### Producer (A-04)
+
+Nove radky do `_raw_import` produkuje **scraper runtime** (`scripts/scraper/firmy-cz.mjs`, viz task A-04). Pro 1 A-01 `ScrapingJobInput` vraci pole validnich `RawImportRow` objektu s `normalized_status="raw"`, `processed_by="scraper"` a `raw_payload_json` ve tvaru klicu odpovidajicich A-03 mappingu. Zapis do Sheets (append-only) je samostatny downstream krok, zatim neimplementovano.
 
 ## Normalization: raw -> LEADS (A-03)
 
