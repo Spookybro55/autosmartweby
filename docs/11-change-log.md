@@ -77,6 +77,30 @@ What this task does NOT deliver:
 - **Code:** apps-script/AutoQualifyHook.gs (new), apps-script/AutoWebCheckHook.gs (edit), apps-script/PreviewPipeline.gs (edit), scripts/test-a07-qualify-hook.mjs (new), docs/30-task-records/A7.md (new), apps-script/Helpers.gs (edit), docs/20-current-state.md (edit), docs/24-automation-workflows.md (edit)
 - **Docs:** docs/20-current-state.md, docs/24-automation-workflows.md
 
+### [B/BX1] CRM write path — doPost handler for frontend writes — DONE
+- **Scope:** Implement the missing `doPost()` handler in Apps Script to enable CRM frontend write-back via HTTP POST. The frontend writer (`apps-script-writer.ts`) was already implemented but had no server-side endpoint.
+
+What this task delivers:
+- `WebAppEndpoint.gs` — `doPost()`, `handleUpdateLead_()`, `jsonResponse_()`
+- Token verification via Script Properties `FRONTEND_API_SECRET`
+- Lead lookup via `findRowByLeadId_()` (Variant B, row-shift immune)
+- Identity verification (business_name + city)
+- LockService guard (shared with onContactSheetEdit)
+- 5 allowed fields: outreach_stage, next_action, last_contact_at, next_followup_at, sales_note
+- outreach_stage reverse-humanization (Czech label → English key)
+- `appsscript.json` webapp config for Web App deployment
+
+What this task does NOT deliver:
+- Web App UI deployment (manual step via Apps Script editor)
+- Frontend `.env.local` configuration
+- Frontend → Web App e2e verification
+- New frontend code (existing `apps-script-writer.ts` already matches)
+
+**Status rationale:** done — inner doPost logic TEST runtime verified (writeVerified=true, restored=true). External Web App HTTP path and frontend e2e not yet verified (requires manual Web App deployment).
+- **Owner:** Stream B
+- **Code:** apps-script/WebAppEndpoint.gs (new), apps-script/appsscript.json (edit)
+- **Docs:** docs/20-current-state.md, docs/30-task-records/BX1.md
+
 ## 2026-04-16
 
 ### [A/A5] Dedupe & company_key matching — DONE
