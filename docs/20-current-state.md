@@ -9,9 +9,9 @@
 
 Autosmartweby je poloautomatizovany CRM system pro oslovovani ceskych zivnostniku bez webovych stranek.
 
-**Apps Script backend** (~4800 LOC, 9 souboru): kvalifikace leadu, generovani briefu a emailovych draftu, per-lead odesilani pres GmailApp, mailbox sync, write-back z odvozeneho sheetu pres lead_id lookup (Variant B). Pipeline bezi v rezimu DRY_RUN=true a standardne se zastavi ve stavu BRIEF_READY. Webhook pipeline existuje v kodu, je vypnuta (ENABLE_WEBHOOK=false).
+**Apps Script backend** (~6700 LOC, 16 souboru): kvalifikace leadu, generovani briefu a emailovych draftu, per-lead odesilani pres GmailApp, mailbox sync, write-back z odvozeneho sheetu pres lead_id lookup (Variant B). Pipeline bezi v rezimu DRY_RUN=true a standardne se zastavi ve stavu BRIEF_READY. Webhook pipeline existuje v kodu, je vypnuta (ENABLE_WEBHOOK=false).
 
-**CRM frontend** (Next.js 16, React 19, TypeScript): prihlasen stránka (email+heslo), dashboard s KPI widgety, leads tabulka s filtrovanim a detail drawerem, pipeline kanban (read-only, 6 sloupcu), follow-up timeline, editace 5 poli per lead se zapisem zpet do Sheets. Frontend bezi lokalne, neni nasazen na verejne URL. Data cte z Google Sheets pres service account, zapis pres Apps Script Web App endpoint (frontend writer existuje, server handler doPost chybi).
+**CRM frontend** (Next.js 16, React 19, TypeScript): prihlasen stránka (email+heslo), dashboard s KPI widgety, leads tabulka s filtrovanim a detail drawerem, pipeline kanban (read-only, 6 sloupcu), follow-up timeline, editace 5 poli per lead se zapisem zpet do Sheets. Frontend bezi lokalne, neni nasazen na verejne URL. Data cte z Google Sheets pres service account, zapis pres Apps Script Web App endpoint (doPost handler implementovan v BX1, TEST runtime verified; Web App UI deployment pending).
 
 **Vstup dat** je rucni. System nescrapuje leady, negeneruje webove stranky a nema hosting pipeline.
 
@@ -26,7 +26,7 @@ CI validuje aktuálnost generated files a existenci governance souboru. Nevalidu
 
 ## Co dnes existuje
 
-### Apps Script backend (11 souboru, ~5200 radku)
+### Apps Script backend (12 souboru, ~6600 radku)
 - Kvalifikace leadu (evaluateQualification_) — rucni spusteni z menu
 - Deduplikace pres company_key (ICO > domena > email > normalizovane jmeno + mesto)
 - Template selection (12+ variant podle segmentu)
@@ -49,7 +49,7 @@ CI validuje aktuálnost generated files a existenci governance souboru. Nevalidu
 - Pipeline kanban (6 sloupcu, read-only, bez drag-drop)
 - Follow-up timeline (po terminu, dnes, zitra, tento tyden)
 - Editace 5 poli per lead se zapisem zpet do Sheets
-- Data: Google Sheets pres service account (read), Apps Script Web App (write — doPost chybi)
+- Data: Google Sheets pres service account (read), Apps Script Web App (write — doPost implementovan BX1, Web App deployment pending)
 - Mock service pro lokalni vyvoj bez Sheets pripojeni
 - Preview renderer (B-02): route `/preview/[slug]`, renderuje MVP landing page z hardcoded sample briefu. 6 sekci (hero, services, contact, reviews, location, faq) rizenych polem `suggested_sections` z B-01 contractu. Verejne pristupny bez auth.
 - Bezi lokalne, neni nasazen na verejne URL
@@ -77,7 +77,7 @@ CI validuje aktuálnost generated files a existenci governance souboru. Nevalidu
 - CI/CD pipeline pro kod (existuje jen docs-governance check)
 - Testy (zadne unit, integration ani e2e testy)
 - Frontend deployment (Vercel/Netlify)
-- Apps Script Web App doPost handler (frontend writer existuje, server handler ne)
+- ~~Apps Script Web App doPost handler~~ — **BX1 DONE** (doPost + handleUpdateLead_, inner logic TEST runtime verified; Web App UI deployment + frontend e2e pending)
 
 ## Specifikace
 
