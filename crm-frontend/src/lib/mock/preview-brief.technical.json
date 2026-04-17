@@ -1,0 +1,24 @@
+{
+  "business_name": "Elektro Projekt Plzeň",
+  "contact_name": "",
+  "city": "Plzeň",
+  "area": "Plzeňský kraj",
+  "service_type": "elektroinstalace",
+  "segment": "elektroinstalace",
+  "pain_point": "Zastaralý web bez kontaktního formuláře",
+  "headline": "Elektro Projekt Plzeň — elektroinstalace a revize",
+  "subheadline": "Zastaralý web bez kontaktního formuláře",
+  "key_benefits": [
+    "Projektování elektroinstalací",
+    "Revize a výchozí prohlídky",
+    "B2B i koncoví klienti"
+  ],
+  "suggested_sections": ["hero", "services", "contact", "faq"],
+  "cta": "Poptejte projekt",
+  "contact_phone": "+420600111222",
+  "contact_email": "kontakt@elektro-priklad.cz",
+  "website_status": "weak_website",
+  "rating": "",
+  "reviews_count": "",
+  "confidence_level": "medium"
+}

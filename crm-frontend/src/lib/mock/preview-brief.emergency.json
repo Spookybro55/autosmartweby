@@ -1,0 +1,24 @@
+{
+  "business_name": "Havárie Instalatér Brno",
+  "contact_name": "",
+  "city": "Brno",
+  "area": "Brno-střed",
+  "service_type": "instalatér",
+  "segment": "instalater",
+  "pain_point": "Firma nemá webovou prezentaci",
+  "headline": "Havárie Instalatér Brno — nonstop výjezd",
+  "subheadline": "Firma nemá webovou prezentaci",
+  "key_benefits": [
+    "Nonstop výjezd Brno",
+    "Rychlý telefonický kontakt",
+    "Lokální řemeslník"
+  ],
+  "suggested_sections": ["hero", "services", "contact", "location"],
+  "cta": "Zavolejte nám",
+  "contact_phone": "+420777888999",
+  "contact_email": "",
+  "website_status": "no_website",
+  "rating": "",
+  "reviews_count": "",
+  "confidence_level": "high"
+}
