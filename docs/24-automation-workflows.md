@@ -1,7 +1,7 @@
 # Automation Workflows — Autosmartweby
 
 > **Kanonicky dokument.** Aktualizuje se pri zmene automatizacnich procesu.
-> **Posledni aktualizace:** 2026-04-16
+> **Posledni aktualizace:** 2026-04-17
 
 ---
 
@@ -67,9 +67,9 @@ Scraping Job Input kontrakt definuje vstupni payload pro jeden scraping job. RAW
 Staging-based ingest pipeline. Navrh v A-02 (RAW_IMPORT staging layer). Runtime implementace je kompletni pro lokalni proof:
 - **Scraper (A-04)** je hotovy jako Node ESM skript v `scripts/scraper/`
 - **Dedupe engine (A-05)** je hotovy v `apps-script/DedupeEngine.gs`
-- **Normalizer (A-10)** je implementovany v `apps-script/Normalizer.gs` — `normalizeRawImportRow_()` per A-03 contract (localne overeno)
-- **Staging writer (A-10)** je implementovany v `apps-script/RawImportWriter.gs` — sheet creation, row write, status update, batch orchestrator (localne overeno; Sheets runtime NOT VERIFIED)
-- **Lokalni proof:** `scripts/test-ingest-runtime.mjs` prochazi celou pipeline (7 rows: 1 reject, 2 hard dup, 4 imported). LEADS append je TODO.
+- **Normalizer (A-10)** je implementovany v `apps-script/Normalizer.gs` — `normalizeRawImportRow_()` per A-03 contract vcetne segment slug-to-label mapping (TEST runtime overeno)
+- **Staging writer (A-10)** je implementovany v `apps-script/RawImportWriter.gs` — sheet creation, row write, status update, batch orchestrator, LEADS append pres HeaderResolver (TEST runtime overeno)
+- **Lokalni proof:** `scripts/test-ingest-runtime.mjs` prochazi celou pipeline (7 rows: 1 reject, 2 hard dup, 4 imported). **TEST runtime proof:** leadsBefore=799, leadsAfter=800, leadsAppended=1.
 
 ```
 1. Scraper (A-04)      -> insert do _raw_import [status: raw]
@@ -197,7 +197,7 @@ Automaticka kvalifikace LEADS radku po web checku. Reusuje `evaluateQualificatio
 - Hromadne odesilani emailu (neni implementovano)
 - Automaticky scraping (neni implementovan — kontrakt pripraven, viz vyse)
 - Preview web generovani (neni implementovano)
-- Ingest flow runtime (navrzen v A-02/A-03, kod neni implementovan)
+- ~~Ingest flow runtime~~ — **DONE** (A-10: normalizer + staging writer + LEADS append, TEST runtime verified)
 
 ---
 

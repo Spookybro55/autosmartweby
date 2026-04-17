@@ -65,7 +65,7 @@ function normalizeRawImportRow_(rawRow) {
 
   var area = cleanOptionalString_(payload.area, 80);
 
-  var segment = cleanSegment_(payload.segment || payload.category);
+  var segment = resolveSegmentLabel_(cleanSegment_(payload.segment || payload.category));
   var serviceType = cleanOptionalString_(payload.service_type, 120);
   var painPoint = cleanOptionalString_(payload.pain_point, 200);
 
@@ -186,4 +186,32 @@ function cleanReviewsCount_(val) {
   var n = parseInt(String(val).trim(), 10);
   if (isNaN(n) || n < 0) return null;
   return n;
+}
+
+
+/* ── Segment slug → LEADS display label (matches SETTINGS!A2:A11) ── */
+
+var SEGMENT_SLUG_TO_LABEL_ = {
+  'instalaterstvi':    'instalatér',
+  'instalater':        'instalatér',
+  'elektrikar':        'elektrikář',
+  'elektrina':         'elektrikář',
+  'malir':             'malíř',
+  'malirskerace':     'malíř',
+  'podlahar':          'podlahář',
+  'podlahy':           'podlahář',
+  'uklidova-firma':    'úklidová firma',
+  'uklid':             'úklidová firma',
+  'hodinovy-manzel':   'hodinový manžel',
+  'cisteni-sedacek':   'čištění sedaček',
+  'cisteni-kobercu':   'čištění koberců',
+  'autodetailing':     'autodetailing',
+  'stehovani':         'stěhování'
+};
+
+function resolveSegmentLabel_(slug) {
+  if (!slug) return null;
+  var label = SEGMENT_SLUG_TO_LABEL_[slug];
+  if (label) return label;
+  return slug;
 }

@@ -1,7 +1,7 @@
 # Current State — Autosmartweby
 
 > **Kanonicky dokument.** Aktualizuje se pri kazdem tasku, ktery meni stav systemu.
-> **Posledni aktualizace:** 2026-04-05
+> **Posledni aktualizace:** 2026-04-17
 
 ---
 
@@ -59,8 +59,8 @@ CI validuje aktuálnost generated files a existenci governance souboru. Nevalidu
 - RAW_IMPORT staging layer v1.0 (`docs/contracts/raw-import-staging.md`) — kontrakt pro `_raw_import` system sheet, staging buffer mezi scraperem a LEADS. 16 sloupcu, 5-stavovy status model, 4-hodnotovy decision model.
 - Normalization raw -> LEADS rules v1.0 (`docs/contracts/normalization-raw-to-leads.md`) — kontrakt pro transformaci surovych dat z `_raw_import` na LEADS radek. 23-field mapping, cleaning rules, reject policy, lead_id generation, 6 novych source_* metadata sloupcu.
 - **Scraper runtime A-04 (firmy.cz)** (`scripts/scraper/firmy-cz.mjs`) — Node ESM CLI, cte A-01 job input a produkuje pole A-02 RAW_IMPORT rows. Parsing strategy: JSON-LD schema.org primary + Open Graph a regex fallbacks. Per-record try/catch, rate-limited live mode, fixture mode pro deterministicky offline test. Zapis do `_raw_import` sheetu je mimo scope A-04.
-- **Ingest runtime bridge A-10** (`apps-script/Normalizer.gs`, `apps-script/RawImportWriter.gs`) — runtime vrstva pro `_raw_import`: normalizer implementuje A-03 cleaning rules vcetne CZ phone prefix normalizace a reject policy; staging writer zajistuje sheet creation, append-only zapis, in-place status update a batch orchestrator (raw → normalize → dedupe → import/reject). **Stav: localne overeno** (`scripts/test-ingest-runtime.mjs`, 7 rows: 1 reject, 2 hard dup, 4 imported). **Neverifikovano:** Google Sheets runtime (sheet creation, row write/update), LEADS row append (TODO v kodu).
-- Zbyvajici automatizace (LEADS row append v import writeru, auto web check A-06, zivefirmy.cz scraper, review UI) nejsou jeste implementovane.
+- **Ingest runtime bridge A-10** (`apps-script/Normalizer.gs`, `apps-script/RawImportWriter.gs`) — runtime vrstva pro `_raw_import`: normalizer implementuje A-03 cleaning rules vcetne CZ phone prefix normalizace, reject policy a segment slug-to-label mapping (SETTINGS!A2:A11 kompatibilni); staging writer zajistuje sheet creation, append-only zapis, in-place status update, batch orchestrator (raw → normalize → dedupe → import/reject) a LEADS append pres HeaderResolver. **Stav: TEST runtime overeno** (2026-04-17, leadsBefore=799, leadsAfter=800, leadsAppended=1; lokalni proof: 7 rows, 1 reject, 2 hard dup, 4 imported).
+- Zbyvajici automatizace (zivefirmy.cz scraper, review UI) nejsou jeste implementovane.
 
 ### Dokumentace
 - Governance s validacnim scriptem

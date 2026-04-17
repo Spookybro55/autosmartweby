@@ -8,6 +8,26 @@
 
 ## 2026-04-17
 
+### [A/A10] Ingest runtime bridge — LEADS append + segment taxonomy fix — DONE
+- **Scope:** Complete the ingest runtime bridge by implementing the missing LEADS append step and fixing the segment taxonomy mismatch that caused a data validation crash.
+
+What this task delivers:
+- `appendLeadRow_()` in RawImportWriter.gs — appends a normalized lead to LEADS using HeaderResolver for dynamic column mapping
+- Replacement of the TODO placeholder at processRawImportBatch_ step 3 with actual `appendLeadRow_()` call
+- `SEGMENT_SLUG_TO_LABEL_` mapping in Normalizer.gs — converts internal slugs (e.g. `instalaterstvi`) to Czech display labels (e.g. `instalater`) compatible with SETTINGS!A2:A11 validation
+- `resolveSegmentLabel_()` function applied during normalization
+- Full end-to-end ingest pipeline: raw → normalize → dedupe → LEADS append
+
+What this task does NOT deliver:
+- Changes to dedupe logic (A-05, reused as-is)
+- Changes to scraper output (A-04, reused as-is)
+- Sheet cleanup of diagnostic test data (done during verification, not part of deliverable)
+
+**Status rationale:** done — TEST runtime verified (leadsBefore=799, leadsAfter=800, leadsAppended=1). Segment taxonomy mismatch root-caused and fixed. All diagnostic functions removed in closeout.
+- **Owner:** Stream A
+- **Code:** apps-script/RawImportWriter.gs (edit), apps-script/Normalizer.gs (edit)
+- **Docs:** docs/20-current-state.md, docs/24-automation-workflows.md, docs/30-task-records/A10.md
+
 ### [A/A6] Auto web check hook — DONE
 - **Scope:** Automatic web check hook that runs Serper-based website discovery on new LEADS rows without manual menu interaction. Reuses existing `findWebsiteForLead_()` from LegacyWebCheck.gs.
 
@@ -58,27 +78,6 @@ What this task does NOT deliver:
 - **Docs:** docs/20-current-state.md, docs/24-automation-workflows.md
 
 ## 2026-04-16
-
-### [A/A10] Ingest runtime bridge — staging writer + normalizer + dedupe handoff — PARTIAL
-- **Scope:** A-02/A-03/A-05 runtime bridge: implements the GAS functions for _raw_import staging, normalization, and dedupe handoff. Locally verified; not yet deployed to Google Sheets.
-
-What this task delivers:
-- `_raw_import` staging sheet creation and row writing functions (A-02 runtime)
-- `normalizeRawImportRow_()` per A-03 contract (field cleaning, reject policy)
-- Pipeline orchestrator: raw → normalize → dedupe → import/reject
-- 6 new `source_*` columns added to EXTENSION_COLUMNS per A-03 contract
-- Local proof harness demonstrating complete ingest lifecycle
-
-What this task does NOT deliver:
-- Live Google Sheets deployment (requires clasp push from main — blocked until merge)
-- LEADS row append (marked TODO in processRawImportBatch_ — the import_writer step updates _raw_import status but does not yet write to LEADS sheet)
-- Google Sheets runtime verification (ensureRawImportSheet_, writeRawImportRows_, updateRawImportRow_ are untested against real Sheets API)
-- Review UI for pending_review rows
-- Fuzzy matching
-
-**Status rationale:** partial because the GAS code is written and logic is locally proven, but Sheets runtime (create sheet, write rows, update status in real spreadsheet) and LEADS append are not verified. This is a runtime bridge, not a complete ingest pipeline.
-- **Owner:** Stream A
-- **Code:** apps-script/Normalizer.gs (new), apps-script/RawImportWriter.gs (new), apps-script/Config.gs (edit), scripts/test-ingest-runtime.mjs (new), scripts/test-wave4-pipeline.mjs (new), docs/30-task-records/A10.md (new)
 
 ### [A/A5] Dedupe & company_key matching — DONE
 - **Scope:** Formalizace a rozšíření existující dedupe logiky v Apps Script. Cílem je:

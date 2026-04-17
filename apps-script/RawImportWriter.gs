@@ -213,8 +213,7 @@ function processRawImportBatch_(opts) {
     stats.imported++;
     if (!dryRun) {
       var leadsRow = normResult.leadsRow;
-      // TODO: append leadsRow to LEADS sheet using HeaderResolver
-      // For now, update _raw_import status
+      appendLeadRow_(leadsSheet, leadsRow);
       updateRawImportRow_(rawSheet, rawRow.raw_import_id, {
         normalized_status: 'imported',
         import_decision: 'imported',
@@ -243,3 +242,32 @@ function processRawImportBatch_(opts) {
   aswLog_('INFO', 'RawImportWriter', 'Batch processed: ' + JSON.stringify(stats));
   return stats;
 }
+
+
+/**
+ * Append a single normalized lead row to the LEADS sheet.
+ * Uses HeaderResolver to map field names to column positions.
+ * Append-only — never overwrites existing rows.
+ *
+ * @param {Sheet} leadsSheet — the LEADS sheet
+ * @param {Object} leadsRow — normalized lead object from normalizeRawImportRow_
+ */
+function appendLeadRow_(leadsSheet, leadsRow) {
+  var hr = getHeaderResolver_(leadsSheet);
+  var width = hr.width();
+  var newRow = [];
+  for (var c = 0; c < width; c++) newRow.push('');
+
+  var fields = Object.keys(leadsRow);
+  for (var f = 0; f < fields.length; f++) {
+    var idx = hr.idxOrNull(fields[f]);
+    if (idx !== null && leadsRow[fields[f]] != null) {
+      newRow[idx] = leadsRow[fields[f]];
+    }
+  }
+
+  var appendAt = Math.max(leadsSheet.getLastRow(), 1) + 1;
+  leadsSheet.getRange(appendAt, 1, 1, width).setValues([newRow]);
+}
+
+
