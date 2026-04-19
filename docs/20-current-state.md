@@ -52,6 +52,7 @@ CI validuje aktuálnost generated files a existenci governance souboru. Nevalidu
 - Data: Google Sheets pres service account (read), Apps Script Web App (write — doPost implementovan BX1, Web App deployment pending)
 - Mock service pro lokalni vyvoj bez Sheets pripojeni
 - Preview renderer (B-02): route `/preview/[slug]`, renderuje MVP landing page z hardcoded sample briefu. 6 sekci (hero, services, contact, reviews, location, faq) rizenych polem `suggested_sections` z B-01 contractu. Verejne pristupny bez auth.
+- Template family mapping (B-03): `crm-frontend/src/lib/domain/template-family.ts` mapuje runtime `template_type` na 4 MVP family (`emergency`, `community-expert`, `technical-authority`, `generic-local`) + render hints. Renderer zatim zustava template-agnostic; family vrstva je pripravena pro nasledne family-specificke layouty.
 - Bezi lokalne, neni nasazen na verejne URL
 
 ### Datove kontrakty a staging

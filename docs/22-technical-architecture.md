@@ -17,6 +17,7 @@
 | Nabidky | HTML + Python + Chrome | offers/ | Staticke obchodni nabidky, HTML→PDF konverze |
 | Auth | HMAC-SHA256 session + Google OAuth | crm-frontend/ | Timing-safe, dual-mode |
 | Preview renderer | Next.js App Router (server components) | crm-frontend/src/app/preview/ | MVP landing page z sample briefu, verejny bez auth |
+| Template family mapping | Pure TS modul | crm-frontend/src/lib/domain/template-family.ts | Mapuje runtime `template_type` na 4 MVP family + render hints (B-03) |
 | Deployment AS | clasp | apps-script/.clasp.json | TEST env default, PROD manualne |
 
 ## Integrace

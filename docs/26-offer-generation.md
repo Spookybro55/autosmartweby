@@ -82,7 +82,7 @@ Gate pravidlo: section se renderuje pouze pokud je v `suggested_sections`. Field
 | Task | Co pouziva z B-01 |
 |------|-------------------|
 | B-02 | PreviewBrief + template_type + preview_slug + SECTION_MAPPING_CONTRACT — **DONE**: MVP renderer v `/preview/[slug]`, 6 sekci, hardcoded sample brief |
-| B-03 | TemplateType (mapovani na render sablony) |
+| B-03 | TemplateType (mapovani na render sablony) — **DONE**: `template-family.ts` mapuje na 4 MVP family (`emergency`, `community-expert`, `technical-authority`, `generic-local`) + render hints; drift fix `TemplateBase` (`plumber`/`construction` namisto `instalater`/`mason`) |
 | B-04 | MinimalRenderRequest + MinimalRenderResponse |
 | B-05 | Response schema + preview_slug gap fix v GAS + PreviewSlugContract |
 
@@ -94,7 +94,20 @@ Gate pravidlo: section se renderuje pouze pokud je v `suggested_sections`. Field
 
 MVP preview renderer je implementovan jako Next.js App Router route `/preview/[slug]`. Renderuje landing page z hardcoded sample briefu. Sekce se renderuji vyhradne podle `brief.suggested_sections`. Nepouziva API endpoint ani runtime validaci — data jsou staticky importovana z B-01 fixture souboru.
 
-Dostupne sample previews: `remesla-dvorak` (rich fixture, 5 sekci), `sluzby-priklad` (minimal fixture, 4 sekce).
+Dostupne sample previews: `remesla-dvorak` (rich fixture, 5 sekci), `sluzby-priklad` (minimal fixture, 4 sekce), `havarie-brno-instalater` (emergency family), `malir-novak-praha` (community-expert family), `elektro-projekt-plzen` (technical-authority family).
+
+## Template Family Mapping (B-03)
+
+Runtime `template_type` (emitovany GAS `chooseTemplateType_`) je mapovan na 4 MVP family v `crm-frontend/src/lib/domain/template-family.ts`:
+
+- `emergency` — `emergency-service-*` (EMERGENCY_SEGMENTS match v GAS)
+- `technical-authority` — `plumber-*`, `electrician-*`
+- `community-expert` — `painter-*`, `construction-*`, `gardener-*`
+- `generic-local` — vse ostatni + unknown fallback
+
+API: `resolveTemplateFamily(templateType: string): TemplateFamily`, `parseTemplateType`, `resolveTemplateRenderHints` (vraci `contactFirst`, `needsReviewFlag`, `isDataConflict` flags).
+
+Renderer zatim zustava template-agnostic — family vrstva je pripravena pro family-specificke layouty v nasledujicich tascich. `needsReviewFlag=true` pro `technical-authority` dokud HTML prototyp (`design-html/03-technical-authority/`) nevznikne.
 
 ## Cilovy model
 

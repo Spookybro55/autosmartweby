@@ -77,6 +77,14 @@ What this task does NOT deliver:
 - **Code:** apps-script/AutoQualifyHook.gs (new), apps-script/AutoWebCheckHook.gs (edit), apps-script/PreviewPipeline.gs (edit), scripts/test-a07-qualify-hook.mjs (new), docs/30-task-records/A7.md (new), apps-script/Helpers.gs (edit), docs/20-current-state.md (edit), docs/24-automation-workflows.md (edit)
 - **Docs:** docs/20-current-state.md, docs/24-automation-workflows.md
 
+### [B/B3] Template family mapping vrstva mezi template_type a renderer — DONE
+- **Scope:** Navazuje na B-01 (preview brief contract) a B-02 (preview renderer). Zavadi MVP mapping vrstvu mezi runtime `template_type` (emitovanym GAS `chooseTemplateType_`) a 4 renderovaci family: `emergency`, `community-expert`, `technical-authority`, `generic-local`.
+
+B-03 NEMENI B-01 contract, NEMENI B-02 renderer strukturu, nepridava `template_type` do `PreviewBrief`, nepridava B-04 endpoint vrstvu ani webhook aktivaci. Renderer zustava template-agnostic; family vrstva je pripravena a testovatelna pro nasledne family-specificke layouty.
+- **Owner:** —
+- **Code:** crm-frontend/src/lib/domain/preview-contract.ts (modified), crm-frontend/src/lib/domain/template-family.ts (new), crm-frontend/src/lib/mock/sample-brief-loader.ts (modified), crm-frontend/src/lib/mock/preview-brief.emergency.json (new), crm-frontend/src/lib/mock/preview-brief.community.json (new), crm-frontend/src/lib/mock/preview-brief.technical.json (new), scripts/tests/template-family.test.ts (new), package.json (monorepo root) (modified)
+- **Docs:** docs/20-current-state.md, docs/22-technical-architecture.md, docs/26-offer-generation.md, docs/30-task-records/B3.md
+
 ### [B/BX1] CRM write path — doPost handler for frontend writes — DONE
 - **Scope:** Implement the missing `doPost()` handler in Apps Script to enable CRM frontend write-back via HTTP POST. The frontend writer (`apps-script-writer.ts`) was already implemented but had no server-side endpoint.
 
