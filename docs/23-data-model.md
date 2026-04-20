@@ -17,6 +17,7 @@ Google Sheets, spreadsheet ID v Config.gs (SPREADSHEET_ID).
 | Ke kontaktovani | Odvozeny view kontakt-ready leadu | Derived (generovany) |
 | _asw_logs | Interni logy Apps Scriptu | System (auto-prune 5000 radku) |
 | _raw_import | Staging buffer pro scraped data pred vstupem do LEADS | System (append-only, viz A-02 kontrakt) |
+| _ingest_reports | Kvalita ingestu per source_job_id (A-09) | System (append-only, viz A-09) |
 
 ## LEADS — sloupce
 
@@ -180,6 +181,56 @@ Pravidla pro transformaci `_raw_import.raw_payload_json` na validni LEADS radek.
 | 4 | source_raw_import_id | string | _raw_import.raw_import_id (FK zpet na raw radek) |
 | 5 | source_scraped_at | ISO 8601 UTC | _raw_import.scraped_at |
 | 6 | source_imported_at | ISO 8601 UTC | generovano pri LEADS insert |
+
+## Ingest quality report: _ingest_reports (A-09)
+
+Novy system sheet (append-only, leading-underscore konvence jako `_asw_logs` a `_raw_import`). Role: reportovaci vrstva nad ingest funnellem. Jeden radek = jeden report za jeden `source_job_id`. Agregace nad `_raw_import` + LEADS; NE novy datovy zdroj.
+
+- **Report unit:** 1 report = 1 `source_job_id` (= 1 scraping job = 1 query na 1 portalu v 1 city/segment).
+- **Storage:** append-only sheet `_ingest_reports` (40 sloupcu) + full JSON payload v `_asw_logs` (via `aswLog_`).
+- **Regenerace:** novy radek (starsi zustavaji pro historical trend + PARTIAL → OK progression).
+
+### Schema (40 sloupcu)
+
+| Sekce | Sloupce |
+|-------|---------|
+| Identity | report_id, source_job_id, portal, segment, city, district |
+| Timing | run_started_at, run_ended_at, duration_ms_approx |
+| Raw stage counts | raw_count, imported_count, error_count, duplicate_count, pending_review_count, unprocessed_count |
+| LEADS stage counts | leads_count, web_checked_count, web_found_count, qualified_or_beyond_count, qualified_current_count, disqualified_count, review_count, lead_stage_empty_count, brief_ready_count, preview_failed_count, draft_ready_count, missing_email_count, missing_phone_count, missing_both_count |
+| Derived rates | normalization_success_rate, import_rate, duplicate_rate, qualification_rate, brief_ready_rate, contact_completeness_rate |
+| Bottleneck | bottleneck_stage, summary_status |
+| Breakdown | fail_reason_breakdown_json |
+| Audit | generated_at, generated_by |
+
+### Strict semantics (truthfulness rules)
+
+- **`duplicate_count`** = COUNT(`import_decision='rejected_duplicate'`) **ONLY**. Pending/review je separate `pending_review_count`. `duplicate_or_review_count` existuje pouze jako derived helper v `fail_reason_breakdown_json`.
+- **`brief_ready_count`** = COUNT(`preview_stage='BRIEF_READY'`) **STRICT CANONICAL**. Nikdy se neinferuje z `preview_brief_json` / `preview_slug` presence.
+- **`qualified_or_beyond_count`** = COUNT(`lead_stage IN ('QUALIFIED','IN_PIPELINE','PREVIEW_SENT')`) — canonical funnel metric. A-08 post-qualify hook posouva QUALIFIED→IN_PIPELINE, takze strict `qualified_current_count` by funnel undercountoval. `qualified_current_count` je soucasne strict-snapshot side-metric pro transparency, ale NE pouzit v rate calculations.
+- **`duration_ms_approx`** = `MAX(updated_at) − MIN(scraped_at)` — **DERIVED APPROXIMATION**, zahrnuje idle time mezi scrape a batch processing. Ne exact runtime single processu.
+
+### Summary status semantika
+
+- `FAILED` — raw_count=0 nebo error_count/raw_count > 0.5
+- `PARTIAL` — imported>0 a (lead_stage_empty>0 nebo web_checked<imported) (A-06/A-07 nedobehl), nebo qualified_or_beyond>0 a brief_ready=0 (A-08 nedobehl/dormant)
+- `DEGRADED` — bottleneck_stage != 'none' (nejnizsi funnel stage rate < 0.8)
+- `OK` — jinak
+
+### Bottleneck stages (4)
+
+1. `A:normalize` = (raw_count − error_count) / raw_count
+2. `B:dedupe_import` = imported_count / (raw_count − error_count)
+3. `C:qualify` = qualified_or_beyond_count / leads_count
+4. `D:brief_ready` = brief_ready_count / qualified_or_beyond_count
+
+Plus `'none'` pokud lowest >= 0.8.
+
+### Producers
+
+- **Post-batch hook v `processRawImportBatch_()`** — non-fatal, per distinct source_job_id v batch-i.
+- **Manual menu "Ingest report → …"** — per job prompt nebo all jobs scan.
+- Implementace: `apps-script/IngestReport.gs`.
 
 ## Contracts
 
