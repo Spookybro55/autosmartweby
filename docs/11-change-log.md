@@ -28,6 +28,29 @@ What this task does NOT deliver:
 - **Code:** apps-script/AutoQualifyHook.gs (modified), scripts/test-a08-preview-queue.mjs (new), docs/30-task-records/A8.md (new), docs/20-current-state.md (modified), docs/24-automation-workflows.md (modified)
 - **Docs:** docs/20-current-state.md, docs/24-automation-workflows.md
 
+### [A/A9] Ingest quality report per source_job_id — DONE
+- **Scope:** Reportovaci vrstva nad existujicim ingest funnellem. Pro kazdy `source_job_id` produkuje jeden radek v append-only `_ingest_reports` sheetu + full JSON payload do `_asw_logs`. Ne novy subsystem — cista agregace nad `_raw_import` + LEADS.
+
+What this task delivers:
+- `apps-script/IngestReport.gs` — `ensureIngestReportsSheet_()`, `buildIngestReport_()`, `writeIngestReport_()`, `generateIngestReportForJob()`, `generateIngestReportsForAllJobs()`, `generateIngestReportPrompt()` (menu)
+- Report unit: **1 report = 1 `source_job_id`** (= 1 scraping job = 1 query na 1 portalu v 1 city/segment)
+- 40-sloupcove schema: identity, timing, raw-stage counts, LEADS-stage counts, derived rates, bottleneck, summary_status, fail_reason_breakdown_json, audit
+- Post-batch hook v `processRawImportBatch_()` — po uspesnem batch-i vygeneruje report per distinct source_job_id, non-fatal wrap
+- Menu submenu "Ingest report → ..." s dvema manualnimi akcemi
+- Local evidence harness `scripts/test-a09-ingest-report.mjs` — 8 scenaru, 93 assertions, all pass
+
+What this task does NOT deliver:
+- Frontend dashboard (mimo scope)
+- Refactor ingest funnelu
+- `run_id` runtime field (CS2 M7 gap zustava)
+- Historicke backfill stare joby (manualni `generateIngestReportsForAllJobs()` to umoznuje, ale neni povinny deliverable)
+- Zivy TEST runtime clasp push proof
+
+**Status rationale:** done v implementation / repo scope. Lokalne overeno (93 assertions). TEST runtime end-to-end NOT VERIFIED (vyzaduje clasp push + realny `_raw_import` + LEADS v TEST projektu).
+- **Owner:** Stream A
+- **Code:** apps-script/IngestReport.gs (new), apps-script/RawImportWriter.gs (modified), apps-script/Menu.gs (modified), scripts/test-a09-ingest-report.mjs (new), docs/30-task-records/A9.md (new), docs/20-current-state.md (modified), docs/23-data-model.md (modified), docs/24-automation-workflows.md (modified)
+- **Docs:** docs/20-current-state.md, docs/23-data-model.md, docs/24-automation-workflows.md
+
 ## 2026-04-17
 
 ### [A/A10] Ingest runtime bridge — LEADS append + segment taxonomy fix — DONE
