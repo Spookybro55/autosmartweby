@@ -13,6 +13,18 @@
 
 const QUALIFIED_OR_BEYOND_STAGES = ['QUALIFIED', 'IN_PIPELINE', 'PREVIEW_SENT'];
 
+const SNAPSHOT_STAGES = {
+  RAW_ONLY: 'RAW_ONLY',
+  DOWNSTREAM_PARTIAL: 'DOWNSTREAM_PARTIAL',
+  FINAL: 'FINAL'
+};
+
+const REQUIRED_RAW_IMPORT_HEADERS = ['source_job_id', 'import_decision', 'normalized_status'];
+
+// Port of Utilities.getUuid() — uses Node's crypto.randomUUID to mirror behavior
+import { randomUUID } from 'node:crypto';
+function Utilities_getUuid_() { return randomUUID(); }
+
 // ── Ported helpers (mirror of apps-script/IngestReport.gs) ────
 
 function parseIsoMs_(val) {
@@ -42,17 +54,21 @@ const INGEST_REPORT_COLUMNS = [
   'normalization_success_rate', 'import_rate', 'duplicate_rate',
   'qualification_rate', 'brief_ready_rate', 'contact_completeness_rate',
   'bottleneck_stage', 'summary_status',
+  'snapshot_stage',
   'fail_reason_breakdown_json', 'generated_at', 'generated_by'
 ];
 
-function buildIngestReport_(sourceJobId, rawRows, leadsRows) {
+function buildIngestReport_(sourceJobId, rawRows, leadsRows, opts) {
   rawRows = rawRows || [];
   leadsRows = leadsRows || [];
+  opts = opts || {};
 
   const report = {};
   for (const col of INGEST_REPORT_COLUMNS) report[col] = '';
 
-  report.report_id = 'rpt-' + sourceJobId + '-' + new Date().toISOString().replace(/[-:T.Z]/g, '').substring(0, 14);
+  const tsCompact = new Date().toISOString().replace(/[-:T.Z]/g, '').substring(0, 14);
+  const uuidSuffix = Utilities_getUuid_().replace(/-/g, '').substring(0, 8);
+  report.report_id = 'rpt-' + sourceJobId + '-' + tsCompact + '-' + uuidSuffix;
   report.source_job_id = sourceJobId;
 
   // Identity
@@ -215,9 +231,69 @@ function buildIngestReport_(sourceJobId, rawRows, leadsRows) {
     duplicate_or_review_count: dupCount + pending
   });
 
+  // Snapshot stage — mirror of GAS logic in buildIngestReport_
+  let snapshot;
+  if (opts.snapshotStage) {
+    snapshot = opts.snapshotStage;
+  } else if (rawCount === 0) {
+    snapshot = SNAPSHOT_STAGES.FINAL;
+  } else if (imported > 0 && leadsCount === 0) {
+    snapshot = SNAPSHOT_STAGES.RAW_ONLY;
+  } else if (leadsCount === 0) {
+    snapshot = SNAPSHOT_STAGES.FINAL;
+  } else if (stageEmpty > 0 || webChecked < imported) {
+    snapshot = SNAPSHOT_STAGES.DOWNSTREAM_PARTIAL;
+  } else if (qualOrBeyond > 0 && briefReady === 0) {
+    snapshot = SNAPSHOT_STAGES.DOWNSTREAM_PARTIAL;
+  } else {
+    snapshot = SNAPSHOT_STAGES.FINAL;
+  }
+  report.snapshot_stage = snapshot;
+
   report.generated_at = new Date().toISOString();
   report.generated_by = 'buildIngestReport_';
   return report;
+}
+
+// Port of reportToRow_ (type-preserving writer helper)
+function reportToRow_(report) {
+  return INGEST_REPORT_COLUMNS.map(col => {
+    const v = report[col];
+    if (v === null || v === undefined || v === '') return '';
+    if (typeof v === 'number' && isFinite(v)) return v;
+    if (typeof v === 'boolean') return v;
+    return String(v);
+  });
+}
+
+// Port of loadRawRowsByJob_ with header validation
+function loadRawRowsByJob_(rawSheetData) {
+  // rawSheetData = 2D array (header row + data rows), mirror of getDataRange().getValues()
+  if (!Array.isArray(rawSheetData) || rawSheetData.length < 1) return {};
+  const headers = rawSheetData[0];
+  const idx = {};
+  for (let h = 0; h < headers.length; h++) idx[headers[h]] = h;
+
+  const missing = [];
+  for (const h of REQUIRED_RAW_IMPORT_HEADERS) {
+    if (idx[h] === undefined) missing.push(h);
+  }
+  if (missing.length > 0) {
+    throw new Error('_raw_import sheet is missing required header(s): ' + missing.join(', ') +
+                    '. Expected per A-02 contract.');
+  }
+
+  if (rawSheetData.length < 2) return {};
+  const byJob = {};
+  for (let r = 1; r < rawSheetData.length; r++) {
+    const jobId = String(rawSheetData[r][idx['source_job_id']] || '').trim();
+    if (!jobId) continue;
+    const row = {};
+    for (const k in idx) row[k] = rawSheetData[r][idx[k]];
+    if (!byJob[jobId]) byJob[jobId] = [];
+    byJob[jobId].push(row);
+  }
+  return byJob;
 }
 
 // ── Fixture builders ───────────────────────────────────────────
@@ -493,6 +569,179 @@ section('SCENARIO 8: Schema sanity — all columns present, readable flat row');
   assert(typeof r.fail_reason_breakdown_json === 'string', 'S8: fail_reason_breakdown is JSON string (flat sheet cell)');
   assert(r.report_id.startsWith('rpt-'), 'S8: report_id has rpt- prefix');
   assert(r.generated_by === 'buildIngestReport_', 'S8: generated_by set');
+}
+
+// ── SCENARIO 9: report_id uniqueness ──────────────────────────
+
+section('SCENARIO 9: report_id is collision-safe (UUID suffix)');
+
+{
+  const jobId = 'firmy-cz-20260420T120000Z-unique0000';
+  const raw = [rawRow({ source_job_id: jobId })];
+  // Generate many reports back-to-back for same jobId in same tick
+  const ids = new Set();
+  const N = 50;
+  for (let i = 0; i < N; i++) {
+    const r = buildIngestReport_(jobId, raw, []);
+    ids.add(r.report_id);
+  }
+  assert(ids.size === N, 'S9: all ' + N + ' report_ids unique (got ' + ids.size + ')');
+  // Format sanity
+  const sample = buildIngestReport_(jobId, raw, []).report_id;
+  assert(sample.startsWith('rpt-' + jobId + '-'), 'S9: report_id keeps rpt-{jobId}- prefix');
+  assert(/-\d{14}-[0-9a-f]{8}$/.test(sample), 'S9: report_id ends with -{ts14}-{uuid8} (got ' + sample + ')');
+}
+
+// ── SCENARIO 10: missing required _raw_import header throws ────
+
+section('SCENARIO 10: loadRawRowsByJob_ throws when source_job_id header missing');
+
+{
+  // Valid sheet — headers present
+  const okSheet = [
+    ['raw_import_id', 'source_job_id', 'import_decision', 'normalized_status'],
+    ['raw-1', 'job-a', 'imported', 'imported']
+  ];
+  let okThrew = false;
+  try { loadRawRowsByJob_(okSheet); } catch (e) { okThrew = true; }
+  assert(!okThrew, 'S10: valid sheet does not throw');
+
+  // Malformed — missing source_job_id
+  const badSheet = [
+    ['raw_import_id', 'import_decision', 'normalized_status'],
+    ['raw-1', 'imported', 'imported']
+  ];
+  let threwMsg = '';
+  try { loadRawRowsByJob_(badSheet); } catch (e) { threwMsg = e.message; }
+  assert(threwMsg.length > 0, 'S10: malformed sheet (no source_job_id) throws');
+  assert(threwMsg.includes('source_job_id'), 'S10: error message mentions source_job_id (got: ' + threwMsg + ')');
+  assert(threwMsg.includes('A-02'), 'S10: error message references A-02 contract');
+
+  // Missing multiple — should list all
+  const worstSheet = [['raw_import_id']];
+  let worstMsg = '';
+  try { loadRawRowsByJob_(worstSheet); } catch (e) { worstMsg = e.message; }
+  assert(worstMsg.includes('source_job_id') && worstMsg.includes('import_decision') && worstMsg.includes('normalized_status'),
+    'S10: missing multiple headers listed together');
+
+  // Empty sheet (no rows at all) — returns empty, does NOT throw
+  let emptyThrew = false;
+  try { loadRawRowsByJob_([]); } catch (e) { emptyThrew = true; }
+  assert(!emptyThrew, 'S10: completely empty sheet returns {} without throwing');
+}
+
+// ── SCENARIO 11: snapshot_stage differentiation ────────────────
+
+section('SCENARIO 11: snapshot_stage correctly distinguishes mid-flight vs final');
+
+{
+  const jobId = 'firmy-cz-20260420T120000Z-snapshot00';
+
+  // Case A: raw=0 → FINAL (nothing to process, terminal)
+  const rA = buildIngestReport_(jobId, [], []);
+  assert(rA.snapshot_stage === 'FINAL', 'S11.A: raw=0 → FINAL (got ' + rA.snapshot_stage + ')');
+
+  // Case B: imports exist but LEADS has nothing yet → RAW_ONLY
+  const rawB = [rawRow({ source_job_id: jobId, import_decision: 'imported' })];
+  const rB = buildIngestReport_(jobId, rawB, []);
+  assert(rB.snapshot_stage === 'RAW_ONLY', 'S11.B: imported>0, leads=0 → RAW_ONLY (got ' + rB.snapshot_stage + ')');
+
+  // Case C: all raw rejected, no leads → FINAL (nothing could ever flow downstream)
+  const rawC = [
+    rawRow({ source_job_id: jobId, import_decision: 'rejected_error', normalized_status: 'error', decision_reason: 'MISSING_CITY' }),
+    rawRow({ source_job_id: jobId, import_decision: 'rejected_duplicate', normalized_status: 'error', decision_reason: 'HARD_DUP_ICO' })
+  ];
+  const rC = buildIngestReport_(jobId, rawC, []);
+  assert(rC.snapshot_stage === 'FINAL', 'S11.C: all rejected, leads=0 → FINAL (got ' + rC.snapshot_stage + ')');
+
+  // Case D: leads present but lead_stage empty → DOWNSTREAM_PARTIAL (A-07 not run)
+  const rawD = [rawRow({ source_job_id: jobId, import_decision: 'imported' })];
+  const leadsD = [leadRow({
+    source_job_id: jobId,
+    lead_stage: '', preview_stage: '', website_checked_at: '', qualified_for_preview: ''
+  })];
+  const rD = buildIngestReport_(jobId, rawD, leadsD);
+  assert(rD.snapshot_stage === 'DOWNSTREAM_PARTIAL',
+    'S11.D: leads present, lead_stage empty → DOWNSTREAM_PARTIAL (got ' + rD.snapshot_stage + ')');
+
+  // Case E: leads qualified but no brief_ready → DOWNSTREAM_PARTIAL (A-08 not run)
+  const rawE = [rawRow({ source_job_id: jobId, import_decision: 'imported' })];
+  const leadsE = [leadRow({
+    source_job_id: jobId,
+    lead_stage: 'QUALIFIED', preview_stage: 'NOT_STARTED', website_checked_at: '2026-04-20T12:05:00Z'
+  })];
+  const rE = buildIngestReport_(jobId, rawE, leadsE);
+  assert(rE.snapshot_stage === 'DOWNSTREAM_PARTIAL',
+    'S11.E: qualified but no brief_ready → DOWNSTREAM_PARTIAL (got ' + rE.snapshot_stage + ')');
+
+  // Case F: full chain complete → FINAL
+  const rawF = [rawRow({ source_job_id: jobId, import_decision: 'imported' })];
+  const leadsF = [leadRow({
+    source_job_id: jobId,
+    lead_stage: 'IN_PIPELINE', preview_stage: 'BRIEF_READY', website_checked_at: '2026-04-20T12:05:00Z'
+  })];
+  const rF = buildIngestReport_(jobId, rawF, leadsF);
+  assert(rF.snapshot_stage === 'FINAL', 'S11.F: full chain complete → FINAL (got ' + rF.snapshot_stage + ')');
+
+  // Case G: explicit override via opts
+  const rG = buildIngestReport_(jobId, rawF, leadsF, { snapshotStage: 'RAW_ONLY' });
+  assert(rG.snapshot_stage === 'RAW_ONLY', 'S11.G: opts.snapshotStage overrides auto-computed');
+
+  // snapshot_stage is orthogonal to summary_status
+  assert(rF.summary_status === 'OK' && rF.snapshot_stage === 'FINAL',
+    'S11: FINAL + OK coexist for happy path');
+  assert(rD.summary_status === 'PARTIAL' && rD.snapshot_stage === 'DOWNSTREAM_PARTIAL',
+    'S11: PARTIAL + DOWNSTREAM_PARTIAL coexist when A-07 not run');
+}
+
+// ── SCENARIO 12: reportToRow_ preserves numeric types ──────────
+
+section('SCENARIO 12: reportToRow_ preserves numbers as numbers (not strings)');
+
+{
+  const jobId = 'firmy-cz-20260420T120000Z-types00000';
+  const raw = Array(10).fill(0).map(() => rawRow({ source_job_id: jobId, import_decision: 'imported' }));
+  const leads = Array(10).fill(0).map(() => leadRow({ source_job_id: jobId, lead_stage: 'IN_PIPELINE', preview_stage: 'BRIEF_READY' }));
+  const r = buildIngestReport_(jobId, raw, leads);
+  const row = reportToRow_(r);
+
+  // Map columns by index for targeted type assertions
+  const colIdx = {};
+  INGEST_REPORT_COLUMNS.forEach((c, i) => colIdx[c] = i);
+
+  // Counts: must be numbers
+  const numericCols = [
+    'raw_count', 'imported_count', 'error_count', 'duplicate_count',
+    'pending_review_count', 'unprocessed_count', 'leads_count',
+    'web_checked_count', 'qualified_or_beyond_count', 'qualified_current_count',
+    'brief_ready_count', 'missing_both_count', 'duration_ms_approx'
+  ];
+  for (const col of numericCols) {
+    assert(typeof row[colIdx[col]] === 'number',
+      'S12: ' + col + ' is number (got ' + typeof row[colIdx[col]] + ': ' + row[colIdx[col]] + ')');
+  }
+
+  // Rates: must be numbers (not stringified)
+  assert(typeof row[colIdx['import_rate']] === 'number', 'S12: import_rate is number');
+  assert(typeof row[colIdx['qualification_rate']] === 'number', 'S12: qualification_rate is number');
+  assert(row[colIdx['import_rate']] === 1, 'S12: import_rate numeric value preserved (=1)');
+
+  // Strings stay strings
+  assert(typeof row[colIdx['report_id']] === 'string', 'S12: report_id is string');
+  assert(typeof row[colIdx['source_job_id']] === 'string', 'S12: source_job_id is string');
+  assert(typeof row[colIdx['summary_status']] === 'string', 'S12: summary_status is string');
+  assert(typeof row[colIdx['snapshot_stage']] === 'string', 'S12: snapshot_stage is string');
+  assert(typeof row[colIdx['fail_reason_breakdown_json']] === 'string', 'S12: fail_reason_breakdown_json stays JSON string');
+
+  // Empty numerics on empty job → '' (Sheets empty cell)
+  const rEmpty = buildIngestReport_(jobId, [], []);
+  const rowEmpty = reportToRow_(rEmpty);
+  assert(rowEmpty[colIdx['normalization_success_rate']] === '',
+    'S12: empty-job rate is "" (not 0, not "NaN")');
+  assert(rowEmpty[colIdx['duration_ms_approx']] === '',
+    'S12: empty-job duration is "" (not 0)');
+  assert(typeof rowEmpty[colIdx['raw_count']] === 'number' && rowEmpty[colIdx['raw_count']] === 0,
+    'S12: empty-job raw_count is numeric 0 (not empty string)');
 }
 
 // ── Summary ────────────────────────────────────────────────────

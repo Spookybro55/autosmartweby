@@ -187,10 +187,10 @@ Pravidla pro transformaci `_raw_import.raw_payload_json` na validni LEADS radek.
 Novy system sheet (append-only, leading-underscore konvence jako `_asw_logs` a `_raw_import`). Role: reportovaci vrstva nad ingest funnellem. Jeden radek = jeden report za jeden `source_job_id`. Agregace nad `_raw_import` + LEADS; NE novy datovy zdroj.
 
 - **Report unit:** 1 report = 1 `source_job_id` (= 1 scraping job = 1 query na 1 portalu v 1 city/segment).
-- **Storage:** append-only sheet `_ingest_reports` (40 sloupcu) + full JSON payload v `_asw_logs` (via `aswLog_`).
+- **Storage:** append-only sheet `_ingest_reports` (41 sloupcu) + full JSON payload v `_asw_logs` (via `aswLog_`).
 - **Regenerace:** novy radek (starsi zustavaji pro historical trend + PARTIAL → OK progression).
 
-### Schema (40 sloupcu)
+### Schema (41 sloupcu)
 
 | Sekce | Sloupce |
 |-------|---------|
@@ -200,6 +200,7 @@ Novy system sheet (append-only, leading-underscore konvence jako `_asw_logs` a `
 | LEADS stage counts | leads_count, web_checked_count, web_found_count, qualified_or_beyond_count, qualified_current_count, disqualified_count, review_count, lead_stage_empty_count, brief_ready_count, preview_failed_count, draft_ready_count, missing_email_count, missing_phone_count, missing_both_count |
 | Derived rates | normalization_success_rate, import_rate, duplicate_rate, qualification_rate, brief_ready_rate, contact_completeness_rate |
 | Bottleneck | bottleneck_stage, summary_status |
+| Snapshot | snapshot_stage |
 | Breakdown | fail_reason_breakdown_json |
 | Audit | generated_at, generated_by |
 
@@ -209,6 +210,12 @@ Novy system sheet (append-only, leading-underscore konvence jako `_asw_logs` a `
 - **`brief_ready_count`** = COUNT(`preview_stage='BRIEF_READY'`) **STRICT CANONICAL**. Nikdy se neinferuje z `preview_brief_json` / `preview_slug` presence.
 - **`qualified_or_beyond_count`** = COUNT(`lead_stage IN ('QUALIFIED','IN_PIPELINE','PREVIEW_SENT')`) — canonical funnel metric. A-08 post-qualify hook posouva QUALIFIED→IN_PIPELINE, takze strict `qualified_current_count` by funnel undercountoval. `qualified_current_count` je soucasne strict-snapshot side-metric pro transparency, ale NE pouzit v rate calculations.
 - **`duration_ms_approx`** = `MAX(updated_at) − MIN(scraped_at)` — **DERIVED APPROXIMATION**, zahrnuje idle time mezi scrape a batch processing. Ne exact runtime single processu.
+- **`snapshot_stage`** (`RAW_ONLY` / `DOWNSTREAM_PARTIAL` / `FINAL`) — **orthogonal to `summary_status`**. Identifikuje pozici v lifecycle funnelu, ne kvalitu vysledku:
+  - `RAW_ONLY` — raw rows existuji ale LEADS jeste nic pro tento job neodrazi (import probehl, ale downstream propsani ceka)
+  - `DOWNSTREAM_PARTIAL` — LEADS existuji, ale A-06/A-07/A-08 chain je nedokonceny (lead_stage empty, web_checked < imported, nebo qualified>0 && brief_ready=0)
+  - `FINAL` — raw_count=0 (nic k zpracovani), vsechny raw rejected (zadny downstream mozny), nebo full chain dobehl pro vsechny leady
+  - Auto-computed z data state v `buildIngestReport_`. Caller muze prepsat pres `opts.snapshotStage`.
+  - Pouziti: filtruj report sheet podle `snapshot_stage='FINAL'` pro definitive-outcome reports; starsi PARTIAL radky zustavaji v sheetu jako historical trend.
 
 ### Summary status semantika
 
