@@ -32,12 +32,15 @@ What this task does NOT deliver:
 - **Scope:** Reportovaci vrstva nad existujicim ingest funnellem. Pro kazdy `source_job_id` produkuje jeden radek v append-only `_ingest_reports` sheetu + full JSON payload do `_asw_logs`. Ne novy subsystem — cista agregace nad `_raw_import` + LEADS.
 
 What this task delivers:
-- `apps-script/IngestReport.gs` — `ensureIngestReportsSheet_()`, `buildIngestReport_()`, `writeIngestReport_()`, `generateIngestReportForJob()`, `generateIngestReportsForAllJobs()`, `generateIngestReportPrompt()` (menu)
+- `apps-script/IngestReport.gs` — `ensureIngestReportsSheet_()`, `buildIngestReport_()` (pure), `writeIngestReport_()` + `reportToRow_()` (type-preserving), `loadRawRowsByJob_()` (header-validated), `loadLeadsRowsByJob_()`, `generateIngestReportForJob()`, `generateIngestReportsForAllJobs()`, `generateIngestReportPrompt()` (menu)
 - Report unit: **1 report = 1 `source_job_id`** (= 1 scraping job = 1 query na 1 portalu v 1 city/segment)
-- 40-sloupcove schema: identity, timing, raw-stage counts, LEADS-stage counts, derived rates, bottleneck, summary_status, fail_reason_breakdown_json, audit
-- Post-batch hook v `processRawImportBatch_()` — po uspesnem batch-i vygeneruje report per distinct source_job_id, non-fatal wrap
+- 41-sloupcove schema: identity, timing, raw-stage counts, LEADS-stage counts, derived rates, bottleneck, summary_status, **snapshot_stage** (RAW_ONLY / DOWNSTREAM_PARTIAL / FINAL — orthogonal to summary_status), fail_reason_breakdown_json, audit
+- `report_id` format `rpt-{source_job_id}-{ts14}-{uuid8}` — timestamp for human readability + UUID suffix for collision resistance (via `Utilities.getUuid()`)
+- `loadRawRowsByJob_` **validates required headers** (`source_job_id`, `import_decision`, `normalized_status`) per A-02 contract; throws loudly on malformed sheet instead of silent empty result
+- `reportToRow_()` **preserves numeric types** when writing to Sheets (counts, rates, durations stay numbers — not stringified)
+- Post-batch hook v `processRawImportBatch_()` — po uspesnem batch-i vygeneruje report per distinct source_job_id, non-fatal wrap. `snapshot_stage` auto-computed z data state → pokud A-06/A-07/A-08 chain dobehl inline, report je `FINAL`; jinak `DOWNSTREAM_PARTIAL`
 - Menu submenu "Ingest report → ..." s dvema manualnimi akcemi
-- Local evidence harness `scripts/test-a09-ingest-report.mjs` — 8 scenaru, 93 assertions, all pass
+- Local evidence harness `scripts/test-a09-ingest-report.mjs` — 12 scenaru, 136 assertions, all pass
 
 What this task does NOT deliver:
 - Frontend dashboard (mimo scope)
@@ -46,7 +49,7 @@ What this task does NOT deliver:
 - Historicke backfill stare joby (manualni `generateIngestReportsForAllJobs()` to umoznuje, ale neni povinny deliverable)
 - Zivy TEST runtime clasp push proof
 
-**Status rationale:** done v implementation / repo scope. Lokalne overeno (93 assertions). TEST runtime end-to-end NOT VERIFIED (vyzaduje clasp push + realny `_raw_import` + LEADS v TEST projektu).
+**Status rationale:** done v implementation / repo scope. Lokalne overeno (136 assertions). TEST runtime end-to-end NOT VERIFIED (vyzaduje clasp push + realny `_raw_import` + LEADS v TEST projektu).
 - **Owner:** Stream A
 - **Code:** apps-script/IngestReport.gs (new), apps-script/RawImportWriter.gs (modified), apps-script/Menu.gs (modified), scripts/test-a09-ingest-report.mjs (new), docs/30-task-records/A9.md (new), docs/20-current-state.md (modified), docs/23-data-model.md (modified), docs/24-automation-workflows.md (modified)
 - **Docs:** docs/20-current-state.md, docs/23-data-model.md, docs/24-automation-workflows.md

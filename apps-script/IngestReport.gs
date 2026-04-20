@@ -68,6 +68,14 @@ var INGEST_REPORT_COLUMNS = [
   'bottleneck_stage',
   'summary_status',
 
+  // Snapshot stage (A-09.1): RAW_ONLY / DOWNSTREAM_PARTIAL / FINAL.
+  // Orthogonal to summary_status — indicates WHEN in the funnel lifecycle
+  // this report was taken, not the quality outcome. A report generated
+  // immediately post-import (before A-06/A-07/A-08 downstream) is
+  // RAW_ONLY / DOWNSTREAM_PARTIAL; a report taken after all downstream
+  // has completed is FINAL.
+  'snapshot_stage',
+
   // Full breakdown (JSON string)
   'fail_reason_breakdown_json',
 
@@ -86,6 +94,16 @@ var INGEST_REPORT_COLUMNS = [
  * snapshot side-metric.
  */
 var QUALIFIED_OR_BEYOND_STAGES = ['QUALIFIED', 'IN_PIPELINE', 'PREVIEW_SENT'];
+
+/* ── Snapshot stage enum (A-09.1) ───────────────────────────── */
+var SNAPSHOT_STAGES = {
+  RAW_ONLY:            'RAW_ONLY',            // no LEADS yet for this job
+  DOWNSTREAM_PARTIAL:  'DOWNSTREAM_PARTIAL',  // leads exist, but A-06/A-07/A-08 incomplete
+  FINAL:               'FINAL'                // downstream complete (or no leads to downstream-process)
+};
+
+/* ── Required _raw_import headers (A-02 contract) ───────────── */
+var REQUIRED_RAW_IMPORT_HEADERS = ['source_job_id', 'import_decision', 'normalized_status'];
 
 /* ═══════════════════════════════════════════════════════════════
    Sheet ensure
@@ -118,18 +136,25 @@ function ensureIngestReportsSheet_(ss) {
  * @param {string} sourceJobId
  * @param {Array<Object>} rawRows — _raw_import rows (objects) for this job
  * @param {Array<Object>} leadsRows — LEADS rows (objects) for this job
+ * @param {Object} [opts] — optional: { snapshotStage: 'RAW_ONLY' | 'DOWNSTREAM_PARTIAL' | 'FINAL' }
+ *                          If omitted, snapshot_stage is auto-computed from data state.
  * @return {Object} report
  */
-function buildIngestReport_(sourceJobId, rawRows, leadsRows) {
+function buildIngestReport_(sourceJobId, rawRows, leadsRows, opts) {
   rawRows = rawRows || [];
   leadsRows = leadsRows || [];
+  opts = opts || {};
 
   var report = {};
   for (var c = 0; c < INGEST_REPORT_COLUMNS.length; c++) {
     report[INGEST_REPORT_COLUMNS[c]] = '';
   }
 
-  report.report_id = 'rpt-' + sourceJobId + '-' + new Date().toISOString().replace(/[-:T.Z]/g, '').substring(0, 14);
+  // report_id: timestamp (human-readable) + UUID short suffix (collision-safe).
+  // Format: rpt-{source_job_id}-{YYYYMMDDHHmmss}-{uuid8}
+  var tsCompact = new Date().toISOString().replace(/[-:T.Z]/g, '').substring(0, 14);
+  var uuidSuffix = Utilities.getUuid().replace(/-/g, '').substring(0, 8);
+  report.report_id = 'rpt-' + sourceJobId + '-' + tsCompact + '-' + uuidSuffix;
   report.source_job_id = sourceJobId;
 
   // ── Identity fields: derive from raw/leads sample ───────────
@@ -347,6 +372,38 @@ function buildIngestReport_(sourceJobId, rawRows, leadsRows) {
   };
   report.fail_reason_breakdown_json = JSON.stringify(breakdown);
 
+  // ── Snapshot stage (A-09.1) ──────────────────────────────────
+  // Orthogonal to summary_status. Answers: "is this a definitive end-of-funnel
+  // report, or a mid-flight snapshot?" Caller may override via opts.snapshotStage;
+  // otherwise auto-compute:
+  //   RAW_ONLY:            raw rows exist but LEADS has nothing for this job yet
+  //                        (no downstream possible — import may have all failed/dup,
+  //                        or leads not yet appended)
+  //   DOWNSTREAM_PARTIAL:  some leads exist but A-06/A-07/A-08 chain incomplete
+  //                        (lead_stage still empty, or web not checked for all,
+  //                        or leads qualified but none reached BRIEF_READY)
+  //   FINAL:               downstream state is settled — either no leads (rawCount=0
+  //                        or all imports rejected) or all leads have fully
+  //                        traversed the chain
+  var snapshot;
+  if (opts.snapshotStage) {
+    snapshot = opts.snapshotStage;
+  } else if (rawCount === 0) {
+    snapshot = SNAPSHOT_STAGES.FINAL; // nothing to process; final-by-default
+  } else if (imported > 0 && leadsCount === 0) {
+    snapshot = SNAPSHOT_STAGES.RAW_ONLY; // imports recorded but LEADS not reflected yet
+  } else if (leadsCount === 0) {
+    snapshot = SNAPSHOT_STAGES.FINAL; // all rejected/duplicate → final
+  } else if (leadStageEmpty > 0 || webChecked < imported) {
+    snapshot = SNAPSHOT_STAGES.DOWNSTREAM_PARTIAL;
+  } else if (qualifiedOrBeyond > 0 && briefReady === 0) {
+    // Leads qualified but none reached BRIEF_READY — preview pipeline pending
+    snapshot = SNAPSHOT_STAGES.DOWNSTREAM_PARTIAL;
+  } else {
+    snapshot = SNAPSHOT_STAGES.FINAL;
+  }
+  report.snapshot_stage = snapshot;
+
   // ── Audit ────────────────────────────────────────────────────
   report.generated_at = new Date().toISOString();
   report.generated_by = 'buildIngestReport_';
@@ -358,14 +415,29 @@ function buildIngestReport_(sourceJobId, rawRows, leadsRows) {
    Sheet writer
    ═══════════════════════════════════════════════════════════════ */
 
-function writeIngestReport_(sheet, report) {
-  var values = INGEST_REPORT_COLUMNS.map(function(col) {
+/**
+ * Convert a report object to a Sheet-ready row with PRESERVED types.
+ * Numbers stay numbers (important for sort / aggregation / sparkline formulas
+ * in Sheets). Strings stay strings. Empty / null / undefined → ''.
+ * JSON columns (fail_reason_breakdown_json) are already stringified by caller.
+ *
+ * @param {Object} report — built via buildIngestReport_
+ * @return {Array} row values ordered by INGEST_REPORT_COLUMNS
+ */
+function reportToRow_(report) {
+  return INGEST_REPORT_COLUMNS.map(function(col) {
     var v = report[col];
-    if (v === null || v === undefined) return '';
+    if (v === null || v === undefined || v === '') return '';
+    if (typeof v === 'number' && isFinite(v)) return v;
+    if (typeof v === 'boolean') return v;
     return String(v);
   });
+}
+
+function writeIngestReport_(sheet, report) {
+  var row = reportToRow_(report);
   var lastRow = Math.max(sheet.getLastRow(), 1);
-  sheet.getRange(lastRow + 1, 1, 1, INGEST_REPORT_COLUMNS.length).setValues([values]);
+  sheet.getRange(lastRow + 1, 1, 1, INGEST_REPORT_COLUMNS.length).setValues([row]);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -378,6 +450,21 @@ function loadRawRowsByJob_(rawSheet) {
   var headers = data[0];
   var idx = {};
   for (var h = 0; h < headers.length; h++) idx[headers[h]] = h;
+
+  // A-02 contract guarantees these columns. If missing, the sheet is malformed
+  // and we must fail loudly rather than silently return empty results.
+  var missing = [];
+  for (var k = 0; k < REQUIRED_RAW_IMPORT_HEADERS.length; k++) {
+    if (idx[REQUIRED_RAW_IMPORT_HEADERS[k]] === undefined) {
+      missing.push(REQUIRED_RAW_IMPORT_HEADERS[k]);
+    }
+  }
+  if (missing.length > 0) {
+    var msg = '_raw_import sheet is missing required header(s): ' + missing.join(', ') +
+              '. Expected per A-02 contract.';
+    aswLog_('ERROR', 'loadRawRowsByJob_', msg);
+    throw new Error(msg);
+  }
 
   var byJob = {};
   for (var r = 1; r < data.length; r++) {
