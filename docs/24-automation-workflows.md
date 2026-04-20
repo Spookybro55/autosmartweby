@@ -230,7 +230,7 @@ Reportovaci vrstva nad ingest funnellem. Pro kazdy `source_job_id` produkuje jed
 
 | Funkce | Ucel |
 |--------|------|
-| `ensureIngestReportsSheet_(ss)` | idempotent sheet create (40 sloupcu) |
+| `ensureIngestReportsSheet_(ss)` | idempotent sheet create (41 sloupcu) |
 | `buildIngestReport_(sourceJobId, rawRows, leadsRows)` | cista funkce: pocita metriky, vraci report objekt (no side effects) |
 | `writeIngestReport_(sheet, report)` | append jednoho radku |
 | `generateIngestReportForJob(sourceJobId)` | public: build + write + aswLog JSON payload |
@@ -253,11 +253,17 @@ Reportovaci vrstva nad ingest funnellem. Pro kazdy `source_job_id` produkuje jed
 
 **Summary status:** OK / DEGRADED (bottleneck detected) / PARTIAL (A-06/A-07/A-08 nedobehl pro vsechny leads) / FAILED (raw=0 nebo error_rate>0.5).
 
+**Snapshot stage (orthogonal to summary_status):** `RAW_ONLY` / `DOWNSTREAM_PARTIAL` / `FINAL` — identifikuje pozici v lifecycle funnelu, ne kvalitu. Auto-computed z data state; caller muze prepsat pres `opts.snapshotStage`. Post-batch hook v `processRawImportBatch_()` nechava auto-compute: pokud A-06/A-07/A-08 chain dobehl inline, report je `FINAL`; jinak `DOWNSTREAM_PARTIAL`. Filtrovani `snapshot_stage='FINAL'` v sheetu dava definitive-outcome reports; starsi PARTIAL radky zustavaji jako historical trend.
+
 **Bottleneck stages (4):** A:normalize, B:dedupe_import, C:qualify, D:brief_ready. Threshold 0.8.
 
-**Fail handling:** `buildIngestReport_` je pure; per-job wrapper zaloguje ERROR na exception a pokracuje (v bulk scanu). Post-batch hook je non-fatal — chyba reportu nezneplatni import success.
+**Fail handling:** `buildIngestReport_` je pure. `loadRawRowsByJob_` **throws** pri chybejicim required headeru (`source_job_id`, `import_decision`, `normalized_status`) per A-02 contract — malformed sheet fails loudly. Per-job wrapper v `generateIngestReportsForAllJobs` zaloguje ERROR na exception a pokracuje (v bulk scanu). Post-batch hook je non-fatal — chyba reportu nezneplatni import success.
 
-**Stav:** LOCAL VERIFIED (8 scenaru / 93 asserti — happy, empty, high-duplicate, missing-contacts, errors-dominate, partial, OK, schema sanity). TEST RUNTIME not verified (vyzaduje clasp push + realny _raw_import / LEADS).
+**Collision-safe IDs:** `report_id` format `rpt-{source_job_id}-{ts14}-{uuid8}` kombinuje human-readable timestamp s UUID suffix (`Utilities.getUuid()`) — bezpecne pro concurrent generaci.
+
+**Type-preserving writer:** `reportToRow_()` pres `writeIngestReport_` zachovava numeric typy (counts, rates, durations) v Sheets misto stringifikace — umoznuje sort, aggregation formulas, sparklines.
+
+**Stav:** LOCAL VERIFIED (12 scenaru / 136 asserti — happy, empty, high-duplicate, missing-contacts, errors-dominate, partial, OK, schema sanity, report_id uniqueness, header validation, snapshot_stage differentiation, type preservation). TEST RUNTIME not verified (vyzaduje clasp push + realny _raw_import / LEADS).
 
 ## Chybejici automatizace
 
