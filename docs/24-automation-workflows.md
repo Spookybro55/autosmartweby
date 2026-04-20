@@ -222,6 +222,43 @@ Uzavira prechod QUALIFIED → BRIEF_READY. `processPreviewQueue()` zpracuje kval
 
 **Stav:** LOCAL VERIFIED (6 scenaru, 38 asserti — happy path, send_allowed=FALSE, skip gates, per-row fail isolation, BRIEF_READY idempotence). TEST RUNTIME not verified (vyzaduje clasp push).
 
+## Ingest quality report (A-09)
+
+Reportovaci vrstva nad ingest funnellem. Pro kazdy `source_job_id` produkuje jeden radek v append-only `_ingest_reports` sheet + full JSON payload do `_asw_logs`. Ne novy subsystem — cista agregace nad `_raw_import` + LEADS.
+
+**Soubor:** `apps-script/IngestReport.gs`
+
+| Funkce | Ucel |
+|--------|------|
+| `ensureIngestReportsSheet_(ss)` | idempotent sheet create (40 sloupcu) |
+| `buildIngestReport_(sourceJobId, rawRows, leadsRows)` | cista funkce: pocita metriky, vraci report objekt (no side effects) |
+| `writeIngestReport_(sheet, report)` | append jednoho radku |
+| `generateIngestReportForJob(sourceJobId)` | public: build + write + aswLog JSON payload |
+| `generateIngestReportsForAllJobs()` | scan distinct source_job_ids v _raw_import + LEADS, per-job try/catch |
+| `generateIngestReportPrompt()` | menu entry: UI prompt → generateIngestReportForJob |
+
+**Trigger cesty (dual path):**
+1. **Post-batch hook** (automatic): na konci `processRawImportBatch_()` po A-06 auto web check, non-fatal wrap. Sebere distinct `source_job_id` z raw rows v batch-i a pro kazdy vygeneruje report. Vysledek v `stats.ingestReportIds` / `stats.ingestReportError`.
+2. **Manual menu** ("Autosmartweby CRM" → "Ingest report → …"):
+   - "Report pro source_job_id…" → prompt → jeden report
+   - "Report pro vsechny joby" → scan distinct → per-each report
+
+**Report unit:** 1 report = 1 `source_job_id`. Comparison mezi joby = read `_ingest_reports` + filter/sort podle `portal`, `segment`, `city`, `district`, `run_started_at`.
+
+**Strict metric semantics** (viz docs/23 sekce "Ingest quality report"):
+- `duplicate_count` = STRICT `import_decision='rejected_duplicate'` only (pending_review separate bucket)
+- `brief_ready_count` = STRICT `preview_stage='BRIEF_READY'` only (neinferuje se z brief_json/slug)
+- `qualified_or_beyond_count` = canonical funnel metric (A-08 posouva QUALIFIED→IN_PIPELINE)
+- `duration_ms_approx` = DERIVED APPROXIMATION (MAX(updated_at) − MIN(scraped_at), ne exact runtime)
+
+**Summary status:** OK / DEGRADED (bottleneck detected) / PARTIAL (A-06/A-07/A-08 nedobehl pro vsechny leads) / FAILED (raw=0 nebo error_rate>0.5).
+
+**Bottleneck stages (4):** A:normalize, B:dedupe_import, C:qualify, D:brief_ready. Threshold 0.8.
+
+**Fail handling:** `buildIngestReport_` je pure; per-job wrapper zaloguje ERROR na exception a pokracuje (v bulk scanu). Post-batch hook je non-fatal — chyba reportu nezneplatni import success.
+
+**Stav:** LOCAL VERIFIED (8 scenaru / 93 asserti — happy, empty, high-duplicate, missing-contacts, errors-dominate, partial, OK, schema sanity). TEST RUNTIME not verified (vyzaduje clasp push + realny _raw_import / LEADS).
+
 ## Chybejici automatizace
 
 - Trigger na novy radek v LEADS (neni implementovan)
