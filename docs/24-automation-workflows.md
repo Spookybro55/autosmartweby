@@ -191,6 +191,37 @@ Automaticka kvalifikace LEADS radku po web checku. Reusuje `evaluateQualificatio
 
 **Stav:** TEST runtime overeno (QUALIFIED, DISQUALIFIED, REVIEW, SKIPPED guard). Lokalne: 6 scenaru, 23 asserti. Failure isolation: code structure + local harness.
 
+## Preview queue → BRIEF_READY (A-08)
+
+Uzavira prechod QUALIFIED → BRIEF_READY. `processPreviewQueue()` zpracuje kvalifikovane leady, zapise preview brief (B-01 kontrakt), slug a email draft, a posune `preview_stage` do `BRIEF_READY`.
+
+**Soubory:** `apps-script/PreviewPipeline.gs` (core logic, pre-existing), `apps-script/AutoQualifyHook.gs` (post-qualify hook, A-08)
+
+| Funkce | Ucel |
+|--------|------|
+| `processPreviewQueue()` | Hlavni vstup: scan LEADS, zapis brief + slug + draft, set `preview_stage=BRIEF_READY` |
+| `buildPreviewBrief_(rd)` | B-01 compatible brief builder (18 poli) |
+| `buildSlug_(name, city)` | URL-safe slug (max 60 chars, normalized) |
+| `composeDraft_(rd)` | Situation-aware email draft (subject + body) |
+| `chooseTemplateType_(rd)` | Template selector (48 variant, B-03 family input) |
+
+**Eligibility:** `qualified_for_preview=TRUE` AND `preview_stage ∈ {'', NOT_STARTED, FAILED, REVIEW_NEEDED, BRIEF_READY}` AND `dedupe_flag !== TRUE`. Idempotence: pokud `preview_stage=BRIEF_READY` a DRY_RUN/no webhook, radek se preskoci (zadny rebuild).
+
+**Zapsana pole per uspesny radek:**
+- `template_type`, `preview_brief_json`, `preview_headline`, `preview_subheadline`, `preview_cta`, `preview_slug`
+- `preview_stage = BRIEF_READY`, `lead_stage: QUALIFIED → IN_PIPELINE`, `last_processed_at`
+- pokud `send_allowed=TRUE`: `email_subject_draft`, `email_body_draft`, `outreach_stage = DRAFT_READY`
+
+**Batch:** `BATCH_SIZE = 100` per run.
+
+**Fail handling:** Per-row `try/catch`. Pri failure → `preview_stage = FAILED`, `preview_error = 'PROCESSING_ERROR: ' + message`, batch pokracuje. `writeExtensionColumns_()` na konci zapise vsechny zmeny changed-only.
+
+**Trigger cesty (dual path):**
+1. **Time-based** (pre-existing): 15-min timer `processPreviewQueue` (auto-install pres `installProjectTriggers()`)
+2. **Post-qualify hook** (A-08): po uspesne kvalifikaci (`stats.qualified > 0`, ne dry run) vola `runAutoQualify_()` inline `processPreviewQueue()`. Non-fatal: chyba hooku nezneplatni qualify vysledek. Stats: `previewHookInvoked: true` nebo `previewHookError: message`.
+
+**Stav:** LOCAL VERIFIED (6 scenaru, 38 asserti — happy path, send_allowed=FALSE, skip gates, per-row fail isolation, BRIEF_READY idempotence). TEST RUNTIME not verified (vyzaduje clasp push).
+
 ## Chybejici automatizace
 
 - Trigger na novy radek v LEADS (neni implementovan)

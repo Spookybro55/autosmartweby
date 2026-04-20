@@ -152,6 +152,20 @@ function runAutoQualifyInner_(batchSize, dryRun, targetLeadIds) {
   aswLog_('INFO', 'runAutoQualify_',
     'Auto qualify complete: ' + JSON.stringify(stats));
 
+  // A-08: post-qualify hook → move newly qualified leads toward BRIEF_READY
+  // without waiting for the 15-min processPreviewQueue timer.
+  // Non-fatal: preview processing failure does not invalidate qualify success.
+  if (!dryRun && stats.qualified > 0) {
+    try {
+      processPreviewQueue();
+      stats.previewHookInvoked = true;
+    } catch (e) {
+      stats.previewHookError = e.message;
+      aswLog_('WARN', 'runAutoQualify_',
+        'A-08 preview hook failed (non-fatal): ' + e.message);
+    }
+  }
+
   return stats;
 }
 
