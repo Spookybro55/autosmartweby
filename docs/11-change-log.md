@@ -6,6 +6,28 @@
 
 ---
 
+## 2026-04-20
+
+### [A/A8] Preview queue → BRIEF_READY — DONE
+- **Scope:** Uzavira prechod kvalifikovaneho leadu (QUALIFIED, preview_stage=NOT_STARTED) do stavu BRIEF_READY bez cekani na 15-min casovy trigger. Symetrie vuci A-06 -> A-07 post-web-check hooku.
+
+What this task delivers:
+- **Post-qualify hook** v `AutoQualifyHook.gs` — po uspesne kvalifikaci (`stats.qualified > 0`) a pri `dryRun === false` primo vola `processPreviewQueue()`. Non-fatal wrap — chyba preview hooku nezneplatni vysledek A-07.
+- **Local evidence harness** `scripts/test-a08-preview-queue.mjs` — 6 scenaru, 38 assertions, portuje kriticke GAS helpery (`resolveWebsiteState_`, `chooseTemplateType_`, `buildPreviewBrief_`, `buildSlug_`, `composeDraft_`) a replikuje per-row logiku `processPreviewQueue`.
+- **Task record** + sync do `docs/20-current-state.md` a `docs/24-automation-workflows.md`.
+
+What this task does NOT deliver:
+- Zmeny `processPreviewQueue()`, `buildPreviewBrief_()`, `buildSlug_()`, `composeDraft_()` (reused as-is z PreviewPipeline.gs)
+- Pridani `preview_slug` do webhook payloadu (znamy gap z B-01 — out of scope, blokovano B-05)
+- B-04 preview endpoint, B-05 slug write-back
+- Lock sjednoceni mezi `runAutoQualify_` a `processPreviewQueue()` (neni nutne — processPreviewQueue neakviruje lock a je volany uvnitr A-07 lock scope)
+- Zivy TEST runtime clasp deployment (vyzaduje push na TEST skript)
+
+**Status rationale:** done — code complete, lokalne verifikovano (38 assertions), existujici 15-min timer + post-hook pokryvaji obe cesty. Fail izolace prokazana per-row try/catch scenariem (row 1 of 3 throws, rows 0 a 2 dosahnou BRIEF_READY).
+- **Owner:** Stream A
+- **Code:** apps-script/AutoQualifyHook.gs (modified), scripts/test-a08-preview-queue.mjs (new), docs/30-task-records/A8.md (new), docs/20-current-state.md (modified), docs/24-automation-workflows.md (modified)
+- **Docs:** docs/20-current-state.md, docs/24-automation-workflows.md
+
 ## 2026-04-17
 
 ### [A/A10] Ingest runtime bridge — LEADS append + segment taxonomy fix — DONE
