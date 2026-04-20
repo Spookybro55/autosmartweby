@@ -83,7 +83,7 @@ Gate pravidlo: section se renderuje pouze pokud je v `suggested_sections`. Field
 |------|-------------------|
 | B-02 | PreviewBrief + template_type + preview_slug + SECTION_MAPPING_CONTRACT — **DONE**: MVP renderer v `/preview/[slug]`, 6 sekci, hardcoded sample brief |
 | B-03 | TemplateType (mapovani na render sablony) — **DONE**: `template-family.ts` mapuje na 4 MVP family (`emergency`, `community-expert`, `technical-authority`, `generic-local`) + render hints; drift fix `TemplateBase` (`plumber`/`construction` namisto `instalater`/`mason`) |
-| B-04 | MinimalRenderRequest + MinimalRenderResponse |
+| B-04 | MinimalRenderRequest + MinimalRenderResponse — **DONE**: `POST /api/preview/render` s header auth, runtime validator, in-memory preview store, upsert by `preview_slug`, `preview_url = ${PUBLIC_BASE_URL}/preview/${slug}`. Zive GAS propojeni ceka na B-05 (GAS payload zatim neobsahuje `preview_slug`). |
 | B-05 | Response schema + preview_slug gap fix v GAS + PreviewSlugContract |
 
 **Doporuceni:** Minimal Compatible first → Target po MVP.
@@ -92,7 +92,7 @@ Gate pravidlo: section se renderuje pouze pokud je v `suggested_sections`. Field
 
 ## Preview Renderer (B-02)
 
-MVP preview renderer je implementovan jako Next.js App Router route `/preview/[slug]`. Renderuje landing page z hardcoded sample briefu. Sekce se renderuji vyhradne podle `brief.suggested_sections`. Nepouziva API endpoint ani runtime validaci — data jsou staticky importovana z B-01 fixture souboru.
+MVP preview renderer je implementovan jako Next.js App Router route `/preview/[slug]`. Renderuje landing page z briefu. Sekce se renderuji vyhradne podle `brief.suggested_sections`. Po B-04 prednostne cte brief z in-memory `preview-store.ts` (runtime submitted pres `/api/preview/render`) a fallbackuje na hardcoded B-02 sample fixtures.
 
 Dostupne sample previews: `remesla-dvorak` (rich fixture, 5 sekci), `sluzby-priklad` (minimal fixture, 4 sekce), `havarie-brno-instalater` (emergency family), `malir-novak-praha` (community-expert family), `elektro-projekt-plzen` (technical-authority family).
 
@@ -108,6 +108,22 @@ Runtime `template_type` (emitovany GAS `chooseTemplateType_`) je mapovan na 4 MV
 API: `resolveTemplateFamily(templateType: string): TemplateFamily`, `parseTemplateType`, `resolveTemplateRenderHints` (vraci `contactFirst`, `needsReviewFlag`, `isDataConflict` flags).
 
 Renderer zatim zustava template-agnostic — family vrstva je pripravena pro family-specificke layouty v nasledujicich tascich. `needsReviewFlag=true` pro `technical-authority` dokud HTML prototyp (`design-html/03-technical-authority/`) nevznikne.
+
+## Preview Render Endpoint (B-04)
+
+`POST /api/preview/render` (`crm-frontend/src/app/api/preview/render/route.ts`) je serverovy vstupni bod pro webhook z Apps Scriptu. Zodpovednost:
+
+- **Auth:** header `X-Preview-Webhook-Secret` porovnany timing-safe proti env `PREVIEW_WEBHOOK_SECRET`.
+- **Validace:** runtime validator (`src/lib/preview/validate-render-request.ts`) proti B-01 `MinimalRenderRequest` + B-01 `PREVIEW_SLUG_PATTERN`. Hard-fail pro `business_name`/`city`/`headline`/`suggested_sections>=3` a union hodnoty (`website_status`, `confidence_level`).
+- **Family routing:** `resolveTemplateFamily` + `resolveTemplateRenderHints` z B-03 (ne re-implementace).
+- **Upsert:** in-memory Map v `src/lib/preview/preview-store.ts`, klic = `preview_slug`. Nezavisly zaznam nese `brief`, `template_type`, `family`, `hints`, `version`, `created_at`, `updated_at`.
+- **Response:** `MinimalRenderResponseOk` s `preview_url = ${PUBLIC_BASE_URL}/preview/${preview_slug}`, `preview_version="b04-mvp-1"`, `preview_quality_score` odvozeno z `confidence_level` (high=0.9, medium=0.7, low=0.5), `preview_needs_review=true` pokud hints flagy nebo unknown template base fallback.
+
+**Out of scope (B-05):** slug generace, GAS payload uprava, `PREVIEW_STAGES` transitions, write-back do LEADS, retries.
+
+**Out of scope (B-06):** externi persistence, CDN, screenshot pipeline, realny versioning.
+
+**Zive GAS propojeni** vyzaduje B-05 — aktualni `PreviewPipeline.gs` webhook payload zatim neobsahuje `preview_slug`, takze produkcni volani endpointu skonci 400.
 
 ## Cilovy model
 

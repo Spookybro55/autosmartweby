@@ -1,9 +1,10 @@
-import type { PreviewBrief, TemplateType } from '@/lib/domain/preview-contract';
-import richBrief from './preview-brief.rich.json';
-import minimalBrief from './preview-brief.minimal.json';
-import emergencyBrief from './preview-brief.emergency.json';
-import communityBrief from './preview-brief.community.json';
-import technicalBrief from './preview-brief.technical.json';
+import type { PreviewBrief, TemplateType } from '../domain/preview-contract.ts';
+import { getPreviewRecord } from '../preview/preview-store.ts';
+import richBrief from './preview-brief.rich.json' with { type: 'json' };
+import minimalBrief from './preview-brief.minimal.json' with { type: 'json' };
+import emergencyBrief from './preview-brief.emergency.json' with { type: 'json' };
+import communityBrief from './preview-brief.community.json' with { type: 'json' };
+import technicalBrief from './preview-brief.technical.json' with { type: 'json' };
 
 /**
  * Envelope around a sample brief so routes can carry template_type alongside
@@ -42,6 +43,10 @@ const SAMPLE_BRIEFS: Record<string, SampleBriefRecord> = {
 };
 
 export function getPreviewBriefBySlug(slug: string): PreviewBrief | null {
+  // B-04: runtime store (briefs submitted via /api/preview/render) has priority.
+  const runtime = getPreviewRecord(slug);
+  if (runtime) return runtime.brief;
+  // Fallback: B-02 hardcoded dev fixtures.
   return SAMPLE_BRIEFS[slug]?.brief ?? null;
 }
 
