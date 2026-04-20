@@ -239,31 +239,6 @@ function processRawImportBatch_(opts) {
     }
   }
 
-  // A-09: generate ingest quality report(s) for source_job_ids processed in this batch.
-  // Non-fatal: report failure does not invalidate import success.
-  if (!dryRun && rawRows.length > 0) {
-    try {
-      var jobIdsSet = {};
-      for (var ji = 0; ji < rawRows.length; ji++) {
-        var jid = String(rawRows[ji].source_job_id || '').trim();
-        if (jid) jobIdsSet[jid] = true;
-      }
-      var jobIds = Object.keys(jobIdsSet);
-      var reportIds = [];
-      for (var rj = 0; rj < jobIds.length; rj++) {
-        var rep = generateIngestReportForJob(jobIds[rj]);
-        reportIds.push(rep.report_id);
-      }
-      stats.ingestReportIds = reportIds;
-      aswLog_('INFO', 'RawImportWriter',
-        'A-09 ingest reports: ' + reportIds.length + ' written');
-    } catch (e) {
-      aswLog_('WARN', 'RawImportWriter',
-        'A-09 ingest report failed (non-fatal): ' + e.message);
-      stats.ingestReportError = e.message;
-    }
-  }
-
   aswLog_('INFO', 'RawImportWriter', 'Batch processed: ' + JSON.stringify(stats));
   return stats;
 }

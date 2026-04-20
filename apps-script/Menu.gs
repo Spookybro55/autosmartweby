@@ -48,12 +48,6 @@ function onOpen() {
     .addItem('Webhook pilot test (5-10 rows)', 'runWebhookPilotTest')
     .addSeparator()
     .addSubMenu(
-      ui.createMenu('Ingest report')
-        .addItem('Report pro source_job_id…', 'generateIngestReportPrompt')
-        .addItem('Report pro vsechny joby', 'generateIngestReportsForAllJobs')
-    )
-    .addSeparator()
-    .addSubMenu(
       ui.createMenu('Ke kontaktování')
         .addItem('Evaluate contact readiness', 'evaluateContactReadiness')
         .addItem('Refresh "Ke kontaktování"', 'refreshContactingSheet')
