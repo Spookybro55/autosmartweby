@@ -3249,3 +3249,528 @@ function processOutboundQueueBatch() {
 - `getEmailSender()` factory pattern.
 - Payload/response `payload_version = "1.0"` konstanta.
 - PII safety invariant pro `provider_response_excerpt` + `error_message` sanitizaci.
+
+---
+
+## Inbound event ingest — C-07 (reply / bounce / unsubscribe)
+
+> **SPEC-only.** Tato sekce definuje kontrakt event ingest vrstvy po úspěšném sendu. Neimplementuje mailbox polling worker, ESP webhook handler, frontend UI, follow-up engine ani provider adaptér.
+
+> **Nomenklatura C-07:** V sekci C-06 handoff tabulce (řádek "C-07 Follow-up cadence") byl C-07 orientačně zmíněn jako "follow-up cadence engine". Vlna 7 zadání reassignovala C-07 na **reply / bounce / unsubscribe ingest**. Follow-up cadence engine je mimo C-07 scope a bude samostatný downstream task. C-07 ingest je **prerekvizita** pro jakýkoli follow-up engine (engine potřebuje vědět, kdy NEposílat další email).
+
+### 1. Účel ingest vrstvy po sendu
+
+```
+         ┌──────────────────┐
+send ──► │  C-06 sender     │ ──► NormalizedSendResponse ──► queue SENT
+         └──────────────────┘                                     │
+                                                                  │
+                                     ↓ (čas plyne, vzdálený strana reaguje)
+                                                                  │
+              ┌───────────────────────────────────────────────────┴────┐
+              │                                                        │
+   mailbox sync (Gmail)                                  provider webhook (ESP)
+              │                                                        │
+              └────────────────────┬───────────────────────────────────┘
+                                   │
+                                   ▼
+                        ┌──────────────────────┐
+                        │  C-07 ingest         │
+                        │  normalize event     │
+                        │  ─────────────       │
+                        │  REPLY / BOUNCE /    │
+                        │  UNSUBSCRIBE /       │
+                        │  UNKNOWN / COMPLAINT │
+                        └──────────┬───────────┘
+                                   │
+                     ┌─────────────┼─────────────┐
+                     ▼             ▼             ▼
+            CS1 lifecycle    stop rules    review flag
+            transition       (queue cancel,  (needs_manual_reply
+            (REPLIED /       stop follow-up) classifier)
+             BOUNCED /
+             UNSUBSCRIBED)
+```
+
+C-07 odděluje **co přijde po sendu** od:
+- provider **send response** (to je C-06 — synchronní výstup z `sender.send`)
+- queue **SEND_STATUS** (to je C-05 — stav odesílání, ne příjmu)
+- lead **lifecycle state** (to je CS1 — kanonická dimenze leadu)
+- follow-up **cadence** (to je budoucí task — logika "kdy poslat další mail")
+
+C-07 je **ingest kontrakt**: definuje event schemata, lifecycle mapping, stop rules a idempotency invariants. Runtime ingest (mailbox polling, webhook endpoint) je **implementační task**.
+
+### 2. Boundary / non-goals
+
+**C-07 řeší:**
+- Event schema pro 3 primární event families: REPLY, BOUNCE, UNSUBSCRIBE.
+- Event schema pro 2 doplňkové rezervy: UNKNOWN_INBOUND, COMPLAINT (obě PROPOSED).
+- Normalizaci raw mailbox / webhook signálů na standardized `InboundEvent` tvar.
+- Deterministický mapping event → CS1 lifecycle transition.
+- Stop rules, které event musí vyvolat (queue cancel, follow-up block, suppression).
+- Idempotency / duplicate-ingest invariants.
+- Cross-ref graf (event ↔ queue row ↔ lead ↔ `_asw_logs`).
+- Source variants (mailbox polling / webhook / manual).
+- Visibility: které LEADS sloupce se aktualizují, kde žije operator review signal.
+
+**C-07 NEŘEŠÍ (out-of-scope):**
+- Mailbox polling worker / Gmail polling runtime.
+- ESP webhook endpoint / HTTP handler.
+- Provider adaptér pro inbound (to je obdoba C-06 na inbound straně — budoucí task).
+- Follow-up cadence engine (kdy poslat další mail v threadu).
+- Reply classification ML / NLP model (v1.0 používá jen rule-based classifier).
+- Operator reply-handling UI (manuál reply screen, suppression management UI).
+- Automatickou reply generaci (CRM neodpovídá za tým).
+- Mutaci C-06 `EmailSender` nebo C-05 queue schema (C-07 jen **čte** `provider_message_id` / `provider_thread_id` / `lead_id` z queue; nezapisuje do queue status poli).
+- Přidávání nových canonical CS1 states.
+
+**Vztah k B6:**
+- B6 (operator reply-handling UI) **není blocker** pro C-07 SPEC. C-07 definuje event store a review flag kontrakt nezávisle na UI. B6 později implementuje, jak operator tyto flagy čte/řeší.
+
+### 3. Event family overview
+
+| Event family | Trigger | CS1 mapping | Stop rule tier | Label |
+|--------------|---------|-------------|----------------|-------|
+| **REPLY** | Lead (nebo někdo z jeho doménu) odpověděl na náš email. | `EMAIL_SENT → REPLIED` (T20). Terminal. | Tier 1: stopuje follow-up automation. Queue row již SENT, není co cancelovat. | VERIFIED (existing `email_reply_type=REPLY` detekce v `apps-script/MailboxSync.gs`). |
+| **BOUNCE** | Provider vrátí nedoručeno (mailer-daemon, MAILER-DAEMON@, delivery status, ESP webhook `bounce` event). | `EMAIL_SENT → BOUNCED` (T21). Terminal. | Tier 2: stopuje další send na tuto adresu **napříč všemi thready i budoucími queue rows**. | VERIFIED (existing `isBounceMessage_` v `apps-script/MailboxSync.gs:321`). |
+| **UNSUBSCRIBE** | Lead explicitně požádal o odhlášení (`List-Unsubscribe` click, reply body obsahující unsubscribe intent, ESP webhook `unsubscribe`). | `* → UNSUBSCRIBED` (T22; může přijít z kteréhokoli outreach stavu, typicky `EMAIL_SENT`). Terminal. | Tier 3: stopuje **veškerou** outreach na lead (nejen email, i budoucí kanály). Nejsilnější stop. | PROPOSED FOR C-07 (žádná runtime detekce dnes neexistuje; existing `Config.gs` enumy ji nepokrývají). |
+| **UNKNOWN_INBOUND** | Něco přišlo do threadu, ale classifier není schopen určit, zda je to reply, bounce, OOO nebo šum. | `EMAIL_SENT → REPLIED` (konzervativně — jakákoli inbound aktivita znamená, že lead (nebo jeho systém) reaguje; nechceme posílat další mail v blind). `reply_needs_manual=TRUE` review flag. | Tier 1 (stejný jako REPLY). | PROPOSED FOR C-07. VERIFIED částečně (existing `EMAIL_REPLY_TYPE.UNKNOWN` + `OOO` — ty tvoří subset tohoto bucketu). |
+| **COMPLAINT** | ESP hlásí spam complaint (feedback loop). Rezerva pro ESP bez explicit unsubscribe events. | Mapping: stejný jako UNSUBSCRIBE (reputation damage + legal implications). | Tier 3. | PROPOSED FOR C-07. Žádná Gmail detekce dnes (Gmail to hlásí jen hromadně přes Postmaster Tools, ne per-thread). |
+
+**Anti-pattern:**
+- `OOO` (out-of-office) **není** samostatná event family pro lifecycle. Per existing `classifyReplyType_()` je to auxiliary `email_reply_type` hodnota a per docs/21 M-8 note "není lifecycle změna". C-07 respektuje: OOO se zachycuje jako metadata (`reply_class=OOO`), ale `reply_event` stále vzniká a lifecycle mapping se **přeskakuje** (lead zůstává `EMAIL_SENT`, follow-up se ale pozastaví na X dní pro "lead je na dovolené"). Detailní OOO hold pravidla jsou mimo C-07 scope (follow-up engine task).
+
+### 4. Reply event schema (`reply_event`)
+
+Jeden reply event odpovídá **jednomu** inbound zprávě od leadu na jeden existující queue row. Pokud lead pošle dva reply rychle po sobě, vznikne N reply events (s různými `event_id`, stejným `outreach_queue_id`).
+
+| # | Pole | Typ | Required | Nullable | Význam | Source | Label |
+|---|------|-----|----------|----------|--------|--------|-------|
+| 1 | `event_id` | string | ✓ | ✗ | UUID v4 per ingest, primární klíč v `_asw_inbound_events`. | Generated by ingest code. | PROPOSED FOR C-07. |
+| 2 | `ingest_event_id` | string | ✓ | ✗ | Idempotency key (viz sekce 14). Deduplikace vs re-poll / webhook retry. | Generated deterministicky (viz sekce 14 §A). | PROPOSED FOR C-07. |
+| 3 | `lead_id` | string | ✓ | ✗ | Cross-ref na LEADS `lead_id`. | LEADS `lead_id` (VERIFIED v `Config.gs` EXTENSION_COLUMNS). | VERIFIED. |
+| 4 | `outreach_queue_id` | string | ✓ | ✓ | Cross-ref na `_asw_outbound_queue` (C-05 sekce 3). Nullable pouze pokud mailbox sync našel thread bez odpovídající queue row (legacy pre-queue send). | C-05 queue (VERIFIED C-05 spec). | PROPOSED FOR C-07 (cross-ref). |
+| 5 | `provider_message_id` | string | ✓ | ✗ | Provider ID originální **odeslané** message (ne inbound). Umožňuje thread pairing. | C-06 `NormalizedSendResponse.provider_message_id`. | VERIFIED (C-06 sekce 3.2). |
+| 6 | `provider_thread_id` | string | ✓ | ✓ | Thread ID (Gmail) nebo `In-Reply-To` chain root (ESP). Nullable pro providery bez thread konceptu. | C-06 `NormalizedSendResponse.provider_thread_id`. | VERIFIED (C-06). |
+| 7 | `inbound_message_id` | string | ✓ | ✗ | Provider ID **inbound** zprávy samotné. Odlišné od `provider_message_id` (outbound). | Gmail message ID / ESP inbound event ID. | PROPOSED FOR C-07. |
+| 8 | `event_type` | enum | ✓ | ✗ | Fixní `"REPLY"`. | Constant. | PROPOSED FOR C-07. |
+| 9 | `event_occurred_at` | ISO-8601 | ✓ | ✗ | Kdy zpráva **vznikla u odesílatele** (message Date header). | Gmail `GmailMessage.getDate()` / ESP `timestamp`. | VERIFIED (existing `MailboxSync.gs` reads it). |
+| 10 | `detected_at` | ISO-8601 | ✓ | ✗ | Kdy CRM event **detekoval** (polling tick / webhook receipt). | Generated by ingest code. | PROPOSED FOR C-07. |
+| 11 | `reply_class` | enum | ✓ | ✗ | Normalized classification: `POSITIVE`, `NEGATIVE`, `QUESTION`, `OOO`, `UNCLASSIFIED`. | Rule-based classifier (v1.0); ML/NLP v2. | PROPOSED FOR C-07. |
+| 12 | `reply_needs_manual` | boolean | ✓ | ✗ | `TRUE` pokud `reply_class=UNCLASSIFIED` nebo classifier confidence pod threshold. Review signal, ne lifecycle state. | Derived z `reply_class` + confidence. | PROPOSED FOR C-07. |
+| 13 | `raw_source` | enum | ✓ | ✗ | Protocol origin: `GMAIL_THREAD`, `ESP_WEBHOOK`, `MANUAL_OPERATOR_INPUT`. | Ingest code. | PROPOSED FOR C-07. |
+| 14 | `ingest_source` | string | ✓ | ✗ | Konkrétní ingest job identifier (např. `mailbox_sync_run_2026-04-21T15:30:00Z` nebo `webhook_sendgrid_inbound_parse`). | Generated by ingest code. | PROPOSED FOR C-07. |
+| 15 | `message_excerpt` | string | ✓ | ✗ | První 256 znaků plain body. PII-safe sanitized (žádné linkování CC/BCC, žádné attachments). | `GmailMessage.getPlainBody().substring(0,256)` / ESP payload. | PROPOSED FOR C-07. |
+| 16 | `classifier_version` | string | ✓ | ✗ | Verze classifier logiky (`"rule-based-v1"`). Audit přes změny classifier pravidel. | Constant per deployment. | PROPOSED FOR C-07. |
+| 17 | `lifecycle_transition_applied` | enum | ✓ | ✗ | `APPLIED`, `SKIPPED_IDEMPOTENT`, `SKIPPED_OOO_HOLD`. Explicit log, jestli event lifecycle změnu způsobil. | Ingest code. | PROPOSED FOR C-07. |
+| 18 | `payload_version` | string | ✓ | ✗ | `"1.0"`. Forward-compat pro schema evoluci. | Constant. | PROPOSED FOR C-07. |
+
+**Celkem: 18 polí.**
+
+### 5. Bounce event schema (`bounce_event`)
+
+| # | Pole | Typ | Required | Nullable | Význam | Source | Label |
+|---|------|-----|----------|----------|--------|--------|-------|
+| 1 | `event_id` | string | ✓ | ✗ | UUID v4. | Generated. | PROPOSED FOR C-07. |
+| 2 | `ingest_event_id` | string | ✓ | ✗ | Idempotency key (sekce 14). | Generated. | PROPOSED FOR C-07. |
+| 3 | `lead_id` | string | ✓ | ✗ | Cross-ref LEADS. | LEADS. | VERIFIED. |
+| 4 | `outreach_queue_id` | string | ✓ | ✓ | Cross-ref queue. Nullable pro legacy pre-queue. | C-05 queue. | PROPOSED. |
+| 5 | `provider_message_id` | string | ✓ | ✗ | Outbound message provider ID. | C-06 response. | VERIFIED. |
+| 6 | `provider_thread_id` | string | ✓ | ✓ | Thread ID pokud existuje. | C-06 response. | VERIFIED. |
+| 7 | `event_type` | enum | ✓ | ✗ | Fixní `"BOUNCE"`. | Constant. | PROPOSED. |
+| 8 | `bounce_class` | enum | ✓ | ✗ | `HARD`, `SOFT`, `AUTORESPONSE_MISCLASSIFIED`, `UNCLASSIFIED`. `HARD` = permanent (adresa neexistuje, doména neexistuje). `SOFT` = transient (mailbox full, server temp error). | Rule-based classifier (SMTP reason code / DSN status / from pattern). | PROPOSED FOR C-07. |
+| 9 | `bounce_reason` | string | ✓ | ✓ | Human-readable excerpt (DSN status code + diagnostic, 256 char max). Nullable pokud provider neposkytuje. | DSN status (RFC 3463) / ESP webhook reason. | PROPOSED FOR C-07. |
+| 10 | `smtp_status_code` | string | ✓ | ✓ | RFC 3463 enhanced status (např. `5.1.1` = bad mailbox). Nullable pro non-SMTP sources. | DSN header / ESP payload. | PROPOSED FOR C-07. |
+| 11 | `event_occurred_at` | ISO-8601 | ✓ | ✗ | Kdy bounce nastal u provideru. | Provider timestamp. | PROPOSED. |
+| 12 | `detected_at` | ISO-8601 | ✓ | ✗ | Kdy CRM event detekoval. | Generated. | PROPOSED. |
+| 13 | `raw_source` | enum | ✓ | ✗ | `GMAIL_DSN_THREAD` (Gmail thread s mailer-daemon), `ESP_WEBHOOK`, `MANUAL_OPERATOR_INPUT`. | Ingest code. | PROPOSED. |
+| 14 | `ingest_source` | string | ✓ | ✗ | Ingest job identifier. | Generated. | PROPOSED. |
+| 15 | `payload_version` | string | ✓ | ✗ | `"1.0"`. | Constant. | PROPOSED. |
+
+**Celkem: 15 polí.**
+
+**Vztah k C-06 `INVALID_RECIPIENT` error class:**
+- C-06 `NormalizedSendErrorClass.INVALID_RECIPIENT` je **synchronní** bounce — provider hlásí v real-time response při `sender.send` (např. SMTP 550 immediate reject). Žije v C-06 response + queue `FAILED` + CS3 PERMANENT dead-letter.
+- C-07 `bounce_event` je **asynchronní** bounce — provider akceptuje sendem, ale později vrátí DSN / webhook. Žije v `_asw_inbound_events` + CS1 T21 `EMAIL_SENT → BOUNCED`.
+- Stejný lead může mít oboje (pokud retry = nový queue row; ale per C-05 pravidlo retry=nový row a `idempotency_key` by měl blokovat duplicate). V praxi: jeden z cest (SYNC nebo ASYNC) se aktivuje per provider.
+
+### 6. Unsubscribe event schema (`unsubscribe_event`)
+
+| # | Pole | Typ | Required | Nullable | Význam | Source | Label |
+|---|------|-----|----------|----------|--------|--------|-------|
+| 1 | `event_id` | string | ✓ | ✗ | UUID v4. | Generated. | PROPOSED. |
+| 2 | `ingest_event_id` | string | ✓ | ✗ | Idempotency key. | Generated. | PROPOSED. |
+| 3 | `lead_id` | string | ✓ | ✗ | Cross-ref LEADS. | LEADS. | VERIFIED. |
+| 4 | `outreach_queue_id` | string | ✓ | ✓ | Cross-ref queue (nullable — unsub může přijít i mimo thread, např. přímá mailto: link). | C-05 queue. | PROPOSED. |
+| 5 | `provider_message_id` | string | ✓ | ✓ | Outbound message ID pokud unsub souvisí s konkrétním emailem. Nullable. | C-06. | VERIFIED. |
+| 6 | `provider_thread_id` | string | ✓ | ✓ | Thread ID pokud existuje. | C-06. | VERIFIED. |
+| 7 | `event_type` | enum | ✓ | ✗ | Fixní `"UNSUBSCRIBE"`. | Constant. | PROPOSED. |
+| 8 | `unsubscribe_source` | enum | ✓ | ✗ | `LIST_UNSUBSCRIBE_HEADER` (RFC 8058 one-click), `LIST_UNSUBSCRIBE_MAILTO` (mailto: link click), `REPLY_BODY_INTENT` (classifier detekoval "nechci další maily" v reply), `ESP_WEBHOOK_UNSUB`, `MANUAL_OPERATOR_INPUT` (GDPR request email handled out-of-band). | Ingest code. | PROPOSED FOR C-07. |
+| 9 | `unsubscribe_reason` | string | ✓ | ✓ | Human-readable excerpt (pokud `unsubscribe_source=REPLY_BODY_INTENT` → message excerpt; jinak nullable). | Message body / webhook payload. | PROPOSED. |
+| 10 | `event_occurred_at` | ISO-8601 | ✓ | ✗ | Kdy unsub nastal. | Provider / message timestamp. | PROPOSED. |
+| 11 | `detected_at` | ISO-8601 | ✓ | ✗ | Kdy CRM event detekoval. | Generated. | PROPOSED. |
+| 12 | `raw_source` | enum | ✓ | ✗ | `GMAIL_THREAD`, `ESP_WEBHOOK`, `MANUAL_OPERATOR_INPUT`. | Ingest code. | PROPOSED. |
+| 13 | `ingest_source` | string | ✓ | ✗ | Ingest job identifier. | Generated. | PROPOSED. |
+| 14 | `payload_version` | string | ✓ | ✗ | `"1.0"`. | Constant. | PROPOSED. |
+
+**Celkem: 14 polí.**
+
+### 7. Event normalization model (4-layer separation)
+
+C-07 striktně odděluje čtyři vrstvy identity:
+
+| Layer | Co to je | Kdo ji zná | Příklad pro reply | Příklad pro bounce |
+|-------|----------|------------|-------------------|---------------------|
+| **A. Raw provider/mailbox signal** | Per-provider tvar (Gmail `GmailMessage`, SendGrid inbound parse JSON, Mailgun webhook). | Adaptér (budoucí task); C-07 ho **nedefinuje**. | `{ from: "lead@example.cz", subject: "Re: Nabídka", body: "Díky, ozvu se příští týden." }` | `{ from: "MAILER-DAEMON@example.com", subject: "Delivery Status Notification", body: "... 5.1.1 ..." }` |
+| **B. Normalized `InboundEvent`** | C-07 kanonický tvar (reply_event / bounce_event / unsubscribe_event / unknown_inbound / complaint). | Ingest kód + downstream (CS1 transition logic, stop-rule enforcer, operator review flag setter). | `reply_event { event_type: "REPLY", reply_class: "POSITIVE", ... }` | `bounce_event { event_type: "BOUNCE", bounce_class: "HARD", smtp_status_code: "5.1.1", ... }` |
+| **C. Lead lifecycle transition** | CS1 18-state; event → transition (T20/T21/T22). | CS1 layer (`docs/21-business-process.md`). | `EMAIL_SENT → REPLIED` (T20) | `EMAIL_SENT → BOUNCED` (T21) |
+| **D. Operator review signal** | Review flag / manual action queue. **Není** lifecycle state. | Operator UI (B6, out-of-scope pro C-07). | `reply_needs_manual=TRUE` pokud `reply_class=UNCLASSIFIED` | N/A (bounce je automaticky terminal, žádný manual review flag) |
+
+**Deterministický flow Raw → Normalized → Lifecycle + Stop rules + Review:**
+
+```
+Raw event (Layer A)
+    │
+    ▼
+classify_inbound(raw) → normalized_event (Layer B)
+    │
+    ├──► apply_lifecycle_transition(normalized_event)  (Layer C)
+    ├──► apply_stop_rules(normalized_event)            (queue cancel + follow-up block + suppression)
+    ├──► set_review_flag_if_needed(normalized_event)   (Layer D, review signal)
+    └──► append_to_logs(_asw_logs, normalized_event)   (CS2 run history)
+```
+
+Každý ze čtyř kroků je **idempotentní** (viz sekce 14). Flow je **read-raw → write-normalized → fan-out → persist**.
+
+### 8. Mapping do lead lifecycle
+
+| Event | CS1 transition | Terminal? | Stop rule tier | Review flag | Notes |
+|-------|----------------|-----------|-----------------|-------------|-------|
+| `reply_event` (reply_class ≠ UNCLASSIFIED) | T20: `EMAIL_SENT → REPLIED` | ✓ | Tier 1 (stop follow-up) | ✗ | REPLIED je terminal per CS1. WON/LOST je downstream auxiliary (docs/21). |
+| `reply_event` (reply_class = UNCLASSIFIED) | T20: `EMAIL_SENT → REPLIED` | ✓ | Tier 1 (stop follow-up) | ✓ `reply_needs_manual=TRUE` | **Lifecycle stále jde na REPLIED** — fakt, že lead něco odpověděl, je terminal signal. Operator musí manuálně interpretovat obsah (WON/LOST/QUESTION/NEGATIVE), ale CS1 lifecycle nezůstává v mezistavu. |
+| `reply_event` (reply_class = OOO) | žádná | — | Tier 1 (stop follow-up **dočasně** — cadence pause) | ✗ | Auxiliary `email_reply_type=OOO` per docs/21 M-8. Lead zůstává `EMAIL_SENT`. Follow-up engine pozastaví cadence na X dní. OOO hold logic je mimo C-07. |
+| `bounce_event` (bounce_class = HARD) | T21: `EMAIL_SENT → BOUNCED` | ✓ | Tier 2 (stop send + propagace suppression) | ✗ | Hard bounce znamená nevalidní adresa. C-09 suppression list (budoucí) dostane `recipient_email`. |
+| `bounce_event` (bounce_class = SOFT) | **žádná** v v1.0 | — | Tier 2 částečně (pauza send na X hodin, ne permanent block) | ✓ `soft_bounce_review=TRUE` pokud X+ po sobě | Soft bounce = transient (mailbox full, server temp). Opakované soft bounce = eskalace na HARD. Eskalační logika je PROPOSED FOR C-07 (sekce 12 §B). |
+| `unsubscribe_event` | T22: `* → UNSUBSCRIBED` (typicky z `EMAIL_SENT`, ale spec umožňuje i z mezistavů pokud operator manuálně odhlásí) | ✓ | Tier 3 (stop all outreach + suppression + legal audit trail) | ✗ | Nejsilnější stop. C-09 suppression + GDPR log. |
+| `unknown_inbound` | T20: `EMAIL_SENT → REPLIED` (konzervativně) | ✓ | Tier 1 (stop follow-up) | ✓ `reply_needs_manual=TRUE` | Viz sekce 12. |
+| `complaint_event` | T22: `* → UNSUBSCRIBED` | ✓ | Tier 3 | ✗ | PROPOSED. Per ESP feedback loop (Mailgun/SendGrid). |
+
+**Důležité invarianty:**
+
+1. **C-07 nikdy nezavádí nový canonical CS1 state.** Všechny existing states (REPLIED #15, BOUNCED #16, UNSUBSCRIBED #17) už CS1 má.
+2. **`NEEDS_MANUAL_REPLY` NENÍ CS1 state.** Je to **review flag** na LEADS/event úrovni (`reply_needs_manual` boolean). Lifecycle lead zůstává `REPLIED`; flag signalizuje operator, že konkrétní reply potřebuje manuální interpretaci.
+3. **Terminal states jsou finální** pro C-07. Lead ve stavu `REPLIED` nelze dalším inbound eventem posunout do `UNSUBSCRIBED` automaticky — musí být manuální operator akce (T-edge z CS1 docs/21 explicitně nezakazuje, ale C-07 defaultně nezapisuje). Protection: pokud lead je `REPLIED` a pak přijde `unsubscribe_event`, C-07 **přepíše** CS1 na `UNSUBSCRIBED` (UNSUBSCRIBED > REPLIED v compliance priority) + zapíše oba events do `_asw_inbound_events` (audit trail).
+4. **Multi-event ordering:** Pokud přijdou dva eventy ve stejný tick, precedence: `UNSUBSCRIBE > COMPLAINT > BOUNCE > REPLY > UNKNOWN_INBOUND`. Compliance (unsub) má nejvyšší prioritu.
+
+### 9. Stop rules (3-tier model)
+
+C-07 definuje tři vrstvy stop rules. Každý event triggeruje **alespoň** jednu vrstvu. Vrstvy jsou kumulativní (vyšší tier zahrnuje všechny nižší).
+
+| Tier | Co stopuje | Triggery | Skope | Implementace (handoff) |
+|------|------------|----------|-------|------------------------|
+| **Tier 1 — follow-up stop** | Další email ve **stejném threadu**. Lead dostal signal, že reaguje; další send by byl spam vůči aktivní komunikaci. | `reply_event`, `unknown_inbound`, `reply_class=OOO` (dočasně). | Per-thread (`provider_thread_id`). | Follow-up cadence engine (budoucí task) před `sender.send` kontroluje inbound events pro thread; pokud existují → skip. |
+| **Tier 2 — address stop** | Další send na **stejnou recipient_email adresu**, napříč všemi thready. | `bounce_event` (HARD → permanent; SOFT → temporary hold X hodin/dní). | Per-email-address. | C-04 sendability gate (existuje) rozšíří block reasons o `ADDRESS_BOUNCED` (PROPOSED FOR C-07 extension). C-09 suppression list dostane `recipient_email`. |
+| **Tier 3 — lead stop (full suppression)** | Veškerou outreach na **lead_id**, napříč všemi kanály a emaily. | `unsubscribe_event`, `complaint_event`. | Per-lead. | C-04 gate (existing B7/B8 block reasons `UNSUBSCRIBED` / `SUPPRESSED`) už toto pokrývá. C-09 suppression list + GDPR audit log. |
+
+**Stop-rule propagation:**
+
+- C-07 **sám o sobě** queue row cancel **neprovádí**. Queue row v C-05 se po `SEND` dostane na `SENT` (terminal); tam nelze cancel. Stop rules se aplikují na **budoucí** queue rows (blokuje producer-side v C-04 gate).
+- Pokud existuje queue row ve stavu `QUEUED` (čekající na send, ještě neodeslán), a přijde `unsubscribe_event` nebo `bounce_event` → queue worker při `claim` kontroluje suppression list + inbound events a pokud najde Tier 2/3 → queue row se přesune na `CANCELLED` (C-05 explicit transition `QUEUED → CANCELLED` s `cancel_reason=SUPPRESSED` nebo `BOUNCED_ADDRESS`). **Tohle je budoucí implementační task** (queue worker + C-09 suppression gate — ne C-07 SPEC).
+- Race: `SENDING` (in-flight) row nelze cancel (C-05 invariant). Pokud `unsubscribe` přijde během `SENDING`, reality je: email letí, po doručení lead dostane unsub option; followup cadence se nespouští.
+
+**Akceptační test mapping:**
+- ✓ **Bounce zastaví další send** → Tier 2 (address stop) + Tier 1 (follow-up stop).
+- ✓ **Unsubscribe zastaví další outreach** → Tier 3 (lead stop, all-channel).
+- ✓ **Reply zastaví follow-up automation** → Tier 1 (follow-up stop per thread).
+- ✓ **Unknown/unclassified reply jde na manual handling** → Tier 1 + `reply_needs_manual=TRUE` review flag.
+
+### 10. Visibility v systému
+
+Kde operator vidí, co se stalo:
+
+| Signal | Location | Update mechanism |
+|--------|----------|-----------------|
+| **Lead dostal reply** | LEADS.`email_sync_status = REPLIED` (existing VERIFIED), LEADS.`email_reply_type = REPLY` (existing), LEADS.`last_email_received_at` (existing), LEADS.`email_reply_classifier` = `reply_class` (PROPOSED FOR C-07), LEADS.`reply_needs_manual` (PROPOSED FOR C-07). CS1 future: `lifecycle_state=REPLIED`. | C-07 ingest zapisuje do LEADS po T20 transition. |
+| **Lead má bounce** | LEADS.`email_sync_status = BOUNCE` / `BOUNCED` (existing enum rozšíření PROPOSED), LEADS.`email_reply_type = BOUNCE` (existing), LEADS.`bounce_class` (PROPOSED FOR C-07). CS1 future: `lifecycle_state=BOUNCED`. | Po T21. |
+| **Lead se odhlásil** | LEADS.`unsubscribed=TRUE` (PROPOSED, existing C-04 handoff), LEADS.`unsubscribed_at` (PROPOSED), LEADS.`unsubscribe_source` (PROPOSED). CS1 future: `lifecycle_state=UNSUBSCRIBED`. | Po T22. |
+| **Reply potřebuje manuální interpretaci** | LEADS.`reply_needs_manual=TRUE` (PROPOSED). Operator UI (B6, out-of-scope) filtruje leady s tímto flagem. | Po `reply_class=UNCLASSIFIED` detekci. |
+| **Plný event log** | `_asw_inbound_events` sheet (PROPOSED FOR C-07 — append-only event store, separátní od `_asw_outbound_queue`). | Každý ingest tick appenduje N událostí. |
+| **Run-level audit** | `_asw_logs` (existing, CS2 run history). | Každý ingest run appenduje summary row (events_processed, events_skipped_idempotent, errors). |
+| **Queue cross-ref** | `_asw_outbound_queue.last_inbound_event_id` (PROPOSED dodatek k C-05 queue schema — zapisuje ingest kód pro rychlé lookup "poslední reakce na tento queue row"). | Po každém úspěšném ingest eventu s ne-null `outreach_queue_id`. |
+
+**Event store (`_asw_inbound_events`):**
+
+Append-only sheet. Schema = union všech tří event schemat (18 + 15 + 14 polí, sparse — většina polí null pro non-applicable event_type) + technical metadata. Celkový column count ≈ 30 unique columns (deduplikace stejných polí napříč schemata).
+
+### 11. Tři sample lifecycle scénáře po sendu
+
+#### Scénář 1 — Lead odpoví (positive reply)
+
+| Krok | Stav | Event | CS1 | Stop rule | Operator visibility |
+|------|------|-------|-----|-----------|---------------------|
+| 1 | Výchozí | queue row `SENT`, CS1 `EMAIL_SENT`, `last_email_sent_at=2026-04-22T10:00:00Z`. | `EMAIL_SENT` | — | Lead na "Ke kontaktování" boardu v kategorii "Odeslané". |
+| 2 | +2h | Lead odpoví: `"Díky za nabídku, ozvu se ve středu."` Gmail inbox obsahuje inbound message. | `EMAIL_SENT` | — | — |
+| 3 | +2h 5min | Mailbox sync polling tick. `extractThreadMetadata_()` najde inbound message, `classifyReplyType_()` vrátí `REPLY`. C-07 classifier interpretuje `reply_class=POSITIVE` (klíčová slova: "díky", "ozvu se"). | — | — | — |
+| 4 | Ingest | C-07 vytvoří `reply_event { event_type: REPLY, reply_class: POSITIVE, reply_needs_manual: FALSE, provider_message_id: <original queue row>, event_occurred_at: 2026-04-22T12:03:00Z }`. Append do `_asw_inbound_events`. | — | — | — |
+| 5 | Normalize → Lifecycle | Apply T20: `EMAIL_SENT → REPLIED`. `lifecycle_transition_applied=APPLIED`. | `REPLIED` (terminal) | Tier 1 (follow-up stop) | LEADS `email_sync_status=REPLIED`, `last_email_received_at=2026-04-22T12:03:00Z`, `email_reply_classifier=POSITIVE`, `reply_needs_manual=FALSE`. |
+| 6 | Stop rule | Follow-up cadence engine (budoucí): při příštím tick per-thread check → skip. | — | — | Lead zmizí z "cadence queue" (pokud existuje). |
+| 7 | `_asw_logs` | Run summary: `{ run_id: ..., events_processed: 1, events_skipped: 0, errors: 0 }`. | — | — | Audit trail dostupný. |
+
+**Operator akce:** Volitelně otevře lead detail, čte `message_excerpt` v event store, odpoví ručně nebo přepne stage manuálně na WON/LOST/atd. (downstream sales, mimo C-07).
+
+#### Scénář 2 — Bounce (hard)
+
+| Krok | Stav | Event | CS1 | Stop rule | Operator visibility |
+|------|------|-------|-----|-----------|---------------------|
+| 1 | Výchozí | queue row `SENT` (provider akceptoval), CS1 `EMAIL_SENT`. | `EMAIL_SENT` | — | — |
+| 2 | +15min | SMTP server odešle DSN `550 5.1.1 User unknown`. Gmail inbox zachytí message od `MAILER-DAEMON@googlemail.com`. | `EMAIL_SENT` | — | — |
+| 3 | Polling tick | `isBounceMessage_()` detekuje (from=mailer-daemon, subject=Delivery Status Notification). Parse body → `smtp_status_code=5.1.1`. C-07 classifier: `bounce_class=HARD` (5.x.x = permanent per RFC 3463). | — | — | — |
+| 4 | Ingest | `bounce_event { event_type: BOUNCE, bounce_class: HARD, bounce_reason: "User unknown", smtp_status_code: "5.1.1", ... }`. Append do `_asw_inbound_events`. | — | — | — |
+| 5 | Normalize → Lifecycle | Apply T21: `EMAIL_SENT → BOUNCED`. | `BOUNCED` (terminal) | Tier 2 (address stop) | LEADS `email_sync_status=BOUNCED`, `email_reply_type=BOUNCE`, `bounce_class=HARD`. |
+| 6 | Suppression propagation | C-07 vyzve C-09 (handoff): přidej `recipient_email` na suppression list s důvodem `HARD_BOUNCE`. (C-09 implementace budoucí.) | — | — | — |
+| 7 | Budoucí sends | C-04 gate pro budoucí queue row na stejný email → block reason `ADDRESS_BOUNCED` (PROPOSED C-04 extension). | — | — | Gate dashboardu: "Blokováno: Address bounced". |
+
+**Operator akce:** Žádná povinná. Lead je terminal. Volitelně ověří, zda má jiný kontakt.
+
+#### Scénář 3 — Unsubscribe
+
+| Krok | Stav | Event | CS1 | Stop rule | Operator visibility |
+|------|------|-------|-----|-----------|---------------------|
+| 1 | Výchozí | queue row `SENT`, CS1 `EMAIL_SENT`. | `EMAIL_SENT` | — | — |
+| 2 | +1 den | Lead klikne `List-Unsubscribe` link v emailu (one-click RFC 8058). Mailto: request přijde na `unsubscribe@autosmartweb.cz`. (NEBO: Lead pošle reply s obsahem `"Nezajímá mě, odhlaste mě."`) | `EMAIL_SENT` | — | — |
+| 3 | Ingest | **Varianta A (one-click):** polling tick na `unsubscribe@` inbox detekuje mailto. **Varianta B (reply body):** C-07 classifier `detectUnsubscribeIntent()` scan reply body — klíčová slova `"odhlaste"`, `"nezajímá"`, `"stop"`, `"unsubscribe"`. | — | — | — |
+| 4 | Normalize | `unsubscribe_event { event_type: UNSUBSCRIBE, unsubscribe_source: LIST_UNSUBSCRIBE_MAILTO (A) nebo REPLY_BODY_INTENT (B), ... }`. Append. | — | — | — |
+| 5 | Normalize → Lifecycle | Apply T22: `EMAIL_SENT → UNSUBSCRIBED`. | `UNSUBSCRIBED` (terminal) | Tier 3 (lead stop, all-channel) | LEADS `unsubscribed=TRUE`, `unsubscribed_at=...`, `unsubscribe_source=LIST_UNSUBSCRIBE_MAILTO`. |
+| 6 | Suppression + GDPR | C-09 handoff: `recipient_email` + `lead_id` na suppression. GDPR audit log entry (legal requirement). | — | — | Lead nelze re-aktivovat bez nového opt-in. |
+| 7 | Budoucí sends | C-04 gate block B7 `UNSUBSCRIBED` → `SEND_BLOCKED`. | — | — | Gate dashboard + GDPR compliance report. |
+
+**Operator akce:** Žádná. Automatický terminal. Jakýkoli pokus o manuální re-enable vyžaduje nový opt-in (C-09 SPEC).
+
+### 12. Unknown / manual handling
+
+#### §A. Kdy jde event na `reply_needs_manual=TRUE`
+
+- `reply_class=UNCLASSIFIED` — classifier (rule-based v1) nenašel dostatek signálů pro POSITIVE / NEGATIVE / QUESTION / OOO.
+- Classifier confidence pod threshold (v2 ML model; v1 nevyužito).
+- Reply obsahuje attachments nebo forwardovaný content, který classifier nedokáže bezpečně parsovat.
+- Reply je napsaná jiným jazykem než CZ/SK/EN (v1 classifier podporuje jen tyto; ostatní → UNCLASSIFIED).
+
+#### §B. Co to je (nikoli co to není)
+
+- **Je to review flag** (`reply_needs_manual` boolean na LEADS + na `reply_event` row).
+- **Je to operator queue filter** — operator UI (B6) bude filtrovat leady s tímto flagem do "Manual reply review" view.
+- **NENÍ to canonical CS1 state.** Lead je `REPLIED` (terminal), flag je dimenze ORTOGONÁLNÍ k lifecycle.
+- **NENÍ to exception queue jako u C-04 `MANUAL_REVIEW_REQUIRED`.** Rozdíl: C-04 MANUAL_REVIEW = "neposílej zatím, potřebuji rozhodnout ZDA poslat". C-07 reply_needs_manual = "lead ODPOVĚDĚL, potřebuji rozhodnout CO S TOU ODPOVĚDÍ". Jiná fáze flow.
+
+#### §C. Jak to stopne follow-up automation
+
+- CS1 lifecycle jde na `REPLIED` (terminal) → Tier 1 stop rule → follow-up engine skip.
+- Flag `reply_needs_manual` je **dodatečný** signal pro operator, ne gate.
+- Follow-up se nespustí bez ohledu na flag (lifecycle terminal je dostatečné).
+
+#### §D. Soft bounce eskalace (explicit manual handling edge case)
+
+- První soft bounce: `bounce_event { bounce_class: SOFT }`. Žádná CS1 transition. Tier 2 partial (temp hold X hodin). `soft_bounce_count` counter na LEADS++.
+- N-tý soft bounce (N ≥ 3, threshold PROPOSED FOR C-07): eskalace na `bounce_class=HARD` → Tier 2 full + T21.
+- Edge case (misclassified as soft): operator může manuálně override v UI (B6 out-of-scope).
+
+### 13. Auditability / observability
+
+**Cross-ref graf:**
+
+```
+LEADS (lead_id) ◄──────────────────┐
+    ▲                              │
+    │                              │
+    │ cross-ref on write           │
+    │                              │
+┌───┴───────────────────────────┐  │
+│  _asw_inbound_events          │  │
+│  (append-only event store)    │  │
+│  ─────────────────────────    │  │
+│  event_id (PK)                │  │
+│  ingest_event_id (uniq idx)   │  │
+│  lead_id           ───────────┘  │
+│  outreach_queue_id ──────────────┼─► _asw_outbound_queue (C-05)
+│  provider_message_id ────────────┼─► queue.provider_message_id
+│  provider_thread_id  ────────────┼─► queue.provider_thread_id
+│  event_type                   │  │
+│  ...                          │  │
+│  ingest_source                │  │
+└────────────┬──────────────────┘  │
+             │                     │
+             │ run summary         │
+             ▼                     │
+    ┌─────────────────────┐        │
+    │  _asw_logs          │        │
+    │  (CS2 run history)  │        │
+    │  run_id             │        │
+    │  events_processed   │        │
+    │  events_skipped     │        │
+    │  errors             │        │
+    └─────────────────────┘        │
+                                   │
+    ┌──────────────────────────────┴─────┐
+    │  _asw_dead_letters (CS3)           │
+    │  ingest error → dead_letter row    │
+    │  (např. malformed webhook payload) │
+    └────────────────────────────────────┘
+```
+
+**Dohledatelnost:**
+
+- Každý event má `event_id` (primary, UUID v4) a `ingest_event_id` (idempotency key, deterministic).
+- Každý event je spojený s leadem přes `lead_id`, volitelně s queue row přes `outreach_queue_id`, volitelně s původním sendem přes `provider_message_id` / `provider_thread_id`.
+- `_asw_logs` drží run-level summary (CS2 pattern): kolik events se zpracovalo, kolik skipped (idempotent), kolik errors.
+- Errors (malformed webhook payload, expired Gmail thread, atd.) jdou do `_asw_dead_letters` (CS3 pattern) s `ingest_source` + `raw_payload_excerpt`.
+
+### 14. Idempotency a duplicate ingest rules
+
+#### §A. Event-level idempotency key (`ingest_event_id`)
+
+**Pattern per raw_source:**
+
+| raw_source | `ingest_event_id` pattern |
+|------------|---------------------------|
+| `GMAIL_THREAD` | `gmail:{gmail_message_id}` (Gmail message ID je globálně unique). |
+| `GMAIL_DSN_THREAD` (bounce) | `gmail:{gmail_message_id}` (stejný pattern; DSN je normální Gmail message s mailer-daemon from). |
+| `ESP_WEBHOOK` | `esp:{provider_name}:{webhook_event_id}` (ESP webhook payloads obsahují unique event ID). |
+| `MANUAL_OPERATOR_INPUT` | `manual:{operator_email}:{lead_id}:{event_type}:{SHA256(excerpt)}` (deterministic od obsahu). |
+
+**Invariants:**
+
+1. Před append do `_asw_inbound_events` ingest kód lookup na `ingest_event_id` v posledních N dnech (N=30 default, PROPOSED).
+2. Pokud existuje → `lifecycle_transition_applied=SKIPPED_IDEMPOTENT`, event se **neappenduje** do event store a CS1 transition se **nespustí** znovu. Run summary zaznamená skip.
+3. Pokud neexistuje → append + lifecycle transition + stop rules + review flag set.
+
+#### §B. Lifecycle-level idempotency
+
+Oddělená od event-level. Chrání před double-transition pokud ingest kód volá T20/T21/T22 víckrát v race.
+
+| Guard | Kde žije |
+|-------|----------|
+| `REPLIED → REPLIED` is no-op | CS1 transition logic (T20 check). |
+| `BOUNCED → BOUNCED` is no-op | T21 check. |
+| `UNSUBSCRIBED → UNSUBSCRIBED` is no-op | T22 check. |
+| `REPLIED → UNSUBSCRIBED` allowed (compliance priority; viz sekce 8 invariant 3). | T22 check s explicit allow-from `REPLIED`. |
+| `BOUNCED → UNSUBSCRIBED` allowed (compliance priority). | T22. |
+| `UNSUBSCRIBED → REPLIED` blocked. UNSUBSCRIBED je silnější terminal. | T20 guard. |
+| `UNSUBSCRIBED → BOUNCED` blocked. | T21 guard. |
+| `BOUNCED → REPLIED` blocked (bounce znamená adresa nevalidní; "reply" v tomto kontextu musí být autoresponse-misclassified; classifier to má chytnout, ale guard je safety net). | T20 guard. |
+
+#### §C. CS3 alignment
+
+- C-07 ingest respektuje CS3 `max_attempts` per ingest job. Default: max_attempts=3 pro transient (network fail při Gmail polling). Permanent fail (malformed payload) → okamžitý dead-letter.
+- `ingest_event_id` idempotency umožňuje bezpečný retry.
+- Ingest job lock (CS3 locking pattern): 1 ingest run za čas per `ingest_source` (např. `mailbox_sync_job` nemá běžet 2x paralelně). LockService pattern identický s CS3 S1-S12.
+
+### 15. Source variants (contract-level)
+
+| Source | Trigger | Latency | Reliability | Notes |
+|--------|---------|---------|-------------|-------|
+| **Gmail mailbox polling** | Periodic trigger (15-min timer per CS2 default). | 0-15 min. | Závislá na Gmail availability. Gmail je high-reliability; poll fail = retry next tick. | Existing `apps-script/MailboxSync.gs` částečně pokrývá (reply + bounce). Unsubscribe ingest z Gmail = PROPOSED (detekce `List-Unsubscribe-Post` header nebo reply body intent). |
+| **ESP provider webhook** | Push z ESP při provider-side event. | 0-few seconds. | Závislá na ESP delivery. Retry policy per ESP (SendGrid 10x, Mailgun 8x). | PROPOSED FOR C-07. Vyžaduje webhook HTTP endpoint (implementační task, mimo SPEC). Auth: ESP signing header (SendGrid `X-Twilio-Email-Event-Webhook-Signature`). |
+| **Manual operator input** | Operator přes UI (B6, out-of-scope) nebo Apps Script menu. | Immediate. | Immediate (no async). | Edge case: operator obdrží bounce NDR v osobním inboxu a manuálně nahlásí → `raw_source=MANUAL_OPERATOR_INPUT`. |
+| **Forward-compat: SMS/LinkedIn inbound** | Future channel. | — | — | C-07 schema má `raw_source` enum jako open set. Přidání nového source = enum extension, ne schema break. |
+
+**Deduplication napříč sources:**
+
+- Pokud stejný event přijde dvěma cestami (např. Gmail polling + SendGrid webhook pro stejný bounce) → `ingest_event_id` je **per raw_source** (viz sekce 14 §A), takže deduplikace nefunguje napříč sources automaticky.
+- Ochrana: **lifecycle-level idempotency** (sekce 14 §B) — druhý event najde lead už ve `BOUNCED` a T21 je no-op.
+- `_asw_inbound_events` obsahuje oba záznamy (audit trail "dostali jsme tuto informaci dvěma cestami"), ale CS1 se mění jen jednou.
+
+### 16. Boundary rules / handoff
+
+| Task / vrstva | Vztah k C-07 | Stav |
+|---------------|--------------|------|
+| **C-06 sender abstraction** | C-07 čte `provider_message_id` + `provider_thread_id` z `NormalizedSendResponse` (perzistovaný queue workerem do queue row při T18 success). | Compatible; C-06 merged. |
+| **C-05 outbound queue** | C-07 křížově referencuje queue row přes `outreach_queue_id`. Nezapisuje do queue SEND_STATUS. Volitelné (implementační task) rozšíření queue o `last_inbound_event_id` je PROPOSED dodatek. | Compatible. |
+| **CS1 lifecycle (T20/T21/T22)** | C-07 triggeruje existing transitions. Žádný nový canonical state. Rozšíření guard rules (sekce 14 §B) je spec-level clarification, ne nový state. | Compatible; clarification only. |
+| **CS3 idempotency / retry / dead-letter** | C-07 reuses `ingest_event_id` idempotency pattern, max_attempts pro transient fails, dead-letter pro malformed payloads. | Compatible. |
+| **CS2 orchestrator (runs, events)** | C-07 appenduje run summary do `_asw_logs`. Každý ingest tick = 1 run. Per-event detail žije v `_asw_inbound_events`, ne v `_asw_logs`. | Compatible. |
+| **C-04 sendability gate** | Rozšíření C-04 block reasons o `ADDRESS_BOUNCED` (PROPOSED FOR C-07 extension). Už existující `UNSUBSCRIBED` / `SUPPRESSED` block reasons pokrývají Tier 3 stop. | Forward-compat; C-04 extension je sub-task. |
+| **C-09 suppression list** | C-07 propaguje Tier 2/3 eventy na C-09 suppression list (`recipient_email` pro bounce, `lead_id` pro unsub). | Forward-compat; C-09 SPEC je downstream task. |
+| **Follow-up cadence engine (formerly "C-07 v předchozím scoping")** | Budoucí task. Engine čte `_asw_inbound_events` + `provider_thread_id` pro per-thread follow-up decision. C-07 je jeho prerekvizita. | Downstream; renamed scope. |
+| **Budoucí mailbox sync implementační task** | Materializuje Gmail polling worker. Reuses existing `apps-script/MailboxSync.gs` scaffold (`classifyReplyType_`, `isBounceMessage_`). Rozšíří o unsubscribe detekci a `_asw_inbound_events` append. | C-07 handoff ready. |
+| **Budoucí ESP webhook implementační task** | Apps Script Web App doPost handler pro provider webhooks (SendGrid inbound parse, Mailgun bounce webhook). Signing auth. Normalization na C-07 event schema. | C-07 handoff ready. |
+| **B6 operator reply-handling UI** | Čte `reply_needs_manual=TRUE` leady, umožní operatorovi vytvořit manual reply, případně přepsat `reply_class`. | Downstream; NOT blocker pro C-07 SPEC. |
+| **Mailbox sync current code** | `apps-script/MailboxSync.gs` dnes zapisuje `email_sync_status` / `email_reply_type` na LEADS. C-07 SPEC definuje cílový stav; current code zůstává in-place do implementačního tasku. | Legacy; C-07 nemění. |
+
+### 17. Non-goals (explicitní)
+
+- Neimplementuje mailbox polling worker (`apps-script/MailboxSync.gs` **extension** pro unsubscribe).
+- Neimplementuje ESP webhook HTTP handler (Apps Script Web App doPost).
+- Neimplementuje Gmail `List-Unsubscribe` header detekci v runtime.
+- Neimplementuje `_asw_inbound_events` sheet creation.
+- Neimplementuje reply classifier (`rule-based-v1`).
+- Neimplementuje soft-bounce escalation counter logiku.
+- Neimplementuje follow-up cadence engine.
+- Neimplementuje operator reply-handling UI.
+- Neimplementuje suppression list propagaci (C-09 handoff).
+- Neimplementuje GDPR audit log (compliance task).
+- Nemění stávající `Config.gs` enumy (`EMAIL_SYNC_STATUS`, `EMAIL_REPLY_TYPE`). Extension PROPOSED hodnotami (`BOUNCED` v sync status, `UNSUBSCRIBE` v reply type) budou zapsány implementačním taskem.
+- Nezavádí nový canonical CS1 state.
+- Nemění C-05 queue schema (extension `last_inbound_event_id` je PROPOSED dodatek, materializuje implementační task).
+- Nemění C-06 sender interface ani response schema.
+
+### 18. Acceptance checklist
+
+- [x] Reply event schema je kompletní (sekce 4, 18 polí s VERIFIED/INFERRED/PROPOSED labely).
+- [x] Bounce event schema je kompletní (sekce 5, 15 polí).
+- [x] Unsubscribe event schema je kompletní (sekce 6, 14 polí).
+- [x] Lifecycle mapping je jednoznačný (sekce 8 tabulka — každý event má explicit CS1 transition nebo "žádná" s důvodem).
+- [x] Stop rules jsou jednoznačné (sekce 9, 3-tier model + akceptační test mapping).
+- [x] Bounce zastaví další send (sekce 9 Tier 2).
+- [x] Unsubscribe zastaví další outreach (sekce 9 Tier 3).
+- [x] Reply je viditelná v systému (sekce 10 — LEADS columns + event store).
+- [x] Neklasifikovaná reply jde na jasně definovaný manual/review signal (sekce 8 + 12 — `reply_needs_manual=TRUE` review flag, ne lifecycle state).
+- [x] `NEEDS_MANUAL_REPLY` je správně zařazené: **review flag**, ne CS1 state (sekce 8 invariant 2, sekce 12 §B).
+- [x] 3 sample lifecycle scénáře po sendu (sekce 11: reply, bounce, unsubscribe).
+- [x] Idempotency je definována event-level + lifecycle-level (sekce 14).
+- [x] Cross-ref graf pokrývá LEADS ↔ event store ↔ queue ↔ `_asw_logs` ↔ `_asw_dead_letters` (sekce 13).
+- [x] Source variants odděleny bez implementace (sekce 15).
+- [x] Handoff do C-05/C-06/CS1/CS3/C-04/C-09/follow-up engine/mailbox sync/webhook/B6 (sekce 16).
+- [x] SPEC-only; žádné runtime změny; žádné Config.gs zápisy.
+
+### 19. PROPOSED vs INFERRED vs VERIFIED label summary
+
+**VERIFIED IN REPO (reuse existing):**
+- CS1 canonical states `EMAIL_SENT`, `REPLIED`, `BOUNCED`, `UNSUBSCRIBED` + transitions T20/T21/T22 (`docs/21-business-process.md`).
+- `apps-script/MailboxSync.gs` — `extractThreadMetadata_()`, `classifyReplyType_()`, `isBounceMessage_()`, `isOooMessage_()`. Reply + bounce detekce částečně existuje.
+- `Config.gs` auxiliary enumy: `EMAIL_SYNC_STATUS` (NOT_LINKED, NOT_FOUND, REVIEW, DRAFT_CREATED, SENT, LINKED, REPLIED, ERROR), `EMAIL_REPLY_TYPE` (NONE, REPLY, BOUNCE, OOO, UNKNOWN).
+- LEADS sloupce (z `EXTENSION_COLUMNS` v `Config.gs:68-119`): `email_sync_status`, `email_reply_type`, `email_thread_id`, `email_last_message_id`, `last_email_sent_at`, `last_email_received_at`, `email_subject_last`, `email_last_error`.
+- Queue row cross-ref fields: `lead_id`, `outreach_queue_id`, `provider_message_id`, `provider_thread_id` (C-05 + C-06).
+- `_asw_logs` (CS2 run history), `_asw_dead_letters` (CS3).
+- C-04 block reasons `UNSUBSCRIBED` (B7), `SUPPRESSED` (B8) — pokrývají Tier 3.
+
+**INFERRED FROM EXISTING SYSTEM:**
+- `email_reply_type=OOO` je auxiliary metadata, ne lifecycle change — odvozeno z `docs/21-business-process.md` M-8 note.
+- CS3 idempotency/retry pattern pro ingest jobs — odvozeno z CS3 S1-S12 locking pattern.
+- CS2 run summary pattern pro `_asw_logs` — odvozeno z existing run history design.
+- `email_sync_status=BOUNCE` není v existing enum (enum má `REPLIED`, `LINKED`, `ERROR`; `BOUNCE` je jen v `email_reply_type`). **Rozpor s docs/21 N3 "BOUNCED neaktualizuje outreach_stage (issue M-8)".** C-07 tím nic neimplementuje, ale spec clarifikuje, že `email_sync_status` by měl dostat `BOUNCED` hodnotu v implementačním tasku (PROPOSED dodatek k enum).
+
+**PROPOSED FOR C-07 (new, implementation task will materialize):**
+- `_asw_inbound_events` sheet (append-only event store, ~30 sparse columns union of 3 event schemas + technical metadata).
+- `reply_event` schema (18 polí).
+- `bounce_event` schema (15 polí).
+- `unsubscribe_event` schema (14 polí).
+- `unknown_inbound` event (rezerva; používá reply_event schema s `reply_class=UNCLASSIFIED`).
+- `complaint_event` (rezerva; PROPOSED bez schema — budoucí task materializuje pokud ESP feedback loop bude aktivován).
+- `reply_class` enum (5: POSITIVE, NEGATIVE, QUESTION, OOO, UNCLASSIFIED).
+- `bounce_class` enum (4: HARD, SOFT, AUTORESPONSE_MISCLASSIFIED, UNCLASSIFIED).
+- `unsubscribe_source` enum (5: LIST_UNSUBSCRIBE_HEADER, LIST_UNSUBSCRIBE_MAILTO, REPLY_BODY_INTENT, ESP_WEBHOOK_UNSUB, MANUAL_OPERATOR_INPUT).
+- `raw_source` enum (4: GMAIL_THREAD, GMAIL_DSN_THREAD, ESP_WEBHOOK, MANUAL_OPERATOR_INPUT; open set, forward-compat).
+- `lifecycle_transition_applied` enum (3: APPLIED, SKIPPED_IDEMPOTENT, SKIPPED_OOO_HOLD).
+- `event_type` enum (5: REPLY, BOUNCE, UNSUBSCRIBE, UNKNOWN_INBOUND, COMPLAINT).
+- LEADS extension: `reply_needs_manual` (boolean), `email_reply_classifier` (enum value), `bounce_class` (enum value), `unsubscribed` (boolean), `unsubscribed_at` (ISO-8601), `unsubscribe_source` (enum value), `soft_bounce_count` (int, PROPOSED).
+- `email_sync_status` enum extension: add `BOUNCED`, `UNSUBSCRIBED` (PROPOSED).
+- `email_reply_type` enum extension: add `UNSUBSCRIBE`, `COMPLAINT` (PROPOSED).
+- C-05 queue extension: `last_inbound_event_id` (PROPOSED dodatek).
+- C-04 block reason extension: `ADDRESS_BOUNCED` (PROPOSED, pro Tier 2 post-bounce block).
+- `ingest_event_id` deterministic pattern per raw_source (sekce 14 §A).
+- Lifecycle transition guards `REPLIED→UNSUBSCRIBED` allow, `UNSUBSCRIBED→REPLIED` block, etc. (sekce 14 §B).
+- Rule-based reply classifier spec (`rule-based-v1`).
+- Ingest job lock pattern (reuse CS3).
+- 3-tier stop rule model.
+- Soft-bounce escalation counter (threshold N=3, PROPOSED).
+- Payload version `"1.0"` pro `_asw_inbound_events` rows.
