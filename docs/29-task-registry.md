@@ -19,6 +19,7 @@
 | B1 | B | Preview brief data contract — formalizace datov... | — | done | 2026-04-05 | docs/23-data-model.md, docs/26-offer-generation.md, docs/30-task-records/B1.md | crm-frontend |
 | B2 | B | Preview renderer na sample briefu | — | done | 2026-04-08 | docs/20-current-state.md, docs/22-technical-architecture.md, docs/26-offer-generation.md, docs/30-task-records/B2.md | crm-frontend |
 | BX1 | B | CRM write path — doPost handler for frontend wr... | Stream B | done | 2026-04-17 | docs/20-current-state.md, docs/30-task-records/BX1.md | apps-script |
+| C-04 | C | Sendability Gate pravidla — autoritativni SPEC ... | Claude | done | 2026-04-21 | docs/24-automation-workflows.md, docs/21-business-process.md, docs/20-current-state.md | — |
 | C2 | C | Hardening audit — přepis sekce Souhrn v docs/20 | claude | done | 2026-04-05 | docs/20-current-state.md | — |
 | C3 | C | Repo governance hardening — CLAUDE.md, branch p... | claude | done | 2026-04-05 | CLAUDE.md, docs/13-doc-update-rules.md, docs/github-collaboration-setup.md, docs/00-folder-inventory.md, docs/00-project-map.md, docs/CRM-SYSTEM-MAP.md | CLAUDE.md, scripts |
 | C4 | C | Post-audit docs corrections — docs/20, docs/23,... | claude | done | 2026-04-05 | docs/20-current-state.md, docs/23-data-model.md, CLAUDE.md, docs/13-doc-update-rules.md | — |
@@ -26,4 +27,4 @@
 | CS2 | C | Navrhnout workflow orchestrator — co spousti co... | Claude | done | 2026-04-05 | docs/24-automation-workflows.md, docs/20-current-state.md | *(zadne code changes)* |
 | CS3 | C | Definovat idempotency keys, retry politiku a de... | Claude | done | 2026-04-05 | docs/24-automation-workflows.md, docs/20-current-state.md | *(zadne code changes)* |
 
-*17 tasks total.*
+*18 tasks total.*
