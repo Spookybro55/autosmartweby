@@ -191,6 +191,122 @@ Automaticka kvalifikace LEADS radku po web checku. Reusuje `evaluateQualificatio
 
 **Stav:** TEST runtime overeno (QUALIFIED, DISQUALIFIED, REVIEW, SKIPPED guard). Lokalne: 6 scenaru, 23 asserti. Failure isolation: code structure + local harness.
 
+## Preview queue → BRIEF_READY (A-08)
+
+Uzavira prechod QUALIFIED → BRIEF_READY. `processPreviewQueue()` zpracuje kvalifikovane leady, zapise preview brief (B-01 kontrakt), slug a email draft, a posune `preview_stage` do `BRIEF_READY`.
+
+**Soubory:** `apps-script/PreviewPipeline.gs` (core logic, pre-existing), `apps-script/AutoQualifyHook.gs` (post-qualify hook, A-08)
+
+| Funkce | Ucel |
+|--------|------|
+| `processPreviewQueue()` | Hlavni vstup: scan LEADS, zapis brief + slug + draft, set `preview_stage=BRIEF_READY` |
+| `buildPreviewBrief_(rd)` | B-01 compatible brief builder (18 poli) |
+| `buildSlug_(name, city)` | URL-safe slug (max 60 chars, normalized) |
+| `composeDraft_(rd)` | Situation-aware email draft (subject + body) |
+| `chooseTemplateType_(rd)` | Template selector (48 variant, B-03 family input) |
+
+**Eligibility:** `qualified_for_preview=TRUE` AND `preview_stage ∈ {'', NOT_STARTED, FAILED, REVIEW_NEEDED (legacy), BRIEF_READY}` AND `dedupe_flag !== TRUE`. B-05 `READY_FOR_REVIEW` a `APPROVED` **nejsou** eligible (operator-owned). Idempotence: pokud `preview_stage=BRIEF_READY` a DRY_RUN/no webhook, radek se preskoci (zadny rebuild).
+
+**Zapsana pole per uspesny radek:**
+- `template_type`, `preview_brief_json`, `preview_headline`, `preview_subheadline`, `preview_cta`, `preview_slug`
+- `preview_stage = BRIEF_READY`, `lead_stage: QUALIFIED → IN_PIPELINE`, `last_processed_at`
+- pokud `send_allowed=TRUE`: `email_subject_draft`, `email_body_draft`, `outreach_stage = DRAFT_READY`
+
+**Batch:** `BATCH_SIZE = 100` per run.
+
+**Fail handling:** Per-row `try/catch`. Pri failure → `preview_stage = FAILED`, `preview_error = 'PROCESSING_ERROR: ' + message`, batch pokracuje. `writeExtensionColumns_()` na konci zapise vsechny zmeny changed-only.
+
+**Trigger cesty (dual path):**
+1. **Time-based** (pre-existing): 15-min timer `processPreviewQueue` (auto-install pres `installProjectTriggers()`)
+2. **Post-qualify hook** (A-08): po uspesne kvalifikaci (`stats.qualified > 0`, ne dry run) vola `runAutoQualify_()` inline `processPreviewQueue()`. Non-fatal: chyba hooku nezneplatni qualify vysledek. Stats: `previewHookInvoked: true` nebo `previewHookError: message`.
+
+**Stav:** LOCAL VERIFIED (6 scenaru, 38 asserti — happy path, send_allowed=FALSE, skip gates, per-row fail isolation, BRIEF_READY idempotence). TEST RUNTIME not verified (vyzaduje clasp push).
+
+## Preview URL return + statusy (B-05)
+
+Uzavira CRM-side smycku mezi A-08 (brief builder) a B-04 endpointem. Apps Script posila webhook dle B-04 contractu (slug v payloadu + auth header), parsuje response do LEADS, a `preview_stage` prechazi do operator-facing lifecycle.
+
+**Soubor:** `apps-script/PreviewPipeline.gs` (webhook call sites), `apps-script/EnvConfig.gs` (secret helper), `apps-script/Config.gs` (enum rozsireni)
+
+**Payload additions (B-04 mandatory):**
+- `preview_slug` — B-04 validuje proti `PREVIEW_SLUG_PATTERN`
+- header `X-Preview-Webhook-Secret` — timing-safe compare proti `PREVIEW_WEBHOOK_SECRET` env na B-04 strane
+
+**Lifecycle (operator-facing):**
+
+```
+NOT_STARTED → BRIEF_READY → GENERATING → READY_FOR_REVIEW → APPROVED (terminal +)
+                                       → FAILED           (retry eligible)
+```
+
+| Stage | Semantics | Writer |
+|-------|-----------|--------|
+| `NOT_STARTED` | inicialni, pipeline muze zacit | GAS (qualify step) |
+| `BRIEF_READY` | brief JSON hotovy, webhook jeste nevolan | GAS (A-08) |
+| `GENERATING` | webhook request in-flight | GAS (B-05) |
+| `READY_FOR_REVIEW` | preview_url zapsana, ceka na operatora | GAS (B-05) |
+| `APPROVED` | operator manualne potvrdil | Operator (Google Sheets manual) |
+| `FAILED` | posledni pokus selhal | GAS (B-05) |
+
+**Response parsing → LEADS write-back (pre-existing, B-05 nezmenil):**
+- 200 + ok:true → `preview_url`, `preview_screenshot_url`, `preview_generated_at`, `preview_version`, `preview_quality_score`, `preview_needs_review`, `preview_stage=READY_FOR_REVIEW`, `preview_error=''`
+- 200 + ok:false → `preview_stage=FAILED`, `preview_error='Webhook ok=false: <body:300>'`
+- HTTP 4xx/5xx | exception → `preview_stage=FAILED`, `preview_error='WEBHOOK_ERROR: <message:300>'`
+
+**Retry rule:** `eligibleStages = ['', 'not_started', 'failed', 'review_needed', 'brief_ready']`. `FAILED` se pri dalsim timer run znovu picnes (natural loop, bez explicit retry counter). `READY_FOR_REVIEW` a `APPROVED` NEJSOU v `eligibleStages` — pipeline je netkne. `GENERATING` take ne (in-flight rowy se neopakuji dokud operator manualne nezresetuje na `NOT_STARTED`).
+
+**Deployment gates (operator-set mimo code):**
+- `PREVIEW_WEBHOOK_SECRET` Script Property (match Next.js env)
+- `WEBHOOK_URL` Config const nebo Script Property
+- `ENABLE_WEBHOOK=true`, `DRY_RUN=false`
+
+**Dva call sites:** `processPreviewQueue()` (timer path) a `runWebhookPilotTest()` (menu path). Identicka logika, symetricke zmeny.
+
+**Stav:** LOCAL VERIFIED (10 scenaru, 42 asserti — S1 success, S2 ok:false, S3-S5 HTTP 400/401/500, S6 network exception, S7 retry eligibility, S8 APPROVED preservation, S9 per-row fail isolation, S10 needs_review flag propagation). TEST RUNTIME not verified (vyzaduje clasp push + Script Properties + B-04 endpoint reachable).
+
+## Ingest quality report (A-09)
+
+Reportovaci vrstva nad ingest funnellem. Pro kazdy `source_job_id` produkuje jeden radek v append-only `_ingest_reports` sheet + full JSON payload do `_asw_logs`. Ne novy subsystem — cista agregace nad `_raw_import` + LEADS.
+
+**Soubor:** `apps-script/IngestReport.gs`
+
+| Funkce | Ucel |
+|--------|------|
+| `ensureIngestReportsSheet_(ss)` | idempotent sheet create (41 sloupcu) |
+| `buildIngestReport_(sourceJobId, rawRows, leadsRows)` | cista funkce: pocita metriky, vraci report objekt (no side effects) |
+| `writeIngestReport_(sheet, report)` | append jednoho radku |
+| `generateIngestReportForJob(sourceJobId)` | public: build + write + aswLog JSON payload |
+| `generateIngestReportsForAllJobs()` | scan distinct source_job_ids v _raw_import + LEADS, per-job try/catch |
+| `generateIngestReportPrompt()` | menu entry: UI prompt → generateIngestReportForJob |
+
+**Trigger cesty (dual path):**
+1. **Post-batch hook** (automatic): na konci `processRawImportBatch_()` po A-06 auto web check, non-fatal wrap. Sebere distinct `source_job_id` z raw rows v batch-i a pro kazdy vygeneruje report. Vysledek v `stats.ingestReportIds` / `stats.ingestReportError`.
+2. **Manual menu** ("Autosmartweby CRM" → "Ingest report → …"):
+   - "Report pro source_job_id…" → prompt → jeden report
+   - "Report pro vsechny joby" → scan distinct → per-each report
+
+**Report unit:** 1 report = 1 `source_job_id`. Comparison mezi joby = read `_ingest_reports` + filter/sort podle `portal`, `segment`, `city`, `district`, `run_started_at`.
+
+**Strict metric semantics** (viz docs/23 sekce "Ingest quality report"):
+- `duplicate_count` = STRICT `import_decision='rejected_duplicate'` only (pending_review separate bucket)
+- `brief_ready_count` = STRICT `preview_stage='BRIEF_READY'` only (neinferuje se z brief_json/slug)
+- `qualified_or_beyond_count` = canonical funnel metric (A-08 posouva QUALIFIED→IN_PIPELINE)
+- `duration_ms_approx` = DERIVED APPROXIMATION (MAX(updated_at) − MIN(scraped_at), ne exact runtime)
+
+**Summary status:** OK / DEGRADED (bottleneck detected) / PARTIAL (A-06/A-07/A-08 nedobehl pro vsechny leads) / FAILED (raw=0 nebo error_rate>0.5).
+
+**Snapshot stage (orthogonal to summary_status):** `RAW_ONLY` / `DOWNSTREAM_PARTIAL` / `FINAL` — identifikuje pozici v lifecycle funnelu, ne kvalitu. Auto-computed z data state; caller muze prepsat pres `opts.snapshotStage`. Post-batch hook v `processRawImportBatch_()` nechava auto-compute: pokud A-06/A-07/A-08 chain dobehl inline, report je `FINAL`; jinak `DOWNSTREAM_PARTIAL`. Filtrovani `snapshot_stage='FINAL'` v sheetu dava definitive-outcome reports; starsi PARTIAL radky zustavaji jako historical trend.
+
+**Bottleneck stages (4):** A:normalize, B:dedupe_import, C:qualify, D:brief_ready. Threshold 0.8.
+
+**Fail handling:** `buildIngestReport_` je pure. `loadRawRowsByJob_` **throws** pri chybejicim required headeru (`source_job_id`, `import_decision`, `normalized_status`) per A-02 contract — malformed sheet fails loudly. Per-job wrapper v `generateIngestReportsForAllJobs` zaloguje ERROR na exception a pokracuje (v bulk scanu). Post-batch hook je non-fatal — chyba reportu nezneplatni import success.
+
+**Collision-safe IDs:** `report_id` format `rpt-{source_job_id}-{ts14}-{uuid8}` kombinuje human-readable timestamp s UUID suffix (`Utilities.getUuid()`) — bezpecne pro concurrent generaci.
+
+**Type-preserving writer:** `reportToRow_()` pres `writeIngestReport_` zachovava numeric typy (counts, rates, durations) v Sheets misto stringifikace — umoznuje sort, aggregation formulas, sparklines.
+
+**Stav:** LOCAL VERIFIED (12 scenaru / 136 asserti — happy, empty, high-duplicate, missing-contacts, errors-dominate, partial, OK, schema sanity, report_id uniqueness, header validation, snapshot_stage differentiation, type preservation). TEST RUNTIME not verified (vyzaduje clasp push + realny _raw_import / LEADS).
+
 ## Chybejici automatizace
 
 - Trigger na novy radek v LEADS (neni implementovan)

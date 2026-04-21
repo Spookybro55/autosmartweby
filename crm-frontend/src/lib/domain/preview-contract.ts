@@ -51,21 +51,25 @@ export type ConfidenceLevelValue = 'high' | 'medium' | 'low';
 // ============================================================================
 // Template Types — VERIFIED IN REPO
 // chooseTemplateType_() in PreviewPipeline.gs generates base+suffix combos.
+//
+// B-03 drift fix: `plumber` and `construction` match GAS runtime output
+// (PreviewPipeline.gs:527, 531). Previous values `instalater` / `mason` were
+// never emitted by GAS and broke type-safety for real webhook payloads.
 // ============================================================================
 
 export type TemplateBase =
-  | 'instalater'
+  | 'emergency-service'
+  | 'plumber'
   | 'electrician'
   | 'locksmith'
   | 'painter'
-  | 'mason'
+  | 'construction'
   | 'cleaning'
   | 'gardener'
   | 'auto-service'
   | 'beauty'
   | 'restaurant'
-  | 'local-service'
-  | 'emergency-service';
+  | 'local-service';
 
 export type TemplateSuffix =
   | ''

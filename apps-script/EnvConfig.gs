@@ -91,6 +91,20 @@ function isProduction_() {
   return getEnvConfig_().isProduction;
 }
 
+/**
+ * B-05: shared secret used to authenticate the preview webhook call.
+ * Reads Script Property `PREVIEW_WEBHOOK_SECRET`. The Next.js B-04 endpoint
+ * (`POST /api/preview/render`) compares it timing-safely against its own
+ * `PREVIEW_WEBHOOK_SECRET` env. Returns empty string when not configured,
+ * so callers can still fail closed (401 from the endpoint) rather than
+ * throwing on missing property.
+ *
+ * @return {string}
+ */
+function getPreviewWebhookSecret_() {
+  return PropertiesService.getScriptProperties().getProperty('PREVIEW_WEBHOOK_SECRET') || '';
+}
+
 /* ── Guards ───────────────────────────────────────────────────── */
 
 /**

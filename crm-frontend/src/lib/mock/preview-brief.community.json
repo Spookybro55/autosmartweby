@@ -1,0 +1,24 @@
+{
+  "business_name": "Malířství Novák",
+  "contact_name": "Jan Novák",
+  "city": "Praha",
+  "area": "Praha-východ",
+  "service_type": "malíř",
+  "segment": "malirstvi",
+  "pain_point": "",
+  "headline": "Malířství Novák — lokální malíř v Praze",
+  "subheadline": "Interiérové a fasádní práce v Praze a okolí",
+  "key_benefits": [
+    "Ruční odvedená práce",
+    "Portfólio realizací v regionu",
+    "Osobní komunikace"
+  ],
+  "suggested_sections": ["hero", "services", "location", "contact"],
+  "cta": "Napište nám",
+  "contact_phone": "",
+  "contact_email": "jan@malirstvi-priklad.cz",
+  "website_status": "has_website",
+  "rating": "",
+  "reviews_count": "",
+  "confidence_level": "medium"
+}

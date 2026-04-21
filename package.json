@@ -7,6 +7,9 @@
     "docs:build-changelog": "node scripts/docs/build-changelog.mjs",
     "docs:build-task-registry": "node scripts/docs/build-task-registry.mjs",
     "docs:check": "node scripts/docs/check-doc-sync.mjs",
-    "docs:new-task": "node scripts/docs/create-task-record.mjs"
+    "docs:new-task": "node scripts/docs/create-task-record.mjs",
+    "test:b03": "node --experimental-strip-types --test scripts/tests/template-family.test.ts",
+    "test:b04": "node --experimental-strip-types --test scripts/tests/preview-render-endpoint.test.ts",
+    "test:b05": "node scripts/test-b05-preview-webhook.mjs"
   }
 }

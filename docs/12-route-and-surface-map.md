@@ -25,6 +25,7 @@
 | `/api/leads` | GET | `src/app/api/leads/route.ts` | Auth vyzadovan | Nacteni vsech leadu z Google Sheets |
 | `/api/leads/[id]` | GET | `src/app/api/leads/[id]/route.ts` | Auth vyzadovan | Nacteni jednoho leadu podle ID |
 | `/api/leads/[id]/update` | POST | `src/app/api/leads/[id]/update/route.ts` | Auth vyzadovan | Aktualizace editovatelnych poli leadu pres Apps Script |
+| `/api/preview/render` | POST | `src/app/api/preview/render/route.ts` | Header `X-Preview-Webhook-Secret` (B-04) | Apps Script → Next.js: prijme MinimalRenderRequest, upsertne brief do in-memory preview store, vrati MinimalRenderResponseOk s `preview_url` |
 | `/api/stats` | GET | `src/app/api/stats/route.ts` | Auth vyzadovan | Statistiky pro dashboard |
 
 ### Mechanismus autentizace
