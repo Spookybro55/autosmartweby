@@ -1,7 +1,7 @@
 # Current State — Autosmartweby
 
 > **Kanonicky dokument.** Aktualizuje se pri kazdem tasku, ktery meni stav systemu.
-> **Posledni aktualizace:** 2026-04-17
+> **Posledni aktualizace:** 2026-04-20 (A-09)
 
 ---
 
@@ -39,7 +39,9 @@ CI validuje aktuálnost generated files a existenci governance souboru. Nevalidu
 - Per-lead Gmail draft/send z "Ke kontaktovani" sheetu
 - Mailbox sync (read-only: thread_id, reply_type, timestamps, CRM labely)
 - **Auto qualify hook A-07** (`apps-script/AutoQualifyHook.gs`) — automaticka kvalifikace po web checku. Reusuje `evaluateQualification_()`, batch size 20, LockService guard, double-run prevence pres `lead_stage`. Dva trigger mody: casovy (15min, auto-install pres installProjectTriggers) a post-web-check (volany z A-06 runAutoWebCheckInner_). **Stav: TEST runtime overeno** (2026-04-17, QUALIFIED + DISQUALIFIED + REVIEW + SKIPPED guard provereny diagnostickymi funkcemi, 23 lokalnich asserti). Bug fix: `extractDomainFromUrl_` vyzaduje tecku v domene (prevence `dom:nenalezeno`).
-- Triggery: 15min timer (processPreviewQueue, autoWebCheckTrigger, autoQualifyTrigger), onOpen (menu), onEdit (write-back)
+- **Preview queue → BRIEF_READY A-08** (`apps-script/AutoQualifyHook.gs` + pre-existing `apps-script/PreviewPipeline.gs`) — uzavira cestu QUALIFIED → BRIEF_READY. `processPreviewQueue()` vybira radky s `qualified_for_preview=TRUE` a `preview_stage ∈ {'', NOT_STARTED, FAILED, REVIEW_NEEDED, BRIEF_READY}`, zapisuje `preview_brief_json` (B-01 kontrakt, 18 poli), `preview_slug`, `preview_headline/subheadline/cta`, `template_type`, a pokud `send_allowed=TRUE` tak i `email_subject_draft` + `email_body_draft` + `outreach_stage=DRAFT_READY`. Per-row `try/catch` zajistuje, ze failure jednoho radku neshodi batch (FAILED + preview_error). Transition `lead_stage: QUALIFIED → IN_PIPELINE`. Dva trigger mody: casovy (15min timer) a post-qualify hook (volany z `runAutoQualify_` po uspesne kvalifikaci, non-fatal). **Stav: LOCAL VERIFIED** (2026-04-20, 6 scenaru / 38 asserti: happy path, send_allowed=FALSE, skip gates, per-row fail isolation, BRIEF_READY idempotence).
+- **Ingest quality report A-09** (`apps-script/IngestReport.gs`) — reportovaci vrstva nad existujicim ingest funnellem. Pro kazdy `source_job_id` generuje 1 radek do append-only `_ingest_reports` sheet (41 sloupcu vcetne snapshot_stage) + full JSON payload do `_asw_logs`. Metriky: raw/imported/error/duplicate/pending counts, LEADS funnel (web_checked, qualified_or_beyond, brief_ready), derived rates (normalization_success, import, qualification, brief_ready, contact_completeness), `bottleneck_stage` detection, `summary_status` (OK/DEGRADED/PARTIAL/FAILED), `fail_reason_breakdown_json` grouping. Strict semantics: `duplicate_count=rejected_duplicate only`, `brief_ready_count=preview_stage='BRIEF_READY' only`, `qualified_or_beyond_count` jako canonical funnel metric (A-08 posouva QUALIFIED→IN_PIPELINE), `duration_ms_approx` labeled jako derived approximation. Dva trigger mody: post-batch hook v `processRawImportBatch_()` (per distinct source_job_id, non-fatal) a manualni menu ("Ingest report → …"). **Stav: LOCAL VERIFIED** (2026-04-20, 12 scenaru / 136 asserti: happy, empty, high-duplicate, missing-contacts, errors-dominate, partial, OK, schema sanity, report_id uniqueness, header validation, snapshot_stage differentiation, type preservation).
+- Triggery: 15min timer (processPreviewQueue, autoWebCheckTrigger, autoQualifyTrigger), onOpen (menu), onEdit (write-back), post-qualify hook A-08 (inline), post-batch A-09 ingest report hook (inline v processRawImportBatch_)
 - DRY_RUN defaultne zapnuty
 
 ### CRM frontend (Next.js 16 + React 19)
