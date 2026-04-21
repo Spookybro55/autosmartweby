@@ -236,6 +236,106 @@ Task NEDODAVA:
 - **Code:** — (—)
 - **Docs:** docs/24-automation-workflows.md, docs/20-current-state.md
 
+### [C/C-08] Follow-up engine — SPEC-only sekvence / časování / stop podmínky pro follow-up automation — DONE
+- **Scope:** Formalizuje follow-up engine — logickou vrstvu mezi C-05 queue a budoucim scheduler/worker runtime — definuje **3-stage sekvenci** (`initial` → `follow_up_1` → `follow_up_2`), maximum **2 follow-upy** po initial (total 3 queue rows per sekvence), **T+3 / T+7 business days** rozestupy pocitane z actual `sent_at` predchozi stage, **quiet hours 09:00–17:00 Europe/Prague**, **5 stop condition kategorii** (REPLY / UNSUBSCRIBE / BOUNCE / MANUAL_BLOCK / REVIEW_FLAG|UNKNOWN_INBOUND) + **5 composite stop invariants** (vcetne C-04 gate re-check s `is_followup=true` + C-07 inbound event store check + CS1 terminal lookup), **triple-redundant reply guard** (CS1 REPLIED + C-04 B3 + inbound event store), **3 decision outcomes** (AUTO_INSERT / REVIEW_REQUIRED / STOP), **pregenerate-vs-regenerate** tabulku (IMMUTABLE recipient/sender_identity/preview_url/personalization vs REGENERATED subject/body/CTA vs STAGE-DERIVED thread_hint/scheduled_at/priority/idempotency_key), idempotency pattern `followup:{lead_id}:{sequence_root_queue_id}:{sequence_stage}`, manual block model diferencovany od UNSUBSCRIBE, **5-vrstvovou tvrdou separaci** (stage / lifecycle / queue status / inbound event / review flag) s 5 zakazanymi kolapsi, sample queue rows pro vsechny 3 stage s field-level INHERITED/REGENERATED/STAGE-DERIVED/IMMUTABLE markers, **5 sample lead timelines** (silent happy path / reply → stop / bounce → stop / unsubscribe → stop / unknown-inbound → review → manual_stop), auditability approach (`_asw_logs` 8 event types + cross-ref graph + observability bez B6 UI), handoff tabulku na C-04/C-05/C-06/C-07/CS1/CS2/CS3/scheduler/B6/copy-gen/C-09/implementation task (12 radku).
+
+Scope je **SPEC-only** — neimplementuje scheduler runtime, cron trigger, queue worker claim loop, mailbox sync runtime, ESP webhook HTTP handler, frontend UI (B6), text-generation engine, holiday calendar detail ani zapisy do `apps-script/Config.gs`. Vsechny nove artefakty jsou oznacene **PROPOSED FOR C-08** a budou materializovany implementacnim taskem. B6 (operator reply-handling UI) **NENI blocker** pro C-08 SPEC — operator muze `followup_manual_block` flag nastavit rucne v Google Sheets bunce.
+
+Task dodava:
+- 3-stage follow-up sequence definition (`initial` / `follow_up_1` / `follow_up_2`) s per-stage tabulkou (purpose, timing, input, output, queue row, thread hint)
+- Max follow-up count invariant (max=2, initial nepocita, total 3 rows per sekvence) + 4 enforcement mechanisms (sequence counter check / idempotency key stage-aware / stage progression deterministic / lookup na poslední SENT row v sekvenci)
+- Timing rules: T+3 business days od `initial.sent_at` → `follow_up_1.scheduled_at`; T+7 business days od `follow_up_1.sent_at` → `follow_up_2.scheduled_at`; vzdy od **actual** `sent_at` (ne scheduled/queued/created); business days = Po-Pá, stat. svatky mimo v1.0; quiet hours 09:00–17:00 Europe/Prague deterministic posun
+- 5 stop condition kategorii s tabulkou (co aktivuje / scope / zastavi jen automatiku nebo i manual / z ktereho tasku pochazi)
+- 5 composite stop invariants (CS1 terminal lookup / C-04 gate re-check s `is_followup=true` / C-07 inbound event store check / manual block flag / OOO review hold s PROPOSED 14 dni pauze)
+- **Triple-redundant reply guard** (garantuje acceptance criteria #4 "lead s reply uz nikdy nedostane follow-up") pres (a) CS1 state check, (b) C-04 gate re-check B3, (c) inbound event store check
+- Pregenerate vs regenerate rules per field (14-radkova tabulka s Initial / follow_up_1 / follow_up_2 / pravidlo sloupci + 3 klicove invariants)
+- 3 decision outcomes (AUTO_INSERT / REVIEW_REQUIRED / STOP) s explicit podminkami pro kazdy + role `reply_needs_manual` + role `unknown_inbound` + dalsi review guardy
+- **5-vrstva tvrda separace** (1. Follow-up stage / 2. Lifecycle state / 3. Queue status / 4. Inbound event / 5. Review flag) s tabulkou "co to je / kde zije / hodnoty / kdo meni" + 5 zakazanych kolapsi + engine konzumacni mapa
+- Sample queue rows (initial, follow_up_1, follow_up_2) s field-level rozlisenim INHERITED / REGENERATED / STAGE-DERIVED / STAGE-OVERRIDE / IMMUTABLE
+- **5 sample lead timelines:**
+  - (1) silent happy path (initial → follow_up_1 → follow_up_2 bez reakce → SEQUENCE_COMPLETE)
+  - (2) reply → stop (initial → reply → CS1 REPLIED → `followup_skip` stop_reason=REPLY)
+  - (3) bounce → stop (initial → hard bounce DSN 5.1.1 → CS1 BOUNCED → Tier 2 address stop, PROPOSED C-04 `ADDRESS_BOUNCED`)
+  - (4) unsubscribe → stop (initial → follow_up_1 → reply "unsubscribe" → CS1 UNSUBSCRIBED → Tier 3 lead stop, `followup_skip` stop_reason=UNSUBSCRIBE)
+  - (5) unknown-inbound → review → manual_stop (initial → reply s UNCLASSIFIED class → `reply_needs_manual=TRUE` → `followup_review_required` → operator rozhodne stop_followup → `followup_manual_stop`)
+- Auditability: `_asw_logs` events pro C-08 (8 PROPOSED event types: `followup_insert`, `followup_skip`, `followup_review_required`, `followup_pause_ooo`, `followup_manual_stop`, `followup_stale_review_abandoned`, `followup_engine_run_summary`, `followup_auto_block_soft_bounce`), cross-ref graph (LEADS ↔ queue ↔ inbound events ↔ logs ↔ dead_letters), observability bez B6 UI (query patterns)
+- Idempotency pattern `followup:{lead_id}:{sequence_root_queue_id}:{sequence_stage}` + 4 invariants (unique per stage×sekvence×lead, safe-to-run-twice, race-safe, ne-rollback-safe) + design rationale (proc ne obsahovy hash pro follow-upy)
+- Manual block model: `followup_manual_block` boolean flag na LEADS + kdo nastavi (operator manual / B6 budouci / engine auto-set edge case) + co presne zastavi (jen automatiku, ne existing QUEUED rows bez C-05 CANCELLED) + reversibilita + diferenciace od UNSUBSCRIBE (6-dimension table: zdroj / scope / CS1 state change / reversible / storage / compliance)
+- Handoff tabulka (12 radku) na C-04/C-05/C-06/C-07/CS1/CS2/CS3/scheduler/B6/copy-gen/C-09/implementation task s per-row popisem "jak C-08 konzumuje" + "jak C-08 prispiva"
+- Non-goals explicit (14 polozek)
+- Acceptance checklist (16 polozek) + PROPOSED/INFERRED/VERIFIED label summary (sekce 18)
+
+**CS1 kompatibilita:**
+- C-08 NIKDY neemituje novy canonical CS1 state. Pouziva existujici terminaly REPLIED (#15), BOUNCED (#16), UNSUBSCRIBED (#17), DISQUALIFIED + T20/T21/T22 transitions z `docs/21-business-process.md`.
+- Engine **cte** lifecycle state pres LEADS (pro terminal check) ale **NIKDY nezapisuje** do `lifecycle_state` — to dela C-05 queue worker (T17, T18) + C-07 ingest (T20, T21, T22) + operator.
+- Triple-redundant reply guard: (a) CS1 terminal check `lifecycle_state IN terminal_states`; (b) C-04 gate re-check B3 `TERMINAL_STATE_REPLIED`; (c) C-07 inbound event store `event_type=REPLY` existence check.
+
+**CS2 kompatibilita:**
+- Engine je novy CS2 step: `followup_engine_run` — batch daily orchestrator (typically 23:00 Europe/Prague cron).
+- Jeden run eviduje `run_id` → `_asw_logs` event `followup_engine_run_summary` s `run_id`, `leads_evaluated`, `inserts`, `skips`, `reviews`, `pauses`, `duration_ms`.
+- Respektuje CS2 event-driven pattern: engine se spusti periodicky + reactivly (po inbound event klidne hned re-vyhodnoti dotcene leady — PROPOSED optimalizace, v1.0 postaci daily batch).
+
+**CS3 kompatibilita:**
+- Engine run respektuje CS3 `LockService.getScriptLock()` pattern (stejne jako C-05 worker + C-07 ingest).
+- `failure_class` mapping pro engine errors: `ENGINE_TIMEOUT` → TRANSIENT, `C04_GATE_FAIL` → PERMANENT (lead-level, operator musi resolve), `PARENT_NOT_SENT` → TRANSIENT (wait pro SENT), `MAX_RETRIES_EXCEEDED` → PERMANENT.
+- Dead-letter pattern: pokud engine run failne pri inserting konkretni follow-up, row se presune do `_asw_dead_letters` s diagnostikou (retry = novy engine run, idempotency klic garantuje ze nedojde k duplicitnimu insertu).
+- Idempotency key `followup:{lead_id}:{sequence_root_queue_id}:{sequence_stage}` respektuje CS3 S1-S12 deterministic-first-then-hash pattern (stage scope = deterministic, content hash se nepouziva — viz design rationale).
+
+**C-04 kompatibilita:**
+- Engine **re-vola** C-04 sendability gate pred kazdym follow-up insert. Predava `is_followup=true` context → C-04 bypasses B16 `ALREADY_SENT` (initial uz byl odeslan, to je expected).
+- Gate vrati `AUTO_SEND_ALLOWED` / `MANUAL_REVIEW_REQUIRED` / `SEND_BLOCKED` — engine route na AUTO_INSERT / REVIEW_REQUIRED / STOP.
+- Gate zohlednuje existing B3/B4/B5 (CS1 terminal), B7 (UNSUBSCRIBED), B8 (SUPPRESSED), PROPOSED C-07 `ADDRESS_BOUNCED`.
+- PROPOSED C-04 extension: `is_followup` context parameter — do materializace pouziva operator interim "initial je odeslan = nevytvaret follow-up" pres C-04 fallback logic (degraded, vyzaduje manual handling).
+
+**C-05 kompatibilita:**
+- Engine je **C-05 producer** — vytvari nove queue rows stejne jako C-04 pro initial. Respektuje C-05 insert contract (sekce 5 docs/24).
+- PROPOSED C-05 schema extensions: `sequence_stage` (string enum), `parent_queue_id` (string nullable), `sequence_root_queue_id` (string), `sequence_position` (integer 1-indexed), `created_from_followup_engine_run` (string audit ref).
+- Do materializace PROPOSED fields engine pracuje s 3 samostatnymi queue rows per sekvence (initial + follow_up_1 + follow_up_2) bez explicitniho stage metadata — funkcni, ale ztraci audit granularitu.
+- Engine **nezapisuje** do existing queue row (parent row je immutable po SENT per C-05). Kazda stage = novy row.
+- Idempotency: `followup:{lead_id}:{sequence_root_queue_id}:{sequence_stage}` respektuje C-05 unique-per-idempotency_key invariant.
+
+**C-06 kompatibilita:**
+- Engine populuje `SendRequest.thread_hint` (C-06 merged PR #29 forward-compat pole):
+  - initial: `thread_hint = null`
+  - follow_up_1: `thread_hint = {thread_id: initial.provider_thread_id, in_reply_to_message_id: initial.provider_message_id}`
+  - follow_up_2: `thread_hint = {thread_id: initial.provider_thread_id, in_reply_to_message_id: follow_up_1.provider_message_id}`
+- Engine **nezapisuje** do C-06 sender interface ani `NormalizedSendResponse`. Jen **cte** `provider_message_id` + `provider_thread_id` + `sent_at` z C-06 response (propsany do queue row pri SENT transition per C-05).
+- Gmail adapter pouzije `GmailApp.getThreadById(thread_id).reply(body)` nebo ESP adapter prevede na `In-Reply-To` + `References` headers — to je C-06 implementacni task, ne C-08.
+
+**C-07 kompatibilita:**
+- Engine **cte** `_asw_inbound_events` pro stop detection. Respektuje C-07 3-tier stop model:
+  - Tier 1 (REPLY, UNKNOWN_INBOUND): sekvence stop (per thread / sekvence)
+  - Tier 2 (BOUNCE): sekvence stop + Tier 2 address stop siri na dalsi sekvence na tu adresu (pres C-04 PROPOSED `ADDRESS_BOUNCED`)
+  - Tier 3 (UNSUBSCRIBE, COMPLAINT): celkovy lead stop napric kanaly (pres C-04 B7 + B8)
+- OOO (`reply_class=OOO`) = **pauze** (ne stop) — engine odlozi next stage o PROPOSED 14 kalendarnich dni, pak re-vyhodnoti.
+- `unknown_inbound` → `reply_needs_manual=TRUE` → REVIEW_REQUIRED. Engine NIKDY auto-inserts pri review flag.
+- Engine **nezapisuje** do `_asw_inbound_events` (append-only, jen C-07 ingest).
+
+**B6 vztah:**
+- B6 (operator reply-handling UI) **NENI blocker** pro C-08 SPEC. Operator muze v interim manage follow-up manual block + review resolution primo v Google Sheets bunce.
+- B6 (budouci task) agreguje do per-lead view: queue sekvence rows, `_asw_logs` follow-up events, LEADS flagy (`reply_needs_manual`, `followup_manual_block`, `followup_review_required`, `unsubscribed`), pause/stop buttons.
+- PROPOSED operator actions pro B6 (mimo C-08 scope): `resolve_review → continue_followup`, `resolve_review → stop_followup`, `set_manual_block`, `clear_manual_block`.
+
+Task NEDODAVA:
+- Runtime scheduler / cron trigger / daily batch job v Apps Script
+- Queue worker claim loop (C-05 implementacni task)
+- Mailbox sync runtime (C-07 implementacni task)
+- ESP webhook HTTP handler (C-07 implementacni task)
+- Frontend UI pro follow-up management (B6)
+- Text-generation engine pro stage-specific copy (follow-up copy-gen task)
+- Holiday calendar implementaci (ops config)
+- Timezone-per-lead personalizaci (v1.0 single timezone)
+- Multi-channel follow-up (SMS, phone, LinkedIn)
+- A/B testing / experiment harness
+- Zapisy do `apps-script/Config.gs` (PROPOSED enumy + Script Properties)
+- Mutaci C-05 queue schema (PROPOSED extensions pouze)
+- Mutaci C-06 sender interface
+- Mutaci C-07 inbound event schema
+- Novy canonical CS1 state
+- **Owner:** Claude
+- **Code:** — (—)
+- **Docs:** docs/24-automation-workflows.md, docs/20-current-state.md
+
 ## 2026-04-20
 
 ### [A/A8] Preview queue → BRIEF_READY — DONE
