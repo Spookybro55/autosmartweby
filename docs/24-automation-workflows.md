@@ -3774,3 +3774,665 @@ Oddělená od event-level. Chrání před double-transition pokud ingest kód vo
 - 3-tier stop rule model.
 - Soft-bounce escalation counter (threshold N=3, PROPOSED).
 - Payload version `"1.0"` pro `_asw_inbound_events` rows.
+
+## Follow-up engine — C-08 (sekvence, časování, stop podmínky)
+
+> **SPEC-only.** Tato sekce definuje kontrakt follow-up engine. Neimplementuje scheduler, queue worker, mailbox sync, webhook ingest, frontend UI, text-generation engine ani zápisy do `apps-script/Config.gs`.
+
+> **C-07 je prerekvizita.** C-08 konzumuje C-07 stop tiers, `reply_needs_manual` review flag a inbound event taxonomii. Bez C-07 by follow-up engine nevěděl, kdy NEposílat další email.
+
+### 1. Účel follow-up engine
+
+```
+  ┌────────────────┐  ┌──────────────────────┐  ┌────────────────────┐
+  │  C-04 gate     │──│  C-05 queue          │──│  C-06 sender       │
+  │  (first-touch) │  │  (outbound_queue)    │  │  (provider)        │
+  └────────────────┘  └──────────────────────┘  └─────────┬──────────┘
+                                                          │ SENT
+                                                          ▼
+                                     ┌────────────────────────────────┐
+                                     │  C-07 inbound event ingest     │
+                                     │  (reply / bounce / unsubscribe)│
+                                     └────────────┬───────────────────┘
+                                                  │
+                                                  ▼
+                                     ┌────────────────────────────────┐
+                                     │  C-08 follow-up engine         │
+                                     │  (WHAT / WHEN / IF next send)  │
+                                     │  ─────────────                 │
+                                     │  → new queue row (stage=Fn)    │
+                                     │  → OR skip + record stop       │
+                                     │  → OR route to review gate     │
+                                     └────────────────────────────────┘
+```
+
+**Co C-08 řeší navíc oproti initial sendu:**
+- Initial send je **first touch** (C-04 → C-05 → C-06). Follow-up engine odpovídá na otázku: **"Poslat další email ve stejném threadu — a pokud ano, kdy a s jakým obsahem?"**
+- Oddělená odpovědnost: C-05 queue neumí rozhodnout o další fázi (jen drží queue rows); C-07 jen hlásí, co přišlo; C-08 je **rozhodovač sekvence**.
+- Follow-up engine čte inbound události z C-07 a lifecycle state z CS1, porovná je s definicí sekvence (initial → follow_up_1 → follow_up_2), a buď vytvoří nový queue row (C-05), nebo sekvenci ukončí, nebo ji pošle na review.
+
+**Co C-08 NEŘEŠÍ:**
+- Scheduler / cron / runtime triggers (mimo scope — implementační task).
+- Queue worker / claim / dispatch loop (C-05 + implementační task).
+- Mailbox sync runtime / Gmail polling (C-07 + implementační task).
+- ESP webhook HTTP handler (C-07 + implementační task).
+- Frontend UI (B6 + budoucí task).
+- Text-generation engine pro follow-up copy (budoucí task — C-08 definuje, **co se pregeneruje vs regeneruje**, ne **jak se text tvoří**).
+- Modifikaci C-05 queue schema nebo C-06 sender interface (C-08 jen **čte** C-07 events a **zapisuje nové queue rows** přes C-05 existing contract).
+- Přidávání nových canonical CS1 states.
+- Zápis PROPOSED enumů do `apps-script/Config.gs`.
+
+**C-08 je SPEC**: definuje sekvenční kontrakt, časovací pravidla, stop podmínky, pregenerate/regenerate rules, auto-vs-review guardy, duplicate prevention invariants a sample timelines. Runtime engine (scheduler + worker) je **implementační task**.
+
+**Vztah k B6:**
+- B6 (operator reply-handling / review UI) **NENÍ blocker** pro C-08 SPEC. C-08 definuje, kdy se follow-up dostane na review (interní signál); B6 později implementuje, jak operator review UI konzumuje. Do té doby operator čte review signál přímo z LEADS / queue metadata v Google Sheets.
+
+### 2. Boundary / non-goals
+
+**C-08 řeší:**
+- Definici follow-up **sequence stage** (initial → follow_up_1 → follow_up_2) s explicitním max count.
+- Timing rules mezi stages (rozestupy, od čeho se počítá, quiet-hours handoff).
+- Stop conditions (reply, bounce, unsubscribe, manual block, review flag).
+- Pregenerate vs regenerate rules pro subject / body / preview_url / personalization / thread_hint / CTA.
+- Automatic vs review decision (kdy follow-up jde autem, kdy na review).
+- Tvrdou separaci 5 vrstev: follow-up stage / lifecycle state / queue status / inbound event / review flag.
+- Sample queue row design pro follow_up_1 + follow_up_2 (co se dědí z initial, co se mění).
+- 5 sample lead timelines (happy path + 4 stop větve).
+- Auditability + observability (jak každý follow-up attempt dohledat).
+- Idempotency / duplicate prevention (invariants nad stage × lead × queue).
+- Manual block model (flag, scope, reversibilita).
+- Handoff body na C-05 / C-06 / C-07 / CS1 / CS3 / scheduler / B6.
+
+**C-08 NEŘEŠÍ:**
+- Scheduler / cron job runtime.
+- Queue worker claim / dispatch loop.
+- Mailbox sync runtime.
+- ESP webhook HTTP handler.
+- Frontend UI (B6).
+- Text-generation engine (jak vypadá konkrétní copy follow_up_1 — jen **co se v payload mění vs dědí**).
+- Rate limiting / quiet hours scheduling detaily (C-08 definuje **contract boundary** — quiet hours posouvají `scheduled_at`, konkrétní pravidla jsou implementační / ops config).
+- Holiday calendar logic.
+- Multi-channel follow-up (SMS, phone, LinkedIn) — C-08 v1.0 je **email-only**.
+- A/B testing a experimenty.
+- Suppression list runtime (C-09 downstream).
+- Mutaci C-05 queue schema (C-08 používá existing `outreach_queue_id`, `scheduled_at`, `priority`, `thread_hint`; PROPOSED dodatky jsou explicitně označené).
+- Mutaci C-06 sender interface.
+- Mutaci C-07 inbound event schema.
+
+### 3. Follow-up sequence definition
+
+C-08 v1.0 definuje **3-stage sekvenci** s maximem **2 follow-upy po initial**:
+
+| Stage | Účel | Kdy vzniká | Vstup | Výstup | Nový queue row? | Thread / reply hint? |
+|-------|------|------------|-------|--------|-----------------|----------------------|
+| **`initial`** | First touch — první outreach email na lead, zakládá thread. | Vytvořen C-04/C-05 při `AUTO_SEND_ALLOWED` (viz sekce 6 docs/24 C-05). | Lead + preview_url + generated subject/body. | Queue row → send → thread založen. | ✓ (C-05 insert) | ✗ Initial nemá thread hint (žádný thread ještě neexistuje). |
+| **`follow_up_1`** | První připomenutí — "viděli jste naši nabídku?" | Engine hodnotí po `T+3 dny` od `sent_at` initial, pokud sequence není stopnutá. | initial queue row (SENT) + inbound event store (prázdno / OOO hold) + lead CS1 state + LEADS follow-up counter. | **Nový** C-05 queue row se stage=`follow_up_1`, `thread_hint` = `{thread_id: initial.provider_thread_id, in_reply_to_message_id: initial.provider_message_id}`. | ✓ (nový C-05 insert) | ✓ Reply-in-thread k initial. |
+| **`follow_up_2`** | Druhé a poslední připomenutí — "poslední šance / posíláme pro jistotu ještě jednou". | Engine hodnotí po `T+7 dní` od `sent_at` follow_up_1 (celkem ~T+10 dní od initial), pokud sequence není stopnutá. | follow_up_1 queue row (SENT) + inbound event store + lead CS1 state + LEADS follow-up counter. | **Nový** C-05 queue row se stage=`follow_up_2`, `thread_hint` = `{thread_id: initial.provider_thread_id, in_reply_to_message_id: follow_up_1.provider_message_id}`. | ✓ (nový C-05 insert) | ✓ Reply-in-thread k follow_up_1 (poslední message v threadu). |
+
+**Invariant:** Po `follow_up_2` sekvence **automaticky končí** (viz sekce 5 max count). Žádný `follow_up_3` v C-08 v1.0 neexistuje. Budoucí vlna může rozšířit na 3+ follow-upy — v tom případě je to **amendment C-08** nebo nové C-XX (explicit breaking change).
+
+**Stage-naming invariant:**
+- `initial` = first touch (vrstva: stage)
+- `follow_up_1`, `follow_up_2` = sekvenční follow-upy (vrstva: stage)
+- **Pozor:** Stage **není** lifecycle state, **není** queue status, **není** inbound event, **není** review flag. Viz sekce 9 pro tvrdou separaci 5 vrstev.
+
+**Reused fields from C-05:**
+- `outreach_queue_id`: každá stage má svůj vlastní UUID.
+- `lead_id`: sdílený napříč sekvencí.
+- `scheduled_at`: populace engine, respektuje timing rules (sekce 4).
+- `priority`: engine může zvýšit prioritu follow-upů (PROPOSED default 100 → 90 pro follow_up_1, 80 pro follow_up_2; konkrétní hodnoty doladí implementační task).
+- `thread_hint` (C-06 `SendRequest` field) = null pro initial; populace pro follow_up_1/2.
+- `send_channel = "email"` (v1.0 pouze email).
+- `send_mode = "SCHEDULED"` (follow-upy jsou vždy plánované, ne IMMEDIATE).
+- `idempotency_key`: re-použije C-05 pattern s rozšířením o stage (viz sekce 13).
+
+**PROPOSED dodatky k C-05 queue schema pro C-08:**
+- `sequence_stage` (string enum: `initial` / `follow_up_1` / `follow_up_2`) — na queue row. **PROPOSED FOR C-08.**
+- `parent_queue_id` (string, nullable) — předchozí queue row v sekvenci (follow_up_1.parent_queue_id = initial.outreach_queue_id; follow_up_2.parent_queue_id = follow_up_1.outreach_queue_id). Initial má `null`. **PROPOSED FOR C-08.**
+- `sequence_root_queue_id` (string) — root queue row sekvence (initial.outreach_queue_id). Sdílený napříč sekvencí pro rychlý lookup "všech rows této sekvence". **PROPOSED FOR C-08.**
+- `sequence_position` (integer 1-indexed: initial=1, follow_up_1=2, follow_up_2=3) — redundantní s `sequence_stage` ale užitečný pro ordering query. **PROPOSED FOR C-08.**
+
+**Důležité:** Tyto 4 PROPOSED fields jsou dodatky ke C-05 schema. Materializace (zápis do `_asw_outbound_queue` column layout + implementace) je **implementační task**. Do té doby C-05 queue drží `initial` + `follow_up_1` + `follow_up_2` jako 3 samostatné rows s vlastním `idempotency_key`, bez explicitního stage metadata (implementace je forward-compat, ale ztrácí stage auditability).
+
+### 4. Timing rules
+
+**Rozestupy:**
+
+| Stage | Časový offset | Od čeho se počítá | Důvod |
+|-------|---------------|-------------------|-------|
+| `initial` | T+0 (immediate nebo scheduled dle operator choice) | - | First touch. |
+| `follow_up_1` | **T+3 business days** od `initial.sent_at` | `initial.sent_at` (actual success timestamp z C-06 `NormalizedSendResponse.sent_at`, ne `scheduled_at`, ne `queued_at`) | 3 dny = typický response window pro B2B outreach. Kratší = spam impression; delší = zapomenou. |
+| `follow_up_2` | **T+7 business days** od `follow_up_1.sent_at` | `follow_up_1.sent_at` (actual success timestamp) | Celková sekvence ~10 business days. Second reminder před ukončením. |
+
+**Invariant — od čeho se počítá:**
+- Vždy od **actual `sent_at`** předchozí stage (C-06 `NormalizedSendResponse.sent_at`, propsaný do queue row `sent_at` při `SENT` transition per C-05).
+- **NE** od `scheduled_at` (plánovaný čas ≠ skutečný čas odeslání — mezi nimi může být retry / queue lag).
+- **NE** od `queued_at` (insert do queue ≠ odeslání).
+- **NE** od `created_at` (creation ≠ send).
+- Pokud předchozí stage je v jiném queue statusu než `SENT` (např. `QUEUED` čekající nebo `FAILED`), **follow-up se neplánuje** — engine čeká na `SENT` nebo finálně fail-terminuje sekvenci (viz sekce 6 stop conditions).
+
+**Business days vs calendar days:**
+- **Business days** (Po-Pá, bez státních svátků). Ignorují se víkendy (Sobota + Neděle).
+- Státní svátky: C-08 **v1.0 ignoruje** (drží jen Po-Pá filter). Holiday calendar je **PROPOSED FOR C-08 implementační task** (mimo SPEC scope — ops config).
+- Time-of-day: Follow-up nesmí být naplánovaný mimo **09:00–17:00 Europe/Prague** (quiet hours). Pokud `scheduled_at` vypočtený z T+N days by padl mimo, posune se na nejbližší 09:00 příštího business day.
+- Quiet hours / holiday posun je **deterministic** — stejný vstup dá stejný `scheduled_at`. Random jitter není.
+
+**Handoff na scheduler:**
+- C-08 definuje `scheduled_at` pomocí výše uvedených pravidel a zapíše ho do nového queue row.
+- Queue worker (C-05 contract) claimne row pouze pokud `now() >= scheduled_at`. Tj. **scheduling je rozhodnutí engine při queue insertu**, ne per-tick scheduler.
+- Pokud scheduler / cron zavolá engine (typicky daily batch), engine projde všechny aktivní sekvence, vyhodnotí, které mají být plánované na další stage, a vytvoří queue rows. Cron detail = implementační task.
+
+**Examples (all sent_at in business hours, Europe/Prague):**
+- initial.sent_at = `2026-04-21 10:00 Po` → follow_up_1.scheduled_at = `2026-04-24 10:00 Pá` (T+3 business days).
+- follow_up_1.sent_at = `2026-04-24 10:00 Pá` → follow_up_2.scheduled_at = `2026-05-05 10:00 Út` (T+7 business days; počítá přes víkend Sa-Ne a Po-Pá 27-30, skip víkend 1-3).
+- initial.sent_at = `2026-04-17 16:00 Pá` → follow_up_1.scheduled_at = `2026-04-22 09:00 St` (T+3 business days: So/Ne skip, Po-St = 3 business days; ale ~16:00 je v quiet-hours window [09-17], takže `scheduled_at` je 16:00 St; v tomto příkladu 09:00 je konzervativní — pro SPEC drzime "+3 business days preserving time-of-day pokud v quiet-hours, jinak posun na 09:00 nejbližšího business day").
+
+**PROPOSED runtime config (implementační task):**
+- `FOLLOWUP_OFFSET_1_BUSINESS_DAYS` = 3
+- `FOLLOWUP_OFFSET_2_BUSINESS_DAYS` = 7
+- `FOLLOWUP_QUIET_HOURS_START` = "09:00"
+- `FOLLOWUP_QUIET_HOURS_END` = "17:00"
+- `FOLLOWUP_TIMEZONE` = "Europe/Prague"
+
+Konkrétní hodnoty doladí operator; C-08 SPEC definuje pouze mechanismus + defaults.
+
+### 5. Max follow-up count
+
+**Autoritativní invariant:**
+
+- **Max follow-upy = 2** (follow_up_1 + follow_up_2).
+- **Initial se NEPOČÍTÁ** do max follow-up count (initial je first touch, ne follow-up).
+- **Celkem max 3 queue rows na sekvenci** (initial + follow_up_1 + follow_up_2).
+- Po `follow_up_2` (ať již SENT / FAILED / CANCELLED) engine **nikdy** nevytvoří `follow_up_3`.
+
+**Jak se zabrání překročení:**
+
+1. **Sequence counter check před insert:**
+   Engine před každým queue insertu ověří `count(queue rows where lead_id=X AND sequence_root_queue_id=initial.id AND sequence_stage IN ("follow_up_1", "follow_up_2")) < 2`. Pokud `>= 2` → skip, record log "MAX_FOLLOWUPS_REACHED".
+
+2. **Idempotency key stage-aware:**
+   `idempotency_key` = `followup:{lead_id}:{sequence_root_queue_id}:{sequence_stage}` (sekce 13). Duplicitní insert pro stejnou stage → queue-level reject (C-05 idempotency invariant).
+
+3. **Stage progression deterministic:**
+   Next stage po SENT `initial` → `follow_up_1`. Next stage po SENT `follow_up_1` → `follow_up_2`. Next stage po SENT `follow_up_2` → **SEQUENCE_COMPLETE** (terminal internal engine state, ne CS1, ne queue status).
+
+4. **Lookup na poslední SENT row v sekvenci:**
+   Engine čte z queue `max(sequence_position) where lead_id=X AND sequence_root_queue_id=Y AND send_status="SENT"`. Pokud `sequence_position >= 3` (= follow_up_2 odeslán) → sekvence terminální, skip.
+
+**Může engine vytvořit víc queue rows než max?**
+- **Ne** — invariant sekvence. Při race / retry / rollback guaranted by idempotency key + sequence_stage check.
+- **Ano v legitimním case**: když operator manuálně vytvoří **novou samostatnou sekvenci** pro stejný lead s jiným CTA / kampaní. To je **nová sequence** (nový `initial`, nový `sequence_root_queue_id`), ne další follow-up existující sekvence. Limit max=2 platí per-sekvence, ne per-lead.
+
+### 6. Stop conditions
+
+Follow-up engine **před každým insertem** nového queue rowu pro `follow_up_N` vyhodnotí stop conditions. Pokud jakákoliv triggeruje → sekvence ukončena (ne nový row).
+
+**Pět povinných stop condition kategorií:**
+
+| # | Stop condition | Co ji aktivuje (source-of-truth) | Scope | Zastaví jen automatiku nebo i ruční outreach? | Z jakého tasku pochází |
+|---|----------------|----------------------------------|-------|------------------------------------------------|------------------------|
+| 1 | **REPLY** | C-07 `reply_event` se `reply_class ∈ {POSITIVE, NEGATIVE, QUESTION}` → CS1 lead state = `REPLIED` (#15). | Thread / sekvence (Tier 1 per C-07). | Pouze automatiku. Manuální outreach operator může pokračovat přes thread reply (mimo engine). | C-07 Tier 1 + CS1 T20. |
+| 2 | **UNSUBSCRIBE** | C-07 `unsubscribe_event` → CS1 lead state = `UNSUBSCRIBED` (#17). LEADS `unsubscribed=true`. | **Celý lead** (Tier 3 per C-07). | I ruční outreach — compliance + legal. Operator musí respektovat unsubscribe. | C-07 Tier 3 + CS1 T22. |
+| 3 | **BOUNCE** | C-07 `bounce_event` (`bounce_class=HARD` nebo `SOFT` nad threshold N=3) → CS1 lead state = `BOUNCED` (#16). | **Per email adresa** (Tier 2 per C-07). Pokud má lead jen 1 adresu = celý lead. | Pouze automatiku na tu adresu. Pokud má lead jinou adresu (rare), manuál může zkusit. C-04 block B8 / PROPOSED `ADDRESS_BOUNCED`. | C-07 Tier 2 + CS1 T21. |
+| 4 | **MANUAL_BLOCK** | Operator nastaví LEADS flag `followup_manual_block=TRUE` (PROPOSED FOR C-08 field) nebo LEADS `suppressed=TRUE` (C-04 B8). | Celý lead (per-lead flag). | Pouze automatiku (manuál může pokračovat, pokud operator sám flag nastavil). | C-08 (nový flag) + C-04 B8 (existing). |
+| 5 | **REVIEW_FLAG** / UNKNOWN_INBOUND | C-07 `unknown_inbound` event → `reply_needs_manual=TRUE` review flag na LEADS. Automaticky se **následně** sekvence pauzuje, dokud operator flag neresolve. | Sekvence (pauze, ne terminal stop). | Pouze automatiku (operator může manuálně poslat follow-up po resolutionu flagu). | C-07 review signal + C-08 pause logic. |
+
+**Kompozitní stop invariants:**
+
+1. **Jakákoliv CS1 terminal (REPLIED, BOUNCED, UNSUBSCRIBED, DISQUALIFIED)** → sekvence stop. Deterministic lookup: `lifecycle_state IN terminal_states` (viz CS1 sekce 4).
+2. **C-04 gate re-check před insertem:** Engine před follow_up_N insert **re-volá** C-04 sendability gate na lead (jako by to byl nový send). Pokud gate vrátí `SEND_BLOCKED` → sekvence stop. Gate zohlední:
+   - B3 `TERMINAL_STATE_REPLIED`
+   - B4 `TERMINAL_STATE_BOUNCED`
+   - B5 `TERMINAL_STATE_UNSUBSCRIBED`
+   - B7 `UNSUBSCRIBED`
+   - B8 `SUPPRESSED`
+   - B16 `ALREADY_SENT` (explicit — initial byl odeslán; ale follow-up má jiný `idempotency_key`, takže B16 se pro follow-up _neaplikuje_ — engine předá C-04 context `is_followup=true` pro bypass B16).
+   - PROPOSED `ADDRESS_BOUNCED` (pro Tier 2 bounce stop).
+3. **C-07 inbound event store check:** Engine se dívá do `_asw_inbound_events` pro `lead_id` + `sequence_root_queue_id`. Pokud existuje event `event_type ∈ {REPLY, BOUNCE, UNSUBSCRIBE, UNKNOWN_INBOUND (s reply_needs_manual=TRUE), COMPLAINT}` → sekvence stop / pauze.
+4. **Manual block flag:** LEADS `followup_manual_block=TRUE` → sekvence stop immediately.
+5. **Review flag OOO hold:** `reply_event` s `reply_class=OOO` → **dočasná pauze** (ne stop). Engine odloží next stage o **PROPOSED 14 kalendářních dní** (operator může upravit). Po 14 dnech engine re-vyhodnotí; pokud lead stále `EMAIL_SENT` + žádný nový inbound event, follow-up pokračuje dle original schedule (posunutý). Toto je jediný case, kdy se sekvence **neukončuje**, jen odkládá.
+
+**Stop condition auditability:**
+
+Když engine skipne follow-up insert kvůli stop condition, **vždy zapíše** do `_asw_logs` run summary:
+- `event = "followup_skip"`
+- `lead_id`
+- `sequence_root_queue_id`
+- `intended_stage` (`follow_up_1` / `follow_up_2`)
+- `stop_reason` (explicit enum: `REPLY` / `UNSUBSCRIBE` / `BOUNCE_HARD` / `BOUNCE_SOFT_ESCALATED` / `MANUAL_BLOCK` / `REVIEW_FLAG_PENDING` / `OOO_PAUSE` / `C04_GATE_BLOCK:{reason}` / `MAX_FOLLOWUPS_REACHED` / `PARENT_NOT_SENT`)
+- `detected_from_event_id` (pokud stop byl triggered C-07 eventem)
+- `cs2_run_id`
+- Timestamp.
+
+**Invariant: lead s reply už nikdy nedostane follow-up** (zadání acceptance criteria #4):
+- Deterministic: `reply_event` (reply_class ≠ OOO) → CS1 `REPLIED` → engine skip check hits REPLY condition → no insert. Garantováno přes (a) CS1 state check, (b) C-04 gate re-check B3, (c) inbound event store check. Triple-redundant guard.
+
+### 7. Pregenerate vs regenerate rules
+
+Tvrdé oddělení **co se dědí immutable** / **co se re-generuje** / **co se jen template-řízeně mění**.
+
+| Pole | Initial | follow_up_1 | follow_up_2 | Pravidlo |
+|------|---------|-------------|-------------|----------|
+| `recipient_email` | Z LEADS. | **Inherited** z initial (přesně ten samý recipient). | **Inherited** z initial. | **Immutable sekvenčně.** Jiný recipient = jiná sekvence (= nový initial). |
+| `sender_identity` | Z operator config (který odesílatel). | **Inherited** z initial (aby thread reply chain držel identity). | **Inherited** z initial. | **Immutable sekvenčně.** Změna sender mid-sequence rozbije reply chain. |
+| `subject` | Generated (C-04 gate + copy task). | **Re-generated** s `Re:` prefix (Gmail standard) **nebo** nový subject pokud template říká "new thread subject". V1.0 default: **`"Re: " + initial.subject`** (Gmail klient to stejně zobrazí jako reply). | **Re-generated** s `Re:` prefix. | **Template-driven regenerate.** V1.0 = `"Re: " + initial.subject`. Copy variant v2.0 = budoucí task. |
+| `body` | Generated (C-04 + copy task). | **Re-generated** — follow-up má vlastní copy ("Dobrý den, jen připomínám…"). | **Re-generated** — poslední reminder copy. | **Template-driven regenerate.** Každá stage má vlastní copy template. Copy text samotný (markdown / HTML) = mimo C-08 scope (copy-generation task). |
+| `body.plain` / `body.html` | Generated. | **Re-generated** per stage template. | **Re-generated** per stage template. | **Regenerate.** V1.0 follow-upy mají **kratší body** než initial (reminder, ne pitch). |
+| `preview_url` | Generated (B-4 `POST /api/preview/render` → persistent URL). | **Inherited** z initial. Stejný preview = stejný obsah — lead vidí konzistentně. | **Inherited** z initial. | **Immutable sekvenčně.** Nový preview_url = nová sekvence / nová kampaň. |
+| `personalization_json` | Generated z LEADS snapshot (immutable per send). | **Inherited** z initial (snapshot v čase initial sendu). | **Inherited** z initial. | **Immutable sekvenčně.** Follow-up nepoužívá aktuální LEADS data — držíme původní personalization pro audit + konzistenci copy. |
+| `thread_hint` | `null`. | `{thread_id: initial.provider_thread_id, in_reply_to_message_id: initial.provider_message_id}`. | `{thread_id: initial.provider_thread_id, in_reply_to_message_id: follow_up_1.provider_message_id}`. | **Stage-specific derivation.** Gmail adapter použije `GmailApp.getThreadById(thread_id).reply(body)`. ESP adapter převede na `In-Reply-To` + `References` headers. |
+| `send_channel` | `"email"`. | **Inherited**. | **Inherited**. | **Immutable sekvenčně.** V1.0 pouze email. Multi-channel = budoucí task. |
+| `send_mode` | `IMMEDIATE` nebo `SCHEDULED` (dle operator). | **`SCHEDULED`** vždy (engine populuje `scheduled_at`). | **`SCHEDULED`** vždy. | **Stage-specific override.** Follow-upy nejsou nikdy IMMEDIATE. |
+| `scheduled_at` | Null nebo operator-set. | Engine computed per timing rules (sekce 4). | Engine computed per timing rules. | **Stage-specific derivation.** |
+| `priority` | Default 100 (z C-05). | **PROPOSED 90** (o trochu vyšší priorita než initial pro oldest-first processing). | **PROPOSED 80** (ještě vyšší — je to poslední šance). | **Stage-specific derivation.** Konkrétní hodnoty doladí implementační task. |
+| `idempotency_key` | `send:{lead_id}:{SHA256(recipient + subject + body)}` (C-05 pattern). | **`followup:{lead_id}:{sequence_root_queue_id}:{stage}`** (sekce 13). | Same pattern. | **Stage-specific pattern.** Liší se od initial — initial sdílí content hash, follow-up sdílí sequence+stage. |
+| `preview_url_version` | From B-4 render. | **Inherited**. | **Inherited**. | Immutable. |
+| Call-to-action (CTA) text | Generated v body. | **Re-generated** (follow-up CTA může být jiný — "potvrďte zájem / dáme vědět" místo "podíváte se na preview"). | **Re-generated** (last-chance CTA). | **Template-driven regenerate.** |
+
+**Klíčový invariant:**
+- **Preview_url + personalization + recipient + sender_identity = IMMUTABLE sekvenčně.** Lead vidí stejný preview a stejnou personalizaci napříč celou sekvencí — to je core value of sequence.
+- **Subject + body + CTA = REGENERATED per stage** — každý follow-up má vlastní reminder copy, ale všechno ostatní (identita, cíl, preview) se nemění.
+- **Thread_hint + scheduled_at + idempotency_key + sequence_stage + priority = STAGE-DERIVED** — engine computuje per stage pravidla.
+
+### 8. Automatic vs review decision
+
+C-08 má **3 decision outcomes** před vytvořením queue row pro `follow_up_N`:
+
+| Outcome | Kdy nastává | Akce |
+|---------|-------------|------|
+| **AUTO_INSERT** | (a) CS1 lead state = `EMAIL_SENT` (ne terminal); (b) C-04 gate re-check = `AUTO_SEND_ALLOWED` s `is_followup=true` context; (c) žádný blocking inbound event v `_asw_inbound_events`; (d) `reply_needs_manual != TRUE`; (e) `followup_manual_block != TRUE`; (f) parent row status = `SENT`; (g) max count not reached. | Engine vytvoří queue row s `send_mode=SCHEDULED` + computed `scheduled_at` + stage metadata. Worker ho claimne a C-06 odešle. |
+| **REVIEW_REQUIRED** | Alespoň jedna z: (a) `reply_needs_manual=TRUE` na LEADS; (b) C-04 gate re-check = `MANUAL_REVIEW_REQUIRED`; (c) PROPOSED `followup_review_required=TRUE` (explicit operator flag). | Engine **nevytvoří** queue row. Zapíše `_asw_logs` event `followup_review_required` s `lead_id` + `intended_stage` + `review_reason`. Sekvence pauzuje; operator musí resolve review flag. Po resolve engine re-vyhodnotí při další run. |
+| **STOP** | CS1 terminal / C-04 `SEND_BLOCKED` / manual block / bounce/unsubscribe event / max count reached / parent `FAILED`/`CANCELLED`. | Engine **nevytvoří** queue row. Sekvence terminuje. Zapíše `_asw_logs` event `followup_skip` s `stop_reason` (viz sekce 6). |
+
+**Role `reply_needs_manual`:**
+- `reply_needs_manual=TRUE` (C-07 review flag) → engine route to REVIEW_REQUIRED.
+- Operator musí manuálně vyřešit (např. v B6 UI nebo přímo v Google Sheets: interpretovat unknown_inbound, klasifikovat reply, rozhodnout continue / stop).
+- Po resolve (operator nastaví `reply_needs_manual=FALSE` + explicit operator action = `continue_followup` / `stop_followup`):
+  - `continue_followup` → engine odblokuje sekvenci, re-compute `scheduled_at` od **operator resolve timestamp** (ne od original parent `sent_at`, protože lead seděl v review delší čas).
+  - `stop_followup` → sekvence terminuje, `_asw_logs` event `followup_manual_stop`.
+- B6 UI **NENÍ blocker** pro C-08 SPEC. Operator může flag resolve přímo v Google Sheets buňce.
+
+**Role `unknown_inbound`:**
+- `unknown_inbound` event → engine route to REVIEW_REQUIRED (via `reply_needs_manual=TRUE`). Nikdy AUTO_INSERT.
+- Dokud review flag není resolve, engine sekvenci pauzuje. Dlouhodobá pauze (> 30 dní) → PROPOSED auto-terminate + `_asw_logs` event `followup_stale_review_abandoned`.
+
+**Další review guardy (PROPOSED FOR C-08):**
+- `followup_review_required` boolean na LEADS — explicit operator-set "tenhle lead send na review před každým follow-upem".
+- Custom reason: `lead_special_handling=TRUE` — engine nikdy auto-insert, vždy REVIEW_REQUIRED.
+- Z C-04 gate: `MANUAL_REVIEW_REQUIRED` outcome (existing) — engine respektuje.
+
+### 9. Follow-up stage vs lifecycle vs queue status — tvrdá separace 5 vrstev
+
+Absolutně nezbytné rozlišení pro audit + zamezení kolapsu identity:
+
+| Vrstva | Co to je | Kde žije | Hodnoty | Kdo mění |
+|--------|----------|----------|---------|----------|
+| **1. Follow-up stage** | Pozice v sekvenci: first touch nebo N-tý follow-up. | `_asw_outbound_queue.sequence_stage` (PROPOSED FOR C-08) | `initial` / `follow_up_1` / `follow_up_2` | C-08 engine při queue insertu. Immutable po insertu. |
+| **2. Lifecycle state** | Canonical CS1 state leadu. | `LEADS.lifecycle_state` (PROPOSED for CS1 implementation) | 18 states (CS1 sekce 4); pro outreach relevantní: `PREVIEW_READY`, `EMAIL_QUEUED`, `EMAIL_SENT`, `REPLIED`, `BOUNCED`, `UNSUBSCRIBED`, `DISQUALIFIED`. | C-05 queue worker (T17, T18), C-07 ingest (T20, T21, T22), manuální operator transitions per CS1 sekce 7. |
+| **3. Queue status** | Stav konkrétního queue rowu (nezávisle na stage / lifecycle / lead). | `_asw_outbound_queue.send_status` (C-05 sekce 3) | `QUEUED` / `SENDING` / `SENT` / `FAILED` / `CANCELLED` (5 values, ortogonální k CS1) | C-05 queue worker. |
+| **4. Inbound event** | Fakt, že něco přišlo do threadu po sendu. | `_asw_inbound_events.event_type` (C-07 sekce 3) | `REPLY` / `BOUNCE` / `UNSUBSCRIBE` / `UNKNOWN_INBOUND` / `COMPLAINT` | C-07 ingest. Append-only. |
+| **5. Review / manual signal** | Flag, že operator musí zasáhnout. | `LEADS.reply_needs_manual` (C-07) + PROPOSED `LEADS.followup_manual_block` + PROPOSED `LEADS.followup_review_required` | Boolean flagy | C-07 ingest (auto-set pro UNCLASSIFIED reply), manuální operator (set / clear). |
+
+**Zakázané kolapse (invariants):**
+- **Stage ≠ lifecycle.** Lead v `follow_up_1` sekvenci může mít lifecycle `EMAIL_SENT` (follow_up_1 ještě nebyl poslán, čeká na scheduled_at) nebo `REPLIED` (přišla odpověď, engine teď stop-skipne follow_up_1). Stage neříká nic o tom, co lead aktuálně dělá.
+- **Stage ≠ queue status.** follow_up_1 může být v queue statusu `QUEUED` (čeká), `SENDING` (právě odesíláme), `SENT` (hotovo), `FAILED`, `CANCELLED`. Stage je pozice; status je mechanika.
+- **Queue status ≠ lifecycle.** Queue row status `SENT` triggeruje CS1 transition T18 (`EMAIL_QUEUED → EMAIL_SENT`), ale následně se lifecycle vyvíjí samostatně (T20/T21/T22) přes C-07 events.
+- **Inbound event ≠ lifecycle.** Event je **fakt** ("něco přišlo"); lifecycle je **výsledný stav** po zpracování eventu. Jeden event může (ale nemusí) trigger CS1 transition.
+- **Review flag ≠ lifecycle.** `reply_needs_manual=TRUE` je pokyn pro operátora; lifecycle lead pořád odpovídá CS1 canonical stavu (typicky `REPLIED`).
+
+**C-08 engine konzumuje všech 5 vrstev:**
+- Čte: (2) lifecycle state, (3) queue status parent rowu, (4) inbound events za posledních N dní, (5) review flagy.
+- Zapisuje: (1) stage metadata na nový queue row, (3) queue status (přes C-05 insert pro nový row).
+- **NIKDY nezapisuje:** (2) lifecycle (to dělá C-05/C-07/operator), (4) inbound events (append-only, jen C-07), (5) review flagy (to dělá C-07 auto nebo operator manual).
+
+### 10. Scheduled row design — sample queue rows
+
+**Initial (reference):**
+
+```
+outreach_queue_id:                Q-2026-04-17-00001
+lead_id:                          L-00042
+sequence_stage:                   "initial"              [PROPOSED FOR C-08]
+parent_queue_id:                  null                   [PROPOSED FOR C-08]
+sequence_root_queue_id:           Q-2026-04-17-00001     [PROPOSED FOR C-08; = self for initial]
+sequence_position:                1                      [PROPOSED FOR C-08]
+recipient_email:                  lead@example.com
+email_subject:                    "Nabídka nového webu pro {{company_name}}"
+email_body:                       "Dobrý den, …" (full initial copy)
+preview_url:                      https://autosmartweb.cz/p/abc123
+personalization_json:             {"company_name": "Acme s.r.o.", "lead_name": "Jan Novák", …}
+send_mode:                        "IMMEDIATE"
+scheduled_at:                     null
+queued_at:                        2026-04-17T10:00:00+02:00
+send_status:                      "SENT"
+sent_at:                          2026-04-17T10:00:15+02:00
+provider_message_id:              gmail:abc456
+provider_thread_id:               gmail-thread:xyz789
+send_channel:                     "email"
+priority:                         100
+idempotency_key:                  "send:L-00042:SHA256(lead@example.com+Nabídka+Dobrý den…)"
+payload_version:                  "1.0"
+created_from_sendability_outcome: "AUTO_SEND_ALLOWED"
+```
+
+**follow_up_1 (created by C-08 engine after initial.sent_at + 3 business days):**
+
+```
+outreach_queue_id:                Q-2026-04-20-00123
+lead_id:                          L-00042
+sequence_stage:                   "follow_up_1"          [PROPOSED — stage-derived]
+parent_queue_id:                  Q-2026-04-17-00001     [= initial row id]
+sequence_root_queue_id:           Q-2026-04-17-00001     [= initial row id; sdíleno sekvenčně]
+sequence_position:                2
+recipient_email:                  lead@example.com       [INHERITED from initial]
+email_subject:                    "Re: Nabídka nového webu pro Acme s.r.o."  [REGENERATED: "Re: " + initial.subject rendered]
+email_body:                       "Dobrý den, jen pro připomenutí…" (follow_up_1 template copy)  [REGENERATED]
+preview_url:                      https://autosmartweb.cz/p/abc123  [INHERITED]
+personalization_json:             {…same snapshot as initial…}  [INHERITED]
+send_mode:                        "SCHEDULED"             [STAGE-OVERRIDE: follow-upy vždy scheduled]
+scheduled_at:                     2026-04-22T10:00:00+02:00  [ENGINE-COMPUTED: initial.sent_at + 3 business days]
+queued_at:                        2026-04-20T23:00:00+02:00  [batch engine run time]
+send_status:                      "QUEUED"
+sent_at:                          null
+provider_message_id:              null
+provider_thread_id:               null
+send_channel:                     "email"                 [INHERITED]
+priority:                         90                      [STAGE-OVERRIDE: PROPOSED 90 for follow_up_1]
+thread_hint:                      {thread_id: "gmail-thread:xyz789", in_reply_to_message_id: "gmail:abc456"}  [STAGE-DERIVED]
+idempotency_key:                  "followup:L-00042:Q-2026-04-17-00001:follow_up_1"  [STAGE PATTERN]
+payload_version:                  "1.0"
+created_from_sendability_outcome: "AUTO_SEND_ALLOWED"      [re-check passed]
+created_from_followup_engine_run: "FU-RUN-2026-04-20-001"  [PROPOSED audit field]
+```
+
+**follow_up_2 (created by C-08 engine after follow_up_1.sent_at + 7 business days):**
+
+```
+outreach_queue_id:                Q-2026-05-05-00456
+lead_id:                          L-00042
+sequence_stage:                   "follow_up_2"
+parent_queue_id:                  Q-2026-04-20-00123      [= follow_up_1 row id]
+sequence_root_queue_id:           Q-2026-04-17-00001      [= initial; same root]
+sequence_position:                3
+recipient_email:                  lead@example.com        [INHERITED]
+email_subject:                    "Re: Nabídka nového webu pro Acme s.r.o."  [REGENERATED from initial subject stem]
+email_body:                       "Dobrý den, posíláme pro jistotu ještě jednou…" [REGENERATED — follow_up_2 template]
+preview_url:                      https://autosmartweb.cz/p/abc123  [INHERITED]
+personalization_json:             {…same snapshot…}
+send_mode:                        "SCHEDULED"
+scheduled_at:                     2026-05-05T10:00:00+02:00  [follow_up_1.sent_at + 7 business days]
+queued_at:                        2026-05-03T23:00:00+02:00
+send_status:                      "QUEUED"
+priority:                         80                       [STAGE-OVERRIDE: PROPOSED 80 for follow_up_2]
+thread_hint:                      {thread_id: "gmail-thread:xyz789", in_reply_to_message_id: "gmail:def012"}  [follow_up_1.provider_message_id]
+idempotency_key:                  "followup:L-00042:Q-2026-04-17-00001:follow_up_2"
+payload_version:                  "1.0"
+created_from_followup_engine_run: "FU-RUN-2026-05-03-001"
+```
+
+**Klíčové observations:**
+- `sequence_root_queue_id` sdílený napříč sekvencí = fast lookup všech rows (`SELECT * FROM _asw_outbound_queue WHERE sequence_root_queue_id = 'Q-2026-04-17-00001'`).
+- `parent_queue_id` tvoří linked-list (initial → follow_up_1 → follow_up_2).
+- `thread_hint` se mění per stage, ale `provider_thread_id` v hintu je konstantní = stejný Gmail thread.
+- `recipient_email`, `preview_url`, `personalization_json` jsou **byte-identical** s initial (inherited snapshot).
+- `subject`, `body`, `priority` jsou stage-derived.
+- `idempotency_key` pattern je **jiný** pro follow-upy (nesdílí C-05 content hash; sdílí sekvence+stage) — to zajistí, že dva follow-up runs pro stejnou stage nevytvoří dva queue rows.
+
+### 11. 5 sample lead timelines
+
+**Scenario 1: initial → follow_up_1 → follow_up_2 bez reakce (happy / silent path)**
+
+| Čas | Událost | Lifecycle | Queue rows | Inbound events | Operator view |
+|-----|---------|-----------|------------|----------------|---------------|
+| `2026-04-17 10:00` | Initial odeslán | `EMAIL_SENT` | Q-001 (initial, SENT) | - | Lead v stage "initial sent". |
+| `2026-04-20 23:00` | Batch engine run → insert follow_up_1 | `EMAIL_SENT` | Q-001 (SENT), Q-002 (follow_up_1, QUEUED, scheduled_at 04-22 10:00) | - | Lead má follow_up_1 pending. |
+| `2026-04-22 10:00` | follow_up_1 odeslán | `EMAIL_SENT` (ne change) | Q-001 (SENT), Q-002 (follow_up_1, SENT) | - | - |
+| `2026-05-03 23:00` | Batch engine run → insert follow_up_2 | `EMAIL_SENT` | Q-001 (SENT), Q-002 (SENT), Q-003 (follow_up_2, QUEUED, scheduled_at 05-05 10:00) | - | - |
+| `2026-05-05 10:00` | follow_up_2 odeslán | `EMAIL_SENT` | Q-001 (SENT), Q-002 (SENT), Q-003 (SENT) | - | Sekvence kompletní, čeká na reply. |
+| `2026-05-12 23:00+` | Batch engine run → **SEQUENCE_COMPLETE**, no insert | `EMAIL_SENT` | Stejné | - | `_asw_logs` event `followup_skip` s `stop_reason=MAX_FOLLOWUPS_REACHED`. Lead v "cold / no-response" (budoucí task rozhodne o archivaci). |
+
+Audit trail: 3 queue rows v sekvenci, všechny SENT, `_asw_logs` zaznamenal 3 engine runs (insert + insert + skip).
+
+**Scenario 2: initial → reply → stop**
+
+| Čas | Událost | Lifecycle | Queue rows | Inbound events | Operator view |
+|-----|---------|-----------|------------|----------------|---------------|
+| `2026-04-17 10:00` | Initial odeslán | `EMAIL_SENT` | Q-001 (initial, SENT) | - | - |
+| `2026-04-18 14:30` | Lead odpoví "Díky, podíváme se!" | `REPLIED` (T20) | Q-001 (SENT) | `reply_event` (reply_class=POSITIVE, reply_needs_manual=FALSE) | Lead `email_reply_type=REPLY`, `reply_class=POSITIVE`. Operator vidí reply v LEADS / email threadu. |
+| `2026-04-20 23:00` | Batch engine run → stop check | `REPLIED` | Q-001 (SENT) (žádný nový) | Stejné | `_asw_logs` event `followup_skip` s `stop_reason=REPLY`, `detected_from_event_id=reply_event:...`. |
+
+Audit trail: 1 queue row, `_asw_inbound_events` 1 event (reply), `_asw_logs` 1 skip run. Sekvence ukončena deterministic po 1. CS1 lookup (REPLIED terminal), 2. C-04 re-check (B3 `TERMINAL_STATE_REPLIED`), 3. inbound event store check (reply_event present). Triple-redundant guard.
+
+**Scenario 3: initial → bounce → stop**
+
+| Čas | Událost | Lifecycle | Queue rows | Inbound events | Operator view |
+|-----|---------|-----------|------------|----------------|---------------|
+| `2026-04-17 10:00` | Initial odeslán | `EMAIL_SENT` | Q-001 (initial, SENT) | - | - |
+| `2026-04-17 10:02` | Mailer-daemon bounce (DSN 5.1.1 invalid recipient) | `BOUNCED` (T21) | Q-001 (SENT) | `bounce_event` (bounce_class=HARD, dsn_code=5.1.1) | Lead `email_sync_status=BOUNCED` (PROPOSED), `email_reply_type=BOUNCE`. |
+| `2026-04-20 23:00` | Batch engine run → stop check | `BOUNCED` | Q-001 (SENT) (žádný nový) | Stejné | `_asw_logs` event `followup_skip` s `stop_reason=BOUNCE_HARD`, `detected_from_event_id=bounce_event:...`. Lead flagged pro `ADDRESS_BOUNCED` (PROPOSED C-04 block). |
+
+Audit trail: 1 queue row, 1 bounce event. Sekvence ukončena. Navíc: adresa `lead@example.com` by se měla přidat do LEADS `bounced_addresses` flag (PROPOSED storage), aby budoucí sekvence na stejný email (např. když operator retry na jinou variantu adresy na témže leadu) byla zablokována C-04 B-PROPOSED `ADDRESS_BOUNCED`.
+
+**Scenario 4: initial → unsubscribe → stop**
+
+| Čas | Událost | Lifecycle | Queue rows | Inbound events | Operator view |
+|-----|---------|-----------|------------|----------------|---------------|
+| `2026-04-17 10:00` | Initial odeslán | `EMAIL_SENT` | Q-001 (initial, SENT) | - | - |
+| `2026-04-18 09:15` | Lead odpoví "unsubscribe" nebo klikne na List-Unsubscribe link | `UNSUBSCRIBED` (T22) | Q-001 (SENT) | `unsubscribe_event` (unsubscribe_source=LIST_UNSUBSCRIBE_HEADER nebo REPLY_BODY_INTENT) | Lead `unsubscribed=true`, `unsubscribed_at=2026-04-18T09:15+02:00`. |
+| `2026-04-20 23:00` | Batch engine run → stop check | `UNSUBSCRIBED` | Q-001 (SENT) (žádný nový) | Stejné | `_asw_logs` event `followup_skip` s `stop_reason=UNSUBSCRIBE`, `detected_from_event_id=unsubscribe_event:...`. Lead flagged globally (Tier 3) — budoucí ANY outreach blocked C-04 B7 `UNSUBSCRIBED`. |
+
+Audit trail: 1 queue row, 1 unsubscribe event. Sekvence ukončena + **Tier 3 global stop** (žádný další email / SMS / kanál nikdy). Compliance + legal preserved.
+
+**Scenario 5: initial → unknown reply / manual review → review gate → resolution**
+
+| Čas | Událost | Lifecycle | Queue rows | Inbound events | Operator view |
+|-----|---------|-----------|------------|----------------|---------------|
+| `2026-04-17 10:00` | Initial odeslán | `EMAIL_SENT` | Q-001 (initial, SENT) | - | - |
+| `2026-04-19 11:00` | Přišla reply, ale classifier confidence < threshold | `REPLIED` (T20 konzervativně) | Q-001 (SENT) | `reply_event` (reply_class=UNCLASSIFIED, reply_needs_manual=TRUE) | Lead `email_reply_type=REPLY`, `reply_needs_manual=TRUE`. Operator vidí review signal. |
+| `2026-04-20 23:00` | Batch engine run → decision = REVIEW_REQUIRED | `REPLIED` | Q-001 (SENT) (žádný nový) | Stejné | `_asw_logs` event `followup_review_required` s `lead_id`, `intended_stage=follow_up_1`, `review_reason=reply_needs_manual`. Engine **nevytvoří** follow_up_1 row. Sekvence pauzuje. |
+| `2026-04-21 14:00` | Operator resolve review: "to byl forward kolegovi, nic nedělej, stopni" | `REPLIED` | Q-001 (SENT) | Stejné + operator action note | Operator nastaví `reply_needs_manual=FALSE` + `followup_manual_block=TRUE`. |
+| `2026-04-22 23:00` | Batch engine run → stop check | `REPLIED` | Q-001 (SENT) | Stejné | `_asw_logs` event `followup_skip` s `stop_reason=MANUAL_BLOCK`, `resolved_by=operator@company.cz`. Sekvence terminálně ukončena. |
+
+**Alternativní resolution scenario 5b:** Operator by resolve "to byla legitimní otázka, pokračuj" → `reply_needs_manual=FALSE` + `continue_followup` action. Engine by re-vyhodnotil, ale v tomto případě lifecycle je `REPLIED` (CS1 terminal), takže stop_reason=REPLY stejně platí (triple-guard). Scenario 5b by tedy vyžadoval operator manuálně **vrátit** CS1 z `REPLIED` na `EMAIL_SENT` (což CS1 umožňuje jako reverse transition, ale je to manuál akce mimo C-08). V praxi: většina UNKNOWN_INBOUND resolutions bude buď MANUAL_BLOCK (stop) nebo lifecycle se fixed.
+
+Audit trail: 1 queue row, 1 reply event s review flag, `_asw_logs` 2 events (review_required + skip). Operator action logged separátně (`LEADS.last_operator_action` + timestamp — PROPOSED).
+
+### 12. Auditability / observability
+
+**Každý follow-up attempt (insert / skip / pause) musí být dohledatelný:**
+
+| Otázka operátora | Zdroj odpovědi |
+|------------------|----------------|
+| "Byl pro tento lead follow-up vytvořen?" | Query `_asw_outbound_queue WHERE lead_id=X AND sequence_stage IN ("follow_up_1", "follow_up_2")`. Pokud 0 rows + existuje initial SENT → engine skipl. |
+| "Proč nebyl follow-up vytvořen?" | `_asw_logs WHERE lead_id=X AND event="followup_skip"` → čte `stop_reason`. |
+| "Kdy engine lead naposledy vyhodnotil?" | `_asw_logs WHERE lead_id=X AND event IN ("followup_insert", "followup_skip", "followup_review_required") ORDER BY timestamp DESC LIMIT 1`. |
+| "Který inbound event zastavil sekvenci?" | `_asw_logs.detected_from_event_id` → join na `_asw_inbound_events.event_id`. |
+| "Jaká je plná sekvence pro tento lead?" | Query `_asw_outbound_queue WHERE sequence_root_queue_id=R ORDER BY sequence_position`. Vrátí initial + follow_up_1 + follow_up_2 (nebo subset). |
+| "Jaký byl computed scheduled_at a od čeho?" | `_asw_logs WHERE lead_id=X AND event="followup_insert"` → zapíše `computed_from_sent_at`, `offset_business_days`, `quiet_hours_adjustment`. |
+| "Je sekvence v review gate? Kdo to resolve?" | LEADS `reply_needs_manual`, `followup_manual_block`, `followup_review_required`. `_asw_logs` zaznamenává operator resolutions. |
+
+**`_asw_logs` events pro C-08 (PROPOSED enum extension):**
+
+| Event | Trigger | Key fields |
+|-------|---------|------------|
+| `followup_insert` | Engine created new queue row. | `lead_id`, `sequence_root_queue_id`, `new_queue_id`, `sequence_stage`, `scheduled_at`, `computed_from_sent_at`, `offset_business_days`. |
+| `followup_skip` | Engine decided STOP. | `lead_id`, `sequence_root_queue_id`, `intended_stage`, `stop_reason`, `detected_from_event_id` (nullable). |
+| `followup_review_required` | Engine decided REVIEW. | `lead_id`, `sequence_root_queue_id`, `intended_stage`, `review_reason`, `review_flag_source`. |
+| `followup_pause_ooo` | `reply_class=OOO` → sekvence odložena. | `lead_id`, `pause_until`, `ooo_event_id`. |
+| `followup_manual_stop` | Operator nastavil `followup_manual_block=TRUE`. | `lead_id`, `operator_id`, `reason_text` (volitelně). |
+| `followup_stale_review_abandoned` | Review pending > 30 dní → auto-terminate (PROPOSED). | `lead_id`, `pending_since`. |
+| `followup_engine_run_summary` | Konec batch engine run. | `run_id`, `leads_evaluated`, `inserts`, `skips`, `reviews`, `pauses`, `duration_ms`. |
+
+**Cross-ref graph:**
+
+```
+LEADS.lead_id ──┬──► _asw_outbound_queue.lead_id (3 rows initial+follow_up_1+follow_up_2)
+                │       └─► sequence_root_queue_id (= initial.outreach_queue_id, sdílený)
+                ├──► _asw_inbound_events.lead_id (0..N events)
+                │       └─► outreach_queue_id (→ konkrétní queue row, který event zastavil)
+                ├──► _asw_logs.lead_id (followup_insert / skip / review / pause events)
+                │       └─► detected_from_event_id (→ _asw_inbound_events)
+                └──► _asw_dead_letters (pokud engine run failed — CS3)
+```
+
+**Observability pro operator (bez B6 UI):**
+- Queue sheet (`_asw_outbound_queue`): filter by `sequence_root_queue_id` → vidí 1-3 rows sekvence.
+- LEADS sheet: sloupce `lifecycle_state` (PROPOSED CS1), `last_email_sent_at`, `reply_needs_manual`, `followup_manual_block`, `unsubscribed`, `email_reply_type`.
+- Logs sheet (`_asw_logs`): filter by `lead_id` nebo `event LIKE 'followup_%'`.
+- **B6 UI** (budoucí task) agreguje výše uvedené do per-lead view.
+
+### 13. Idempotency / duplicate prevention
+
+**C-08 idempotency pattern:**
+
+```
+idempotency_key = "followup:{lead_id}:{sequence_root_queue_id}:{sequence_stage}"
+```
+
+**Example:**
+- `followup:L-00042:Q-2026-04-17-00001:follow_up_1`
+- `followup:L-00042:Q-2026-04-17-00001:follow_up_2`
+
+**Invariants:**
+
+1. **Unique per stage × sekvence × lead.** Duplicitní insert se stejným klíčem je C-05 queue-level reject (existing C-05 idempotency invariant).
+2. **Engine je safe-to-run-twice.** Pokud batch engine zavolán N× za den, vytvoří queue row jen jednou per stage.
+3. **Race-safe.** Dva paralelní engine runs (unlikely, ale possible) skončí s jediným queue insertem díky C-05 idempotency.
+4. **Ne-rollback-safe.** Pokud queue row byl insertován → CANCELLED (před SENT), engine **nesmí** znovu vytvořit ten samý row se stejným klíčem. CANCELLED stage se počítá jako "pokus byl učiněn" (viz sekce 5 max count). Pro retry stage musí být **nová sekvence** (= nový `sequence_root_queue_id`).
+
+**Stop-detection idempotency:**
+
+- Engine čte `_asw_inbound_events` s deterministic filter (latest N events per lead). Pokud event existuje ≥ 1× → stop trigger. Jeden event může triggerovat jen jednou (engine si v `_asw_logs` zaznamená `detected_from_event_id` → zabrání re-triggeru při second run, ale stop_reason stále platí).
+
+**Navazování na C-05 / CS3 idempotency principy:**
+
+- C-05 idempotency key pattern pro initial: `send:{lead_id}:{SHA256(recipient + subject + body)}` — obsahový hash.
+- C-08 idempotency key pattern pro follow-upy: `followup:{lead_id}:{sequence_root_queue_id}:{sequence_stage}` — **sekvenční** (ne obsahový, protože follow-up body se mění per run pokud copy template evolve).
+- Proč ne obsahový hash pro follow-upy? Kdyby copy template follow_up_1 byl mírně updatován mezi dvěma engine runs (op ladí text), hash by byl různý → dva queue rows by se vytvořily. Sekvenční klíč to elegantně řeší.
+- CS3 alignment: engine ingest job respektuje CS3 `LockService.getScriptLock()` pattern (stejně jako C-07 ingest + C-05 worker).
+
+### 14. Manual block model
+
+**Co je manual block:**
+- Operator-initiated stop na follow-up automation pro konkrétní lead. Engine **nevytvoří** žádný další follow-up queue row.
+
+**Kde žije:**
+- `LEADS.followup_manual_block` — boolean flag (PROPOSED FOR C-08). Default `FALSE`.
+- Alternativně (fallback bez nového sloupce): operator může nastavit C-04 B8 `suppressed=TRUE`, což engine respektuje přes C-04 re-check. Explicit `followup_manual_block` je PROPOSED pro jemnější granularitu (stop jen follow-upy, ne first-touch sekvence pro nové kampaně).
+
+**Kdo ho nastavuje:**
+- Operator manuálně v Google Sheets (interim bez B6 UI).
+- B6 UI (budoucí): explicit "Zastavit follow-upy" tlačítko na lead detail page.
+- Engine auto-set v edge casech (PROPOSED): např. 3× consecutive SOFT bounce → engine preventivně nastaví `followup_manual_block=TRUE` + zapíše `_asw_logs` event `followup_auto_block_soft_bounce`.
+
+**Co přesně zastaví:**
+- Engine skipne všechny budoucí follow-up insertion attempts pro daný lead.
+- Nezastaví existing queue rows v `QUEUED` statusu — pokud manual block přijde mezi insert a worker claim, queue row se **stále pošle** (race). Aby byl preventivní, operator musí také C-05 `CANCELLED` existing queued row. Explicit-two-step je OK per C-05 invariant (queue nemá transaction safety across lead-level flags).
+- Nezastaví manuální outreach (operator může odpovědět v threadu ručně).
+
+**Reversibilita:**
+- Manual block je **reversible**. Operator může nastavit zpět `FALSE` a sekvence pokračuje od další stage eligibility (engine computed scheduled_at od **last SENT parent_queue_id.sent_at**).
+- Pokud lead byl v CS1 `REPLIED` / `BOUNCED` / `UNSUBSCRIBED` když block byl nastaven, po `FALSE` set engine stále skipne (triple-guard přes CS1 terminal / C-04 gate / inbound events).
+
+**Jak se projeví v follow-up engine:**
+- Engine read order: (1) `LEADS.followup_manual_block` → pokud `TRUE` → skip + log `stop_reason=MANUAL_BLOCK`. (2) Ostatní stop conditions.
+- Manual block má **highest priority** po CS1 terminal stop. Důvod: explicit operator intent > automated inference.
+
+**Differentiation od UNSUBSCRIBE:**
+
+| Dimenze | MANUAL_BLOCK | UNSUBSCRIBE |
+|---------|--------------|-------------|
+| Zdroj | Operator explicit action. | Lead action (reply body / List-Unsubscribe / ESP webhook). |
+| Scope | Follow-up automation only (operator může stále manuálně odpovídat). | Entire outreach, all channels (Tier 3 per C-07). Legal/compliance binding. |
+| CS1 state change | Žádný (lead zůstává v existing state). | `* → UNSUBSCRIBED` (T22). |
+| Reversible | Ano (operator může unset). | Operator může unset manuálně s explicit re-consent, ale default treat as binding. |
+| Storage | LEADS `followup_manual_block` (boolean). | LEADS `unsubscribed` (boolean) + `unsubscribed_at` (timestamp) + `unsubscribe_source`. |
+| Compliance | Internal policy. | Legal requirement (GDPR, CAN-SPAM). |
+
+### 15. Boundary rules / handoff na další tasky
+
+| Task | Jak C-08 konzumuje | Jak C-08 přispívá |
+|------|-------------------|-------------------|
+| **C-04 Sendability gate** | Engine re-voláá gate před každým follow_up insert s `is_followup=true` context (bypass B16 `ALREADY_SENT`). Gate vrací `AUTO_SEND_ALLOWED` / `MANUAL_REVIEW_REQUIRED` / `SEND_BLOCKED`. | PROPOSED gate extension: `is_followup` context parameter. PROPOSED block reason `ADDRESS_BOUNCED` (z C-07). |
+| **C-05 Outbound queue** | Engine vytváří nové queue rows přes C-05 insert contract (sekce 5 docs/24). PROPOSED C-05 schema extension: `sequence_stage`, `parent_queue_id`, `sequence_root_queue_id`, `sequence_position`, `created_from_followup_engine_run`. | Engine je C-05 producer (stejně jako C-04 pro initial). |
+| **C-06 Provider abstraction** | Engine populuje `SendRequest.thread_hint` (follow_up_1 / follow_up_2). | Žádná mutace C-06 interface. |
+| **C-07 Inbound event ingest** | Engine čte `_asw_inbound_events` pro stop detection. Konzumuje stop tiers (1/2/3). | Žádná mutace C-07 schema. |
+| **CS1 Lead lifecycle** | Engine čte `lifecycle_state` pro terminal check. | Žádný nový canonical state. |
+| **CS2 Orchestrator** | Engine je CS2 step — batch job spuštěný cron / trigger. | PROPOSED nový CS2 step: `followup_engine_run` (daily batch, evaluates all active sequences). |
+| **CS3 Reliability** | Ingest job lock pattern, failure_class, dead-letter. | PROPOSED failure_class mapping: `ENGINE_TIMEOUT`→TRANSIENT, `C04_GATE_FAIL`→PERMANENT (lead), `PARENT_NOT_SENT`→TRANSIENT (wait), `MAX_RETRIES_EXCEEDED`→PERMANENT. |
+| **Scheduler runtime task** (budoucí) | Engine je volán scheduler (daily cron nebo Apps Script trigger). Konkrétní trigger = implementační task. | Definuje engine interface + contract. |
+| **B6 Operator review UI** (budoucí) | Žádná konzumace ze strany SPEC. | PROPOSED operator actions: `resolve_review → continue_followup`, `resolve_review → stop_followup`, `set_manual_block`, `clear_manual_block`. |
+| **Future copy-generation task** | Engine volá copy-gen pro `subject` + `body` per stage. | Definuje contract: copy-gen dostává stage name + lead snapshot, vrací rendered subject+body. V1.0 inline template (no AI), v2.0 AI-enhanced. |
+| **C-09 Suppression list** (budoucí) | Engine respektuje suppression list přes C-04 B8. | Žádná přímá interakce. |
+| **Implementační task C-08 runtime** | Materializuje engine (Apps Script function `runFollowupEngine()`), adds PROPOSED queue fields, adds PROPOSED LEADS flags, adds stage-specific copy templates. | Tato SPEC je autoritativní vstup. |
+
+### 16. Non-goals (explicit reminders)
+
+- Neimplementuje scheduler / cron / trigger runtime (mimo scope).
+- Neimplementuje queue worker claim loop (to je C-05 implementační task).
+- Neimplementuje mailbox sync runtime (to je C-07 implementační task).
+- Neimplementuje ESP webhook HTTP handler (to je C-07 implementační task).
+- Neimplementuje frontend UI (B6).
+- Neimplementuje text-generation engine (budoucí copy task).
+- Nepřidává nové canonical CS1 states.
+- Nemodifikuje C-05 queue schema ani C-06 sender interface (PROPOSED dodatky pouze).
+- Nemodifikuje C-07 inbound event schema.
+- Nezapisuje PROPOSED enumy / flagy do `apps-script/Config.gs` (implementační task).
+- Neřeší multi-channel follow-up (SMS, phone, LinkedIn).
+- Neřeší A/B testing / experimenty.
+- Neřeší holiday calendar detail (ops config).
+- Neřeší timezone-per-lead personalizaci (v1.0 single timezone `Europe/Prague`).
+
+### 17. Acceptance checklist
+
+- [x] Sekvence má definovaný max počet (sekce 5: max 2 follow-upy, total 3 rows včetně initial).
+- [x] Časové rozestupy jsou explicitní (sekce 4: T+3 business days, T+7 business days).
+- [x] Stop conditions jsou kompletní (sekce 6: reply, unsubscribe, bounce, manual block, review flag + CS1 terminal check + C-04 gate re-check + inbound event store check).
+- [x] Lead s reply už nedostane follow-up (sekce 6 invariant "triple-redundant guard" přes CS1 REPLIED / C-04 B3 / inbound event).
+- [x] Je jasné, co se pregeneruje a co zůstává (sekce 7: immutable = recipient, sender_identity, preview_url, personalization, channel; regenerated = subject, body, CTA; stage-derived = thread_hint, scheduled_at, priority, idempotency_key).
+- [x] Je jasné, kdy jde follow-up automaticky vs na review (sekce 8: 3 outcomes AUTO_INSERT / REVIEW_REQUIRED / STOP s explicit podmínkami).
+- [x] 5 sample lead timelines pokrývá hlavní větve (sekce 11: silent / reply / bounce / unsubscribe / unknown-review).
+- [x] Sample scheduled rows jsou jednoznačné (sekce 10: initial + follow_up_1 + follow_up_2 s polím-level rozlišením immutable / regenerated / stage-derived).
+- [x] Celý průběh je auditovatelný (sekce 12: `_asw_logs` events + LEADS flags + queue metadata + cross-ref graph).
+- [x] Dokument jde přímo použít jako source-of-truth pro budoucí implementaci.
+- [x] 5 vrstev identity (stage / lifecycle / queue status / inbound event / review flag) je tvrdě oddělených (sekce 9).
+- [x] Idempotency pattern je definován (sekce 13: `followup:{lead_id}:{root}:{stage}`).
+- [x] Manual block model je definován (sekce 14).
+- [x] Handoff tabulka pokrývá C-04 / C-05 / C-06 / C-07 / CS1 / CS2 / CS3 / scheduler / B6 / copy-gen / C-09 / implementační task (sekce 15).
+- [x] SPEC-only — žádné runtime změny, žádné Config.gs zápisy.
+- [x] B6 není blocker (sekce 1 + 8 + 14 explicit).
+
+### 18. PROPOSED vs INFERRED vs VERIFIED label summary
+
+**VERIFIED IN REPO (reuse existing):**
+- `_asw_outbound_queue` schema (C-05 merged PR #28): `outreach_queue_id`, `lead_id`, `recipient_email`, `email_subject`, `email_body`, `preview_url`, `personalization_json`, `send_mode`, `scheduled_at`, `queued_at`, `send_status`, `sent_at`, `provider_message_id`, `provider_thread_id`, `send_channel`, `priority`, `idempotency_key`, `payload_version`, `created_from_sendability_outcome`.
+- `SendRequest.thread_hint` (C-06 merged PR #29): forward-compat pole pro follow-up reply-in-thread.
+- `_asw_inbound_events` (C-07 merged PR #30): event_id, lead_id, outreach_queue_id, provider_message_id, provider_thread_id, event_type, reply_class, bounce_class, unsubscribe_source, reply_needs_manual.
+- CS1 canonical states `EMAIL_SENT`, `REPLIED`, `BOUNCED`, `UNSUBSCRIBED` + T20/T21/T22 (docs/21).
+- C-04 block reasons B3 (`TERMINAL_STATE_REPLIED`), B4 (`TERMINAL_STATE_BOUNCED`), B5 (`TERMINAL_STATE_UNSUBSCRIBED`), B7 (`UNSUBSCRIBED`), B8 (`SUPPRESSED`), B16 (`ALREADY_SENT`).
+- CS2 `_asw_logs` run history contract.
+- CS3 `_asw_dead_letters` + `LockService` pattern.
+- PROPOSED C-07 extension `ADDRESS_BOUNCED` block reason.
+
+**INFERRED FROM EXISTING SYSTEM:**
+- T+3 / T+7 business days = typical B2B outreach cadence (industry standard for cold outreach sequences). Konfigurovatelné.
+- `Re: {initial.subject}` = Gmail-standard reply subject. Používá standard RFC 5322 convention.
+- Quiet hours `09:00–17:00 Europe/Prague` = standard business hours. Konfigurovatelné.
+- Holiday calendar = mimo v1.0 scope. Ops config.
+- Copy templates per stage = výstup budoucího copy-gen tasku.
+
+**PROPOSED FOR C-08 (new, implementation task will materialize):**
+- C-05 queue schema extension: `sequence_stage` (enum initial/follow_up_1/follow_up_2), `parent_queue_id` (string, nullable), `sequence_root_queue_id` (string), `sequence_position` (integer 1-indexed), `created_from_followup_engine_run` (string audit ref).
+- LEADS schema extension: `followup_manual_block` (boolean), `followup_review_required` (boolean, optional), `last_operator_action` (string + timestamp, for audit).
+- C-04 gate extension: `is_followup` context parameter (boolean) for bypass B16.
+- `_asw_logs` event types: `followup_insert`, `followup_skip`, `followup_review_required`, `followup_pause_ooo`, `followup_manual_stop`, `followup_stale_review_abandoned`, `followup_engine_run_summary`, `followup_auto_block_soft_bounce`.
+- Stop reason enum: `REPLY`, `UNSUBSCRIBE`, `BOUNCE_HARD`, `BOUNCE_SOFT_ESCALATED`, `MANUAL_BLOCK`, `REVIEW_FLAG_PENDING`, `OOO_PAUSE`, `C04_GATE_BLOCK:{reason}`, `MAX_FOLLOWUPS_REACHED`, `PARENT_NOT_SENT`.
+- Idempotency key pattern `followup:{lead_id}:{sequence_root_queue_id}:{sequence_stage}`.
+- Decision outcome enum: `AUTO_INSERT`, `REVIEW_REQUIRED`, `STOP`.
+- Engine batch run artifact: `FU-RUN-{YYYY-MM-DD}-{NNN}` identifier, summary row v `_asw_logs`.
+- Priority derivation per stage: 100 / 90 / 80 (PROPOSED defaults).
+- CS3 failure_class mapping for engine errors: `ENGINE_TIMEOUT`→TRANSIENT, `C04_GATE_FAIL`→PERMANENT (lead-level), `PARENT_NOT_SENT`→TRANSIENT, `MAX_RETRIES_EXCEEDED`→PERMANENT.
+- Auto-terminate thresholds: OOO pause = 14 calendar days (PROPOSED), review stale abandonment = 30 days (PROPOSED), soft-bounce consecutive block = 3 bounces (PROPOSED, aligned with C-07).
+- Holiday calendar config (Script Property or external source) — optional, mimo v1.0 SPEC.
+- Script Properties: `FOLLOWUP_OFFSET_1_BUSINESS_DAYS=3`, `FOLLOWUP_OFFSET_2_BUSINESS_DAYS=7`, `FOLLOWUP_QUIET_HOURS_START=09:00`, `FOLLOWUP_QUIET_HOURS_END=17:00`, `FOLLOWUP_TIMEZONE=Europe/Prague`, `FOLLOWUP_MAX_PER_SEQUENCE=2`, `FOLLOWUP_OOO_PAUSE_DAYS=14`, `FOLLOWUP_REVIEW_STALE_ABANDON_DAYS=30`.
+- Payload version `"1.0"` pro follow-up queue rows (same as C-05 initial contract, compatible).
