@@ -20,6 +20,7 @@
 | Template family mapping | Pure TS modul | crm-frontend/src/lib/domain/template-family.ts | Mapuje runtime `template_type` na 4 MVP family + render hints (B-03) |
 | Preview render endpoint | Next.js App Router (POST handler) | crm-frontend/src/app/api/preview/render/route.ts | B-04: prijima Apps Script webhook, validuje MinimalRenderRequest (B-01), volá `resolveTemplateFamily` (B-03), upsertne brief do `preview-store.ts` (in-memory), vraci `MinimalRenderResponseOk` s `preview_url = ${PUBLIC_BASE_URL}/preview/${slug}`. Auth: header `X-Preview-Webhook-Secret`, timing-safe. |
 | Preview runtime store | In-memory Map | crm-frontend/src/lib/preview/preview-store.ts | B-04: module-scope `Map<string, PreviewStoreRecord>`, reset pri restartu. GAS je source of truth, re-run obnovi stav. Externi persistence = B-06 scope. |
+| Preview webhook caller (GAS → B-04) | Apps Script | apps-script/PreviewPipeline.gs (`processPreviewQueue`, `runWebhookPilotTest`) | B-05: payload obsahuje `preview_slug`, headers obsahuji `X-Preview-Webhook-Secret` (ze Script Property `PREVIEW_WEBHOOK_SECRET` pres `getPreviewWebhookSecret_()`). Preview lifecycle: `BRIEF_READY → GENERATING → READY_FOR_REVIEW → APPROVED` nebo `FAILED` (retry eligible). Response parsing beze zmen (pre-existing write-back do LEADS). |
 | Deployment AS | clasp | apps-script/.clasp.json | TEST env default, PROD manualne |
 
 ## Integrace

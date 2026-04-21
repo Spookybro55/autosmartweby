@@ -968,7 +968,9 @@ function processPreviewQueue() {
 
       // Step 5: Webhook (only when NOT dry run AND webhook enabled)
       if (!DRY_RUN && ENABLE_WEBHOOK && WEBHOOK_URL) {
-        hr.set(row, 'preview_stage', PREVIEW_STAGES.QUEUED);
+        // B-05: single GENERATING state covers the whole in-flight window
+        // (replaces legacy QUEUED + SENT_TO_WEBHOOK pair).
+        hr.set(row, 'preview_stage', PREVIEW_STAGES.GENERATING);
 
         var payload = {
           spreadsheet_id: SPREADSHEET_ID,
@@ -978,6 +980,7 @@ function processPreviewQueue() {
           branch_key: hr.get(row, 'branch_key'),
           template_type: templateType,
           preview_brief: brief,
+          preview_slug: hr.get(row, 'preview_slug'), // B-05: required by B-04 endpoint
           contact: {
             name: brief.contact_name || '',
             phone: brief.contact_phone || '',
@@ -995,14 +998,16 @@ function processPreviewQueue() {
         hr.set(row, 'webhook_payload_json', JSON.stringify(payload));
 
         try {
-          hr.set(row, 'preview_stage', PREVIEW_STAGES.SENT_TO_WEBHOOK);
-
           var resp = UrlFetchApp.fetch(WEBHOOK_URL, {
             method: 'post',
             contentType: 'application/json',
             payload: JSON.stringify(payload),
             muteHttpExceptions: true,
-            headers: { 'User-Agent': 'Autosmartweby-CRM/1.0' }
+            headers: {
+              'User-Agent': 'Autosmartweby-CRM/1.0',
+              // B-05: shared-secret auth for B-04 endpoint (timing-safe compare on receiver).
+              'X-Preview-Webhook-Secret': getPreviewWebhookSecret_()
+            }
           });
 
           var httpCode = resp.getResponseCode();
@@ -1025,10 +1030,12 @@ function processPreviewQueue() {
             if (respObj.preview_quality_score !== undefined) {
               hr.set(row, 'preview_quality_score', respObj.preview_quality_score);
             }
+            // B-05: preview_needs_review remains informational (drives operator focus),
+            // but the stage unifies on READY_FOR_REVIEW regardless of the flag.
             var needsReview = respObj.preview_needs_review === true ||
               (respObj.preview_quality_score !== undefined && respObj.preview_quality_score < 0.7);
             hr.set(row, 'preview_needs_review', needsReview ? 'TRUE' : 'FALSE');
-            hr.set(row, 'preview_stage', needsReview ? PREVIEW_STAGES.REVIEW_NEEDED : PREVIEW_STAGES.READY);
+            hr.set(row, 'preview_stage', PREVIEW_STAGES.READY_FOR_REVIEW);
             hr.set(row, 'preview_error', '');
           }
 
@@ -1558,6 +1565,7 @@ function runWebhookPilotTest() {
         branch_key: hr.get(row, 'branch_key'),
         template_type: templateType,
         preview_brief: brief,
+        preview_slug: hr.get(row, 'preview_slug'), // B-05: required by B-04 endpoint
         contact: {
           name: brief.contact_name || '',
           phone: brief.contact_phone || '',
@@ -1575,17 +1583,19 @@ function runWebhookPilotTest() {
       };
 
       hr.set(row, 'webhook_payload_json', JSON.stringify(payload));
-      hr.set(row, 'preview_stage', PREVIEW_STAGES.QUEUED);
-
-      // --- Send webhook ---
-      hr.set(row, 'preview_stage', PREVIEW_STAGES.SENT_TO_WEBHOOK);
+      // B-05: single GENERATING state for the whole in-flight window.
+      hr.set(row, 'preview_stage', PREVIEW_STAGES.GENERATING);
 
       var resp = UrlFetchApp.fetch(WEBHOOK_URL, {
         method: 'post',
         contentType: 'application/json',
         payload: JSON.stringify(payload),
         muteHttpExceptions: true,
-        headers: { 'User-Agent': 'Autosmartweby-CRM/1.0-pilot' }
+        headers: {
+          'User-Agent': 'Autosmartweby-CRM/1.0-pilot',
+          // B-05: shared-secret auth for B-04 endpoint.
+          'X-Preview-Webhook-Secret': getPreviewWebhookSecret_()
+        }
       });
 
       var httpCode = resp.getResponseCode();
@@ -1612,15 +1622,16 @@ function runWebhookPilotTest() {
           hr.set(row, 'preview_quality_score', respObj.preview_quality_score);
         }
 
+        // B-05: preview_needs_review stays informational; stage unifies on READY_FOR_REVIEW.
         var needsReview = respObj.preview_needs_review === true ||
           (respObj.preview_quality_score !== undefined && respObj.preview_quality_score < 0.7);
         hr.set(row, 'preview_needs_review', needsReview ? 'TRUE' : 'FALSE');
-        hr.set(row, 'preview_stage', needsReview ? PREVIEW_STAGES.REVIEW_NEEDED : PREVIEW_STAGES.READY);
+        hr.set(row, 'preview_stage', PREVIEW_STAGES.READY_FOR_REVIEW);
         hr.set(row, 'preview_error', '');
 
         ok++;
-        results.push('OK řádek ' + rowNum + ': stage=' +
-          (needsReview ? 'REVIEW_NEEDED' : 'READY') +
+        results.push('OK řádek ' + rowNum + ': stage=READY_FOR_REVIEW' +
+          (needsReview ? ' (needs_review=true)' : '') +
           (respObj.preview_url ? ' url=' + respObj.preview_url : ''));
       }
 

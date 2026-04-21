@@ -83,8 +83,8 @@ Gate pravidlo: section se renderuje pouze pokud je v `suggested_sections`. Field
 |------|-------------------|
 | B-02 | PreviewBrief + template_type + preview_slug + SECTION_MAPPING_CONTRACT — **DONE**: MVP renderer v `/preview/[slug]`, 6 sekci, hardcoded sample brief |
 | B-03 | TemplateType (mapovani na render sablony) — **DONE**: `template-family.ts` mapuje na 4 MVP family (`emergency`, `community-expert`, `technical-authority`, `generic-local`) + render hints; drift fix `TemplateBase` (`plumber`/`construction` namisto `instalater`/`mason`) |
-| B-04 | MinimalRenderRequest + MinimalRenderResponse — **DONE**: `POST /api/preview/render` s header auth, runtime validator, in-memory preview store, upsert by `preview_slug`, `preview_url = ${PUBLIC_BASE_URL}/preview/${slug}`. Zive GAS propojeni ceka na B-05 (GAS payload zatim neobsahuje `preview_slug`). |
-| B-05 | Response schema + preview_slug gap fix v GAS + PreviewSlugContract |
+| B-04 | MinimalRenderRequest + MinimalRenderResponse — **DONE**: `POST /api/preview/render` s header auth, runtime validator, in-memory preview store, upsert by `preview_slug`, `preview_url = ${PUBLIC_BASE_URL}/preview/${slug}`. |
+| B-05 | Preview URL return + statusy — **DONE**: Apps Script caller doplnen (slug v payloadu, `X-Preview-Webhook-Secret` header). `preview_stage` enum rozsiren o operator-facing lifecycle `GENERATING → READY_FOR_REVIEW → APPROVED`, `FAILED` retry-eligible. Live run aktivovany operator-set Script Properties + `ENABLE_WEBHOOK=true`. |
 
 **Doporuceni:** Minimal Compatible first → Target po MVP.
 
