@@ -55,6 +55,7 @@ CI validuje aktuálnost generated files a existenci governance souboru. Nevalidu
 - Mock service pro lokalni vyvoj bez Sheets pripojeni
 - Preview renderer (B-02): route `/preview/[slug]`, renderuje MVP landing page z hardcoded sample briefu. 6 sekci (hero, services, contact, reviews, location, faq) rizenych polem `suggested_sections` z B-01 contractu. Verejne pristupny bez auth.
 - Template family mapping (B-03): `crm-frontend/src/lib/domain/template-family.ts` mapuje runtime `template_type` na 4 MVP family (`emergency`, `community-expert`, `technical-authority`, `generic-local`) + render hints. Renderer zatim zustava template-agnostic; family vrstva je pripravena pro nasledne family-specificke layouty.
+- Preview render endpoint (B-04): `POST /api/preview/render` (`crm-frontend/src/app/api/preview/render/route.ts`) prijima payload z Apps Scriptu, validuje proti B-01 MinimalRenderRequest, upsertne brief do in-memory preview store (`src/lib/preview/preview-store.ts`) a vrati `MinimalRenderResponseOk` s `preview_url = ${PUBLIC_BASE_URL}/preview/${preview_slug}`. Auth: header `X-Preview-Webhook-Secret` vs env `PREVIEW_WEBHOOK_SECRET` (timing-safe compare). Unknown template base fallback → `preview_needs_review=true`. B-02 route `/preview/[slug]` nyni prednostne cte runtime store a fallbackuje na hardcoded fixtures. Zive GAS propojeni zatim chybi — GAS payload jeste neobsahuje `preview_slug` (B-05 gap fix).
 - Bezi lokalne, neni nasazen na verejne URL
 
 ### Datove kontrakty a staging

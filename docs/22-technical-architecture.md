@@ -18,6 +18,8 @@
 | Auth | HMAC-SHA256 session + Google OAuth | crm-frontend/ | Timing-safe, dual-mode |
 | Preview renderer | Next.js App Router (server components) | crm-frontend/src/app/preview/ | MVP landing page z sample briefu, verejny bez auth |
 | Template family mapping | Pure TS modul | crm-frontend/src/lib/domain/template-family.ts | Mapuje runtime `template_type` na 4 MVP family + render hints (B-03) |
+| Preview render endpoint | Next.js App Router (POST handler) | crm-frontend/src/app/api/preview/render/route.ts | B-04: prijima Apps Script webhook, validuje MinimalRenderRequest (B-01), volá `resolveTemplateFamily` (B-03), upsertne brief do `preview-store.ts` (in-memory), vraci `MinimalRenderResponseOk` s `preview_url = ${PUBLIC_BASE_URL}/preview/${slug}`. Auth: header `X-Preview-Webhook-Secret`, timing-safe. |
+| Preview runtime store | In-memory Map | crm-frontend/src/lib/preview/preview-store.ts | B-04: module-scope `Map<string, PreviewStoreRecord>`, reset pri restartu. GAS je source of truth, re-run obnovi stav. Externi persistence = B-06 scope. |
 | Deployment AS | clasp | apps-script/.clasp.json | TEST env default, PROD manualne |
 
 ## Integrace

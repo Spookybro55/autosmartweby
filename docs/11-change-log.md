@@ -54,6 +54,14 @@ What this task does NOT deliver:
 - **Code:** apps-script/IngestReport.gs (new), apps-script/RawImportWriter.gs (modified), apps-script/Menu.gs (modified), scripts/test-a09-ingest-report.mjs (new), docs/30-task-records/A9.md (new), docs/20-current-state.md (modified), docs/23-data-model.md (modified), docs/24-automation-workflows.md (modified)
 - **Docs:** docs/20-current-state.md, docs/23-data-model.md, docs/24-automation-workflows.md
 
+### [B/B4] Preview render endpoint — POST /api/preview/render — DONE
+- **Scope:** Navazuje na B-01 (preview contract), B-02 (preview renderer) a B-03 (template family mapping). Zavadi Next.js API endpoint, ktery prijima webhook payload z Apps Scriptu, validuje ho proti B-01 `MinimalRenderRequest`, upsertne brief do in-memory preview store, zvoli render family pres B-03 resolvery a vrati B-01 `MinimalRenderResponseOk` s `preview_url = ${PUBLIC_BASE_URL}/preview/${preview_slug}`.
+
+B-04 NEMENI B-01 contract, NEMENI B-03 mapping, NEMENI Apps Script. Zive GAS propojeni vyzaduje B-05 (GAS payload zatim neobsahuje `preview_slug`).
+- **Owner:** Stream B
+- **Code:** crm-frontend/src/app/api/preview/render/route.ts (new), crm-frontend/src/lib/preview/preview-store.ts (new), crm-frontend/src/lib/preview/validate-render-request.ts (new), crm-frontend/src/lib/preview/quality-score.ts (new), crm-frontend/src/lib/mock/sample-brief-loader.ts (modified), crm-frontend/tsconfig.json (modified), scripts/tests/preview-render-endpoint.test.ts (new), package.json (modified)
+- **Docs:** docs/12-route-and-surface-map.md, docs/20-current-state.md, docs/22-technical-architecture.md, docs/26-offer-generation.md, docs/30-task-records/B4.md
+
 ## 2026-04-17
 
 ### [A/A10] Ingest runtime bridge — LEADS append + segment taxonomy fix — DONE
