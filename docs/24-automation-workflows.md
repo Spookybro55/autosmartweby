@@ -2587,3 +2587,665 @@ Queue řádek, který byl zrušen protože lead mezitím odpověděl sám (pre-e
 - Enumy: `QUEUE_SEND_STATUS` (`QUEUED`/`SENDING`/`SENT`/`FAILED`/`CANCELLED`), `QUEUE_SEND_MODE` (`IMMEDIATE`/`SCHEDULED`), `QUEUE_FAILURE_CLASS` (`TRANSIENT`/`PERMANENT`/`AMBIGUOUS` — reuses CS3).
 - Cancel reasons enum set: `RE_EVAL_SENDABILITY_BLOCKED`, `OPERATOR_CANCEL`, `LEAD_REPLIED_FIRST`, `LEAD_UNSUBSCRIBED`, `LEAD_BOUNCED`. Rozšiřitelný; implementační task formalizuje.
 - Payload contract (payload_version 1.0, sekce 6).
+
+---
+
+## Provider Abstraction — C-06
+
+> **Autoritativni specifikace.** Definuje sender interface a provider abstraction vrstvu mezi C-05 queue workerem a konkrétním email providerem (Gmail / SendGrid / Mailgun / …).
+> **Task ID:** C-06
+> **Scope:** SPEC-only. Neimplementuje runtime sender, žádný provider adapter, queue worker, mailbox sync, ani frontend.
+> **Zavislosti:** C-05 (queue payload v1.0 + queue row outcome), CS3 (failure classes + dead-letter), CS1 (EMAIL_SENT transition), CS2 (S12 + run history / `_asw_logs`).
+
+### 1. Účel vrstvy
+
+Provider abstraction vrstva sedí **mezi** C-05 queue workerem a **pod** ním, tedy nad konkrétním provider SDK / API:
+
+```
+        C-04 gate  ─── AUTO_SEND_ALLOWED ──┐
+                                           ▼
+                          ┌─────────────────────────────────┐
+                          │    C-05 outbound queue          │
+                          │    (_asw_outbound_queue row)    │
+                          └───────┬─────────────────────────┘
+                                  │
+                                  ▼  claim (SENDING)
+                          ┌─────────────────────────────────┐
+                          │    Queue worker (business)      │
+                          │    (future implementation)      │
+                          └───────┬─────────────────────────┘
+                                  │
+                                  ▼  sender.send(SendRequest)
+                          ┌─────────────────────────────────┐
+                          │    C-06 Sender Interface        │  ◄── provider-agnostic
+                          │    (EmailSender)                │
+                          └───────┬─────────────────────────┘
+                                  │
+           ┌──────────────────────┼──────────────────────┐
+           ▼                      ▼                      ▼
+   ┌──────────────┐       ┌──────────────┐       ┌──────────────┐
+   │ GmailAdapter │       │SendGridAdapt.│       │MailgunAdapt. │   ◄── provider-specific
+   │ (GmailApp)   │       │ (HTTP + API) │       │ (HTTP + API) │       (implementace mimo C-06)
+   └──────┬───────┘       └──────┬───────┘       └──────┬───────┘
+          │                      │                      │
+          └──────────────────────┼──────────────────────┘
+                                 ▼
+                        ┌─────────────────────────────────┐
+                        │  NormalizedSendResponse (v1.0)  │  ◄── sjednocený výstup
+                        └───────┬─────────────────────────┘
+                                │
+                                ▼
+                          queue worker zapíše:
+                          send_status ∈ { SENT, FAILED }
+                          provider_message_id, sent_at,
+                          failure_reason, failure_class,
+                          dead_letter_id (přes CS3)
+```
+
+**Proč vrstva existuje:**
+- Změna providera (např. Gmail → SendGrid při přechodu z per-lead manual na bulk API) nesmí vyžadovat přepis business logiky (queue worker, C-05 payload, C-04 gate, CS3 retry matice).
+- Provider-specific request formatting, response parsing, rate-limiting semantika a error mapping jsou **uvnitř** adapteru; ven jde pouze normalizovaný kontrakt.
+- Queue worker a CS3 retry matice pracují výhradně s `NormalizedSendResponse` + `failure_class`; nikdy nevidí HTTP status, Gmail exception type ani ESP body payload.
+- Jeden oprávněný provider per runtime je config-level decision (fallback / multi-provider routing je explicitně mimo C-06 — viz sekce 11).
+
+### 2. Boundary / non-goals
+
+**Co C-06 řeší:**
+- Definici provider-agnostického `EmailSender` interface (signatura, vstupy, výstup).
+- `NormalizedSendResponse` v1.0 — jednotný response kontrakt.
+- `NormalizedSendErrorClass` — společnou klasifikaci errorů (mapuje se na CS3 `failure_class`).
+- `NormalizedProviderStatus` — jednotnou enum nad provider-specific raw status.
+- Rate limiting jako **kontrakt** (adapter hlásí `RATE_LIMITED` + `rate_limit_reset_at`); **ne** scheduler / throttler.
+- 3 fail scénáře (timeout, rate limit, invalid recipient) s mapováním do normalized response + CS3 failure_class.
+- Provider mapping sample (Gmail + generic ESP) — ukázka překladu provider raw výstupu do normalized.
+- Sender selection pravidla (config-level, fallback je out-of-scope).
+- Cross-ref graph: C-05 queue row ↔ C-06 normalized response ↔ `_asw_logs` run history.
+
+**Co C-06 NEŘEŠÍ:**
+- Runtime implementaci sender / adapter v `apps-script/` (Gmail, SendGrid, Mailgun, SMTP call).
+- Queue worker loop / polling / trigger / cron (to je implementační task nad C-05 + C-06).
+- Mailbox sync (reply / bounce detekce) — downstream; C-06 končí v momentu provider-level response.
+- Follow-up cadence (C-07).
+- Rate limiting / quiet hours scheduling (C-08) — C-06 pouze definuje, jak se throttle hlásí v response. C-08 řeší, kdy se z queue bere.
+- Suppression list (C-09) — suppression je řešen v C-04 gate, ne v sender vrstvě.
+- Frontend provider config UI / adapter onboarding UI.
+- ESP webhook ingestu (inbound deliverability signals) — to je budoucí rozšíření mailbox sync, nikoli C-06.
+- Multi-provider fallback (primary + secondary + tiebreak). Out-of-scope — explicitně označeno.
+- Runtime změny `apps-script/Config.gs` / `EXTENSION_COLUMNS`. Všechny nové enumy a pole jsou PROPOSED FOR C-06.
+
+### 3. Sender interface spec
+
+**Název interface:** `EmailSender`
+**Metoda:** `send(request: SendRequest) → NormalizedSendResponse` (synchronní z pohledu queue workeru; adapter implementace může async-wrap provider SDK, ale **interface je synchronní** — vrací response teprve když má finální odpověď od providera nebo hit-timeout).
+
+**Vztah k C-05 payload kontraktu:** `SendRequest` je **derivát** C-05 payload v1.0 (sekce 6 C-05), nikoli jeho přímý předán. Queue worker `SendRequest` vytváří **zúženým mapováním** z C-05 payloadu + runtime correlation metadat. Důvod: C-05 payload je orientován na "co ukládat v queue"; `SendRequest` je orientován na "co provider potřebuje". Většina polí je identická (subject, body, recipient, preview_url, personalization), některá jsou zkratky (např. top-level `correlation_id = outreach_queue_id`).
+
+#### 3.1 SendRequest (input)
+
+| # | Field | Typ | Required | Nullable | Význam | Source | Snapshot / runtime |
+|---|-------|-----|----------|----------|-------|--------|---------------------|
+| 1 | `correlation_id` | string | ANO | NE | Queue row PK (`outreach_queue_id`). Adapter ho propne do provider correlation hlaviček (`X-Correlation-Id` nebo ekvivalent). | C-05 payload `outreach_queue_id` | immutable snapshot |
+| 2 | `idempotency_key` | string | ANO | NE | `send:{lead_id}:{SHA256(email + subject + body)}`. Adapter ho propne do provider-level idempotency hlaviček, pokud provider idempotency podporuje (SendGrid `X-Message-Id` / Mailgun `message-id`). Gmail adapter ignoruje — Gmail idempotency nemá. | C-05 payload `idempotency_key` | immutable snapshot |
+| 3 | `channel` | enum `"EMAIL"` | ANO | NE | V1.0 pouze email. Rezerva pro `SMS`/`LINKEDIN` — jiný adapter interface. | C-05 payload `channel` | immutable snapshot |
+| 4 | `recipient` | object `{ email: string, name?: string }` | ANO | NE | Příjemce. `name` je optional; pokud není, adapter použije samotný email. | C-05 payload `recipient.email` + (future) name | immutable snapshot |
+| 5 | `sender_identity` | object `{ email: string, name?: string, reply_to?: string }` | ANO | NE | Kdo odesílá. Dnes naplněn z `EnvConfig.gs` / Script Properties / provider config. | provider/runtime config | runtime-derived |
+| 6 | `subject` | string | ANO | NE | Email subject (plain text, UTF-8). | C-05 payload `subject` | immutable snapshot |
+| 7 | `body` | object `{ plain?: string, html?: string }` | ANO (alespoň jedno z polí) | NE | Adapter rozhoduje, které pole použít. V1.0 queue worker předává `plain` (reused `email_body` z C-05); HTML větev je rezerva pro budoucí rich template rendering. | C-05 payload `body` (plain) | immutable snapshot |
+| 8 | `preview_url` | string | NE | ANO | Optional. Adapter ho nepoužívá přímo — subject/body už mají URL embeded. Předáváno pro audit. | C-05 payload `preview_url` | immutable snapshot |
+| 9 | `personalization` | object (JSON) | NE | ANO | Placeholder snapshot. Adapter ho nepoužívá; je tu pouze pro audit trail (co provider v momentu sendu věděl). | C-05 payload `personalization` | immutable snapshot |
+| 10 | `headers` | object `{ [name: string]: string }` | NE | ANO | Volitelné custom HTTP/SMTP headers (`X-Correlation-Id`, `X-Idempotency-Key`, `Reply-To`, …). Queue worker je pre-populuje correlation daty; adapter může přidat provider-specific hlavičky. | queue worker + adapter | runtime-derived |
+| 11 | `attachments` | array | NE | ANO | V1.0 vždy prázdné/null. Rezerva. | — | — |
+| 12 | `thread_hint` | object `{ thread_id?: string, in_reply_to_message_id?: string }` | NE | ANO | Threading hint pro follow-up (C-07 forward-compat). V1.0 vždy null. Pokud předán, Gmail adapter ho použije přes `GmailApp.getThreadById` + `reply`; generic ESP ho mapuje na `In-Reply-To` + `References` headers. | C-07 future | runtime-derived |
+| 13 | `scheduling` | object `{ mode: "IMMEDIATE"\|"SCHEDULED", scheduled_at?: ISO8601, queued_at: ISO8601 }` | ANO | NE | Pro audit. Adapter nepoužívá k scheduling rozhodnutí (to dělá queue worker dle `scheduled_at` eligibility); pouze propaguje do correlation headers. | C-05 payload `scheduling` | immutable snapshot |
+| 14 | `timeout_ms` | integer | ANO | NE | Max doba, jak dlouho smí adapter čekat na provider odpověď. Default 30000. Queue worker nastavuje. | queue worker config | runtime-derived |
+| 15 | `sender_run_id` | string | ANO | NE | CS2 run history cross-ref (`run_id` queue workera). Adapter ho loguje do `_asw_logs` s každou adapter událostí. | CS2 runtime | runtime-derived |
+| 16 | `sender_event_id` | string | ANO | NE | CS2 event cross-ref (`event_id` queue claim eventu). | CS2 runtime | runtime-derived |
+| 17 | `payload_version` | string `"1.0"` | ANO | NE | Protokol verze. Adapter odmítne vyšší verzi, kterou nerozumí. | queue worker konstanta | immutable snapshot |
+
+**Počet polí:** 17. Z toho 13 immutable snapshot z C-05 payload, 4 runtime-derived (sender_identity, headers, sender_run_id, sender_event_id, timeout_ms).
+
+**Validace vstupu:**
+- Adapter **musí** odmítnout request, který má chybějící required pole; vrátí `NormalizedSendResponse` se `success=false`, `error_class=INVALID_REQUEST`, `retryable=false`.
+- Adapter **nesmí** mlčky doplňovat chybějící defaults (subject, body, recipient). Toto je business-layer chyba, ne provider chyba.
+
+#### 3.2 NormalizedSendResponse (output)
+
+| # | Field | Typ | Required | Nullable | Význam | Success | Fail |
+|---|-------|-----|----------|----------|-------|---------|------|
+| 1 | `success` | boolean | ANO | NE | Výsledek. `true` iff provider **potvrdil** přijetí do své sítě. | `true` | `false` |
+| 2 | `provider_message_id` | string | ANO pri success | ANO pri fail | Message ID vrácený providerem (Gmail `Message-Id` header, SendGrid `X-Message-Id`, Mailgun `id`). | MUSÍ být non-null | může být null (např. při timeout/rate-limit před odesláním) |
+| 3 | `provider_thread_id` | string | NE | ANO | Thread ID (Gmail `ThreadId`). Generic ESP obvykle nevrací — null. | null nebo string | null |
+| 4 | `sent_at` | ISO 8601 | ANO | NE | Čas, kdy provider potvrdil přijetí (pro fail = čas dokončení attemptu). | `now()` při acceptu | `now()` při failu |
+| 5 | `provider_status` | enum `NormalizedProviderStatus` | ANO | NE | Viz 3.3. Sjednocená enum nad provider raw status. | `ACCEPTED` nebo `QUEUED_BY_PROVIDER` | `REJECTED`, `THROTTLED`, `TIMEOUT`, `AUTH_FAILED`, `UNKNOWN` |
+| 6 | `error_code` | string | NE | ANO | Stabilní kód z adapteru (např. `GMAIL_AUTH_EXPIRED`, `ESP_429_RATE_LIMIT`). Pro success null. | null | MUSÍ být non-null |
+| 7 | `error_message` | string | NE | ANO | Human-readable zpráva pro operatora. Pro success null. | null | MUSÍ být non-null |
+| 8 | `error_class` | enum `NormalizedSendErrorClass` | NE | ANO | Viz 3.4. Mapuje na CS3 `failure_class`. Pro success null. | null | MUSÍ být non-null |
+| 9 | `retryable` | boolean | NE | ANO | Hint pro queue worker. `true` = CS3 by považoval retry za bezpečný; queue worker **přesto dodržuje CS3 max_attempts=1** (pozn. sekce 8). Pro success null. | null | `true` / `false` |
+| 10 | `rate_limit_reset_at` | ISO 8601 | NE | ANO | Pouze pro `error_class=RATE_LIMIT`. Kdy provider říká, že smíme zkusit znovu (např. Gmail quota reset, SendGrid `X-RateLimit-Reset`). Null jinak. | null | non-null **pouze** pro RATE_LIMIT |
+| 11 | `provider_name` | enum | ANO | NE | `GMAIL` / `SENDGRID` / `MAILGUN` / … Identifikuje, který adapter response vyprodukoval. Pro audit. | `GMAIL` | `GMAIL` |
+| 12 | `provider_http_status` | integer | NE | ANO | HTTP status code, pokud provider HTTP API (SendGrid, Mailgun). Null pro Gmail (nepoužívá HTTP z pohledu Apps Script). | 200 (ESP) / null (Gmail) | 429/500/… (ESP) / null (Gmail) |
+| 13 | `provider_raw_status` | string | NE | ANO | Surový status string od providera (např. Gmail "SENT", SendGrid "accepted"). Pro audit; queue worker ho nepoužívá k logice. | non-null | non-null |
+| 14 | `provider_response_excerpt` | string | NE | ANO | Trimmed excerpt z provider response body (max 500 chars). Pro audit debug. **Nesmí obsahovat PII** — viz 3.5. | non-null | non-null |
+| 15 | `correlation_id` | string | ANO | NE | Echo z `SendRequest.correlation_id` = `outreach_queue_id`. Cross-ref zpět do queue. | echo | echo |
+| 16 | `attempt_duration_ms` | integer | ANO | NE | Jak dlouho adapter request trval (wall-clock). Pro observability. | >= 0 | >= 0 |
+| 17 | `payload_version` | string `"1.0"` | ANO | NE | Response schema verze. | `"1.0"` | `"1.0"` |
+
+**Počet polí:** 17 (7 požadovaných minimem + 10 auditability/diagnostický rozšíření se zdůvodněním).
+
+**Zdůvodnění doplněných polí** (nad 7 minimem):
+
+| Pole | Proč |
+|------|------|
+| `error_class` | Bez něj queue worker nemá deterministický vstup do CS3 retry matice. `error_code`/`error_message` jsou diagnostické, ne classification. |
+| `retryable` | Hint pro queue worker / budoucí re-queue logiku. Odděluje "v principu retryable" od "CS3 maximum dosaženo". |
+| `rate_limit_reset_at` | Bez něj nelze scheduled re-queue (C-08 budoucí) udělat respectovaně vůči providerovi. |
+| `provider_name` | Audit — vědět, který adapter response vyprodukoval, když v budoucnu bude víc adapterů. |
+| `provider_http_status`, `provider_raw_status`, `provider_response_excerpt` | Nemají vliv na logiku (adapter už abstrahoval); jsou pro post-mortem debug a support ticket content. |
+| `correlation_id` | Echo — bez echa je velmi snadné zaměnit response s jiným request, zvlášť v batch processing. |
+| `attempt_duration_ms` | Observability. Provider latency monitoring bez něj nelze. |
+| `payload_version` | Forward compatibility. |
+
+#### 3.3 `NormalizedProviderStatus` enum (PROPOSED FOR C-06)
+
+| Hodnota | Význam | Success nebo Fail? |
+|---------|--------|-------------------|
+| `ACCEPTED` | Provider odpověděl synchronně úspěchem (Gmail sendEmail OK, SendGrid 202 accepted). | Success |
+| `QUEUED_BY_PROVIDER` | Provider přijal request do vlastní fronty; finální delivery status bude later (SendGrid async queue, Mailgun delayed). Z pohledu C-06 se počítá jako success — provider převzal odpovědnost. | Success |
+| `REJECTED` | Provider synchronně odmítl request (invalid recipient syntax, blocked domain). | Fail |
+| `THROTTLED` | Provider throttluje volajícího (429 / Gmail quota / SendGrid rate limit). | Fail |
+| `TIMEOUT` | Adapter nedostal odpověď v `timeout_ms`. Finální provider-side stav **není znám** (provider mohl email odeslat, ale odpověď se neprošla). | Fail |
+| `AUTH_FAILED` | Authentication/authorization problém (expired token, revoked API key, invalid OAuth scope). | Fail |
+| `UNKNOWN` | Adapter dostal response, který neumí klasifikovat (unexpected HTTP status / exception type). Fallback — vyžaduje manuální diagnózu. | Fail |
+
+**Invariant:** každý `NormalizedSendResponse.provider_status` musí spadat do této enum. `UNKNOWN` je explicitní eskape hatch a musí být v adapterech minimalizovaný (každý UNKNOWN je bug proti kompletnosti mappingu).
+
+#### 3.4 `NormalizedSendErrorClass` enum (PROPOSED FOR C-06)
+
+Mapuje na CS3 `failure_class` (TRANSIENT / PERMANENT / AMBIGUOUS), ale je **jemnější** — explicitní kategorie, které queue worker může mapovat 1:1 na CS3.
+
+| Error class | Popis | CS3 failure_class mapping | retryable hint |
+|-------------|-------|--------------------------|----------------|
+| `TIMEOUT` | Timeout během provider requestu. Provider-side stav neznámý. | `AMBIGUOUS` | `false` (CS3 AMBIGUOUS = HOLD + manual review per section 5.2) |
+| `RATE_LIMIT` | Provider throttling. Request nebyl zpracován. | `TRANSIENT` | `true` (ale CS3 max_attempts=1 stále platí) |
+| `INVALID_RECIPIENT` | Provider rejected kvůli syntax / domain / suppression. | `PERMANENT` | `false` |
+| `AUTH_FAILED` | Token / API key problém. Neovlivňuje email, ale operator intervence nutná. | `TRANSIENT` (operator musí reset) nebo `PERMANENT` (revoked). Default `TRANSIENT`; adapter může override. | `false` pro automatic; `true` po operator fix |
+| `PROVIDER_UNAVAILABLE` | 5xx / network error / DNS fail. Provider side issue. | `TRANSIENT` | `true` (ale CS3 max_attempts=1) |
+| `PROVIDER_REJECTED` | 4xx kromě rate-limit/auth (např. 400 bad request, 422 unprocessable). | `PERMANENT` | `false` |
+| `INVALID_REQUEST` | C-06 adapter odmítl request před provider voláním (missing required field). Business-layer bug. | `PERMANENT` | `false` |
+| `UNKNOWN` | Nezkategorizovaný error. | `AMBIGUOUS` | `false` |
+
+**Invariant:** adapter **nesmí** vrátit `success=false` bez `error_class`. `UNKNOWN` je povolen pouze jako poslední fallback.
+
+#### 3.5 PII safety invariant
+
+`provider_response_excerpt` a `error_message` **nesmí** obsahovat:
+- Plain text subject / body / recipient / personalization values.
+- API keys / tokeny.
+- Cookies / session identifiers.
+
+Adapter je odpovědný za sanitizaci. Pokud není jisté, adapter **musí** excerpt zkrátit na status + error code (např. `"HTTP 429: rate_limit_exceeded"`).
+
+### 4. Provider adapter model
+
+**Shared logic (queue worker / business layer):**
+- Pre-send validace proti C-05 queue row invariantům (status == SENDING, idempotency_key duplicate guard).
+- Construction `SendRequest` z C-05 payload + runtime correlation metadat.
+- `EmailSender.send()` call.
+- Response parsing — čte **pouze** `NormalizedSendResponse`. Nikdy HTTP status, provider exception type, provider body.
+- Queue row update (`send_status = SENT` nebo `FAILED`, `provider_message_id`, `sent_at`, `failure_reason`, `failure_class`, `dead_letter_id`).
+- CS3 dead-letter promote při fail.
+- `_asw_logs` zápis s payload `{ outreach_queue_id, provider_name, normalized_status, error_class, duration_ms }`.
+
+**Provider-specific logic (uvnitř adapteru):**
+- Konstrukce provider request (Gmail `GmailApp.sendEmail` / SendGrid `fetch` + Authorization header + JSON body / Mailgun form-encoded body).
+- Provider-specific retry **uvnitř jednoho attempt** (např. DNS retry, TLS handshake retry). **NE** business-level retry — ten je CS3.
+- Mapping provider response → `NormalizedSendResponse`.
+- Mapping provider error → `NormalizedSendErrorClass`.
+- Sanitizace error_message a provider_response_excerpt (PII-safe).
+- Timeout enforcement (adapter musí `SendRequest.timeout_ms` respektovat).
+
+**Jak zabránit, aby se business logika větvila podle providera:**
+
+| Pravidlo | Důsledek |
+|----------|----------|
+| Queue worker **smí** přistupovat pouze k `NormalizedSendResponse`, nikdy k raw provider objects | Invariant testovatelný přes type system / interface visibility. |
+| Adapter **nesmí** emitovat eventy do `_asw_logs` sám — to dělá queue worker s normalizovaným payloadem | Jednotný formát `_asw_logs` záznamu. |
+| Provider-specific pole (např. Gmail `threadId`) se do `NormalizedSendResponse` dostávají **pouze** jako `provider_thread_id` (obecné jméno), ne jako `gmail_thread_id` | Změna providera nevyžaduje změnu queue schema nebo `_asw_logs` payload schema. |
+| `NormalizedSendErrorClass` je uzavřená enum; queue worker mapuje na CS3 failure_class přes fixní lookup | Žádná `if provider == 'gmail'` větev v business logice. |
+
+**Config-level provider selection (sekce 10):** queue worker čte 1 Script Property `EMAIL_PROVIDER` (PROPOSED), jinak fallback na defaultní provider (viz sekce 10). Rozhodnutí o providerovi se děje **jednou** při startu queue workera, ne per-request.
+
+### 5. Sample provider mapping
+
+#### 5.1 Gmail (reference — existing `GmailApp` usage v `apps-script/OutboundEmail.gs`)
+
+**Success response:**
+
+```
+GmailApp.sendEmail(recipient, subject, bodyPlain, options)
+  → nevrací nic (void), ale zápis do mailboxu proběhl
+  → GmailApp.search() ihned po send vrátí novou thread s ThreadId a lastMessageId
+```
+
+Gmail adapter musí po `sendEmail()` zavolat `GmailApp.search()` pro retrieval `messageId` + `threadId`. Timing: Gmail typicky indexuje do < 2s.
+
+Mapping:
+
+| NormalizedSendResponse field | Gmail source |
+|------------------------------|--------------|
+| `success` | `true` pokud `sendEmail()` neházel; `false` jinak |
+| `provider_message_id` | `GmailMessage.getId()` z nejnovější message v sent threadu |
+| `provider_thread_id` | `GmailThread.getId()` |
+| `sent_at` | `GmailMessage.getDate()` (ISO) nebo `now()` fallback |
+| `provider_status` | `ACCEPTED` (Gmail nemá async queued stav — sendEmail je synchronní) |
+| `provider_raw_status` | `"SENT"` (Gmail canonical) |
+| `provider_http_status` | `null` (Gmail Apps Script API není HTTP z tohoto pohledu) |
+| `provider_response_excerpt` | `"GmailApp.sendEmail OK, threadId=${threadId}"` |
+| `provider_name` | `"GMAIL"` |
+
+**Fail response (Gmail exception):**
+
+```
+try {
+  GmailApp.sendEmail(...)
+} catch (e) {
+  // e.message může být:
+  //   "Service invoked too many times for one day: email"  → quota
+  //   "Authorization is required to perform that action."   → auth
+  //   "Invalid argument"                                    → invalid recipient
+}
+```
+
+Mapping tabulka viz sekce 6 (fail scénáře). Každá Gmail exception message se mapuje na konkrétní `error_class` přes regex/substring match uvnitř adapteru.
+
+#### 5.2 Generic ESP (reference — budoucí SendGrid/Mailgun adapter)
+
+**Success response (SendGrid 202 Accepted):**
+
+```
+POST https://api.sendgrid.com/v3/mail/send
+Authorization: Bearer ${API_KEY}
+Content-Type: application/json
+X-Message-Id: ${SendRequest.idempotency_key}   ← C-06 adapter zapíše
+
+Response:
+202 Accepted
+X-Message-Id: abc123xyz
+(empty body)
+```
+
+Mapping:
+
+| NormalizedSendResponse field | Generic ESP source |
+|------------------------------|-------------------|
+| `success` | `true` pokud status ∈ {200, 201, 202} |
+| `provider_message_id` | `X-Message-Id` response header |
+| `provider_thread_id` | `null` (většina ESP nemá thread concept — threading až přes mailbox sync / `In-Reply-To` header) |
+| `sent_at` | `now()` při receive response |
+| `provider_status` | `ACCEPTED` (202) nebo `QUEUED_BY_PROVIDER` (pokud ESP rozlišuje — např. Mailgun) |
+| `provider_raw_status` | `"accepted"` nebo `"queued"` z provider response (pokud je v body) |
+| `provider_http_status` | 202 |
+| `provider_response_excerpt` | `"HTTP 202, X-Message-Id=abc123xyz"` |
+| `provider_name` | `"SENDGRID"` nebo `"MAILGUN"` |
+
+**Fail response (SendGrid 429):**
+
+```
+POST https://api.sendgrid.com/v3/mail/send
+...
+
+Response:
+429 Too Many Requests
+X-RateLimit-Reset: 1714041600
+Content-Type: application/json
+{"errors":[{"message":"rate limit exceeded"}]}
+```
+
+Mapping:
+
+| NormalizedSendResponse field | Hodnota |
+|------------------------------|---------|
+| `success` | `false` |
+| `provider_message_id` | `null` |
+| `provider_status` | `THROTTLED` |
+| `error_code` | `"ESP_429_RATE_LIMIT"` |
+| `error_message` | `"Provider throttled; retry after reset"` (sanitized) |
+| `error_class` | `RATE_LIMIT` |
+| `retryable` | `true` |
+| `rate_limit_reset_at` | `2026-04-25T12:00:00Z` (converted from `X-RateLimit-Reset` unix timestamp) |
+| `provider_http_status` | 429 |
+| `provider_raw_status` | `"rate_limit_exceeded"` (from body) |
+
+**Odlišnosti Gmail vs generic ESP:**
+
+| Aspekt | Gmail | Generic ESP |
+|--------|-------|-------------|
+| Transport | Apps Script `GmailApp` (native) | HTTP REST API |
+| `provider_http_status` | vždy null | 200/202/429/500 |
+| `provider_thread_id` | přítomné (Gmail thread je native) | null (threading není native ESP koncept) |
+| Idempotency | Provider nepodporuje (C-06 `idempotency_key` → ignored adapterem) | Provider podporuje přes `X-Message-Id` / custom header |
+| Rate limit signal | Exception `"Service invoked too many times"` | HTTP 429 + `X-RateLimit-Reset` header |
+| Auth failure signal | Exception `"Authorization is required"` | HTTP 401/403 |
+| Invalid recipient | Exception `"Invalid argument"` nebo accepted then bounce asynchronně | HTTP 400/422 synchronně, nebo accepted + async webhook bounce |
+
+**Adapter je povinný oba typy sjednotit** do `NormalizedSendResponse` beze stopy po tom, který provider je uvnitř.
+
+### 6. Rate limiting pravidla per provider
+
+C-06 rate limiting je **kontrakt**, ne scheduler.
+
+| Vrstva | Co řeší | Kdo to dělá |
+|--------|---------|-------------|
+| Provider-level rate limit | Provider sám vynucuje quota (Gmail 500/day free, 2000/day Workspace; SendGrid podle plánu; Mailgun podle plánu). | Provider. |
+| C-06 adapter | Detekuje provider throttle signal a převede do `error_class=RATE_LIMIT` + `rate_limit_reset_at`. **Nečeká, neretryuje.** Okamžitě vrací response. | Adapter. |
+| C-05 queue worker | Při fail s `error_class=RATE_LIMIT` → CS3 TRANSIENT → dead-letter (max_attempts=1). | Queue worker. |
+| C-08 (budoucí) | Preventivní scheduling: před claimem queue row kontroluje daily/hourly quota counter, pokud přeshnuto, posouvá `scheduled_at`. | C-08. |
+| Operator | Po dead-letter: manuální re-queue po resetu providera (`rate_limit_reset_at`). | Operator. |
+
+**Proč nesmí rozbít batch:**
+- Queue worker zpracovává queue row per-row (ne per-batch atomic). Rate limit u jednoho řádku je failure jen tohoto řádku; zbytek batch pokračuje.
+- CS3 S12 max_attempts=1 → dead-letter okamžitý → žádný retry loop, který by blokoval batch progress.
+- Queue worker nesmí na odpověď `THROTTLED` čekat (sleep/backoff). Pokud je to potřeba, C-08 to řeší přes `scheduled_at`.
+
+**Gmail rate limiting specifics:**
+- Gmail Apps Script má daily email quota (500 / 2000 podle plánu). Quota reset je o půlnoci Pacific Time.
+- Gmail adapter **nevidí** přesnou quotu zbývající. Jediný signál je exception. Proto `rate_limit_reset_at` pro Gmail je adapterem **odhadnutý** na next midnight PT (konzervativně). Operator má právo overridnout.
+
+**Generic ESP rate limiting specifics:**
+- ESP obvykle vrací `X-RateLimit-Remaining` + `X-RateLimit-Reset` headery i při úspěchu. C-06 tyto **nezachytává** v success response (v1.0); rezerva pro budoucí `provider_rate_limit_state` field.
+
+### 7. Fail scénáře (povinné 3)
+
+#### 7.1 Timeout
+
+**Co provider typicky vrací:**
+- Gmail: Apps Script exception po 30s+ bez návratu z `GmailApp.sendEmail()`.
+- Generic ESP: socket timeout / connection timeout na HTTP request; nebo HTTP 504 Gateway Timeout (pokud zasáhne proxy).
+
+**Mapping do `NormalizedSendResponse`:**
+
+| Field | Hodnota |
+|-------|---------|
+| `success` | `false` |
+| `provider_message_id` | `null` |
+| `sent_at` | `now()` při vzniku timeoutu |
+| `provider_status` | `TIMEOUT` |
+| `error_code` | `"GMAIL_TIMEOUT"` / `"ESP_TIMEOUT"` |
+| `error_message` | `"Provider request exceeded timeout_ms"` |
+| `error_class` | `TIMEOUT` |
+| `retryable` | `false` (AMBIGUOUS = HOLD) |
+| `rate_limit_reset_at` | null |
+| `attempt_duration_ms` | >= `SendRequest.timeout_ms` |
+
+**CS3 handoff:** `TIMEOUT` → `AMBIGUOUS` → CS3 section 5.2 S12 pravidlo: `max_attempts=1`, **HOLD + manual review** (ne auto-retry). Queue row `send_status=FAILED`, `failure_class=AMBIGUOUS`, promoted do `_asw_dead_letters` s hint pro operatora: "Unknown provider-side state — manually verify before re-drive."
+
+**Proč nevyžaduje změnu business logiky:** timeout je vždy stejně mapovaný bez ohledu na providera. Queue worker vidí `error_class=TIMEOUT`, mapuje na CS3 AMBIGUOUS bez větvení podle `provider_name`.
+
+#### 7.2 Rate limit
+
+**Co provider typicky vrací:**
+- Gmail: exception `"Service invoked too many times for one day: email"`.
+- Generic ESP: HTTP 429 + `X-RateLimit-Reset` response header.
+
+**Mapping:**
+
+| Field | Hodnota |
+|-------|---------|
+| `success` | `false` |
+| `provider_message_id` | `null` |
+| `sent_at` | `now()` |
+| `provider_status` | `THROTTLED` |
+| `error_code` | `"GMAIL_QUOTA_EXCEEDED"` / `"ESP_429_RATE_LIMIT"` |
+| `error_message` | `"Provider throttled; see rate_limit_reset_at"` |
+| `error_class` | `RATE_LIMIT` |
+| `retryable` | `true` (v principu; CS3 stále max_attempts=1) |
+| `rate_limit_reset_at` | Gmail: adapterem odhadnuté midnight PT. ESP: parsed z `X-RateLimit-Reset`. |
+
+**CS3 handoff:** `RATE_LIMIT` → `TRANSIENT` → CS3 section 5.2 S12: `max_attempts=1`, **dead-letter**, manual only. C-08 (budoucí) může pre-emptive posunout `scheduled_at` dle `rate_limit_reset_at` a nový queue row vytvořit, ale to je mimo C-06.
+
+**Proč nevyžaduje změnu business logiky:** jednotný `error_class=RATE_LIMIT` + `rate_limit_reset_at` stačí queue workerovi. Gmail vs ESP rozdíly jsou uvnitř adapteru.
+
+#### 7.3 Invalid recipient
+
+**Co provider typicky vrací:**
+- Gmail: exception `"Invalid argument: to"` **synchronně**, nebo accept + async bounce (bounce pak řeší mailbox sync, mimo C-06).
+- Generic ESP: HTTP 400 / 422 s body `{"errors":[{"field":"to","message":"invalid email"}]}`.
+
+**Mapping (synchronní rejection):**
+
+| Field | Hodnota |
+|-------|---------|
+| `success` | `false` |
+| `provider_message_id` | `null` |
+| `sent_at` | `now()` |
+| `provider_status` | `REJECTED` |
+| `error_code` | `"GMAIL_INVALID_RECIPIENT"` / `"ESP_INVALID_RECIPIENT"` |
+| `error_message` | `"Recipient email rejected by provider"` (sanitized — nesmí obsahovat raw recipient pro PII) |
+| `error_class` | `INVALID_RECIPIENT` |
+| `retryable` | `false` |
+| `rate_limit_reset_at` | null |
+
+**CS3 handoff:** `INVALID_RECIPIENT` → `PERMANENT` → CS3 section 5.2 S12: `max_attempts=1`, **dead-letter okamžitě**. Lead potenciálně kandidát na `email_valid=FALSE` write-back (mimo C-06; budoucí mailbox sync / C-04 gate tuning).
+
+**Proč nevyžaduje změnu business logiky:** C-04 gate má H1–H4 validaci emailu, ale provider může mít přísnější pravidla (blocked TLDs, suppression list, provider reputation). `INVALID_RECIPIENT` je permanent; queue worker dead-letter bez debate.
+
+**Async bounce pozn.:** Pokud provider synchronně přijme (202) ale poté pošle asynchronní bounce, C-06 response je `success=true` se `provider_status=ACCEPTED`. Bounce zachytí mailbox sync downstream (mimo C-06). CS1 transition na `BOUNCED` je triggered mailbox sync eventem E15, ne C-06.
+
+### 8. Provider status normalization (oddělení vrstev)
+
+**Čtyři dimenze — nesmí se plést:**
+
+| Vrstva | Příklady hodnot | Kde žije | Kdo zapisuje |
+|--------|----------------|----------|--------------|
+| **A. Provider raw status** | Gmail: `"SENT"`, `"QUEUED"`. SendGrid: `"accepted"`, `"rejected"`. Mailgun: `"queued"`, `"failed"`. | Uvnitř adapteru; do normalized response jde pouze jako `provider_raw_status` (pro audit). | Provider. |
+| **B. C-06 `NormalizedProviderStatus`** | `ACCEPTED`, `QUEUED_BY_PROVIDER`, `REJECTED`, `THROTTLED`, `TIMEOUT`, `AUTH_FAILED`, `UNKNOWN` (7 hodnot). | `NormalizedSendResponse.provider_status` — provider-agnostic. | C-06 adapter. |
+| **C. C-05 `QUEUE_SEND_STATUS`** | `QUEUED`, `SENDING`, `SENT`, `FAILED`, `CANCELLED` (5 hodnot). | `_asw_outbound_queue.send_status`. | Queue worker (na základě `NormalizedSendResponse.success`). |
+| **D. CS1 lifecycle state** | `EMAIL_QUEUED`, `EMAIL_SENT`, `REPLIED`, `BOUNCED`, `UNSUBSCRIBED` (subset CS1 18 stavů). | `lead.lifecycle_state` (future; aktuálně derivovatelné z CS1 sekce 10.4). | Queue worker (T17/T18 při queue insert / SENT), mailbox sync (T19/T20 bounce/reply). |
+
+**Mapping pravidlo (deterministické):**
+
+```
+NormalizedSendResponse.success
+  == true  → provider_status ∈ { ACCEPTED, QUEUED_BY_PROVIDER }
+              → queue.send_status = SENT
+              → lead.lifecycle_state = EMAIL_SENT (T18)
+
+  == false → provider_status ∈ { REJECTED, THROTTLED, TIMEOUT, AUTH_FAILED, UNKNOWN }
+              → queue.send_status = FAILED
+              → queue.failure_class = map(error_class) per CS3 lookup
+              → queue.dead_letter_id set per CS3 S12
+              → lead.lifecycle_state stays at EMAIL_QUEUED
+                (C-06 NETRIGGERUJE CS1 transition na FAILED — to je operator / menu akce T25)
+```
+
+**Invariant:** žádná jiná kombinace není povolena. `success=true` se `provider_status=TIMEOUT` je bug (adapter musí buď vědět, že email prošel → ACCEPTED, nebo ne → TIMEOUT/false).
+
+**Proč mailbox-downstream (reply, bounce, OOO) není C-06:**
+- C-06 končí v momentu provider response. Accept ≠ delivered ≠ read ≠ replied.
+- Reply / bounce / OOO detekce je mailbox sync (`apps-script/SyncMailbox.gs` dnes; budoucí webhook ingest) — downstream CS1 transition T19/T20.
+
+### 9. Auditability / observability
+
+**Propojení `NormalizedSendResponse` s queue row:**
+- `NormalizedSendResponse.correlation_id` == `queue.outreach_queue_id`. Při success: queue.provider_message_id = response.provider_message_id, queue.sent_at = response.sent_at, queue.send_status = SENT.
+- Při fail: queue.failure_reason = response.error_message, queue.failure_class = lookup(response.error_class), queue.send_status = FAILED, queue.dead_letter_id = DL row promoted by CS3.
+
+**Propojení s `_asw_logs`:**
+Queue worker po přijetí response zapíše do `_asw_logs` jeden řádek per response:
+
+```
+level:       INFO (success) | ERROR (fail)
+function:    "QueueWorker.send"
+lead_id:     row.lead_id
+run_id:      SendRequest.sender_run_id  (echoed)
+event_id:    SendRequest.sender_event_id (echoed)
+payload: {
+  outreach_queue_id:    response.correlation_id,
+  provider_name:        response.provider_name,
+  provider_status:      response.provider_status,
+  provider_message_id:  response.provider_message_id,
+  provider_http_status: response.provider_http_status,
+  error_class:          response.error_class (null at success),
+  error_code:           response.error_code (null at success),
+  attempt_duration_ms:  response.attempt_duration_ms,
+  payload_version:      response.payload_version
+}
+```
+
+**Propagate `provider_message_id` + `thread_id`:**
+- `queue.provider_message_id` = primary cross-ref k provider.
+- `queue.provider_thread_id` (PROPOSED C-06 field v queue, navazuje na C-05 schema) = cross-ref k Gmail thread. Generic ESP: null.
+- Mailbox sync downstream matchuje inbound replies přes `provider_thread_id` (Gmail) nebo přes `In-Reply-To` / `References` header chain (ESP).
+
+**Zachování provider-specific error bez rozbití normalized kontraktu:**
+- `provider_response_excerpt` (max 500 chars, PII-safe) drží raw error string pro operator post-mortem.
+- `provider_http_status` + `provider_raw_status` drží provider-specific hodnoty.
+- Normalized `error_class` + `error_code` drží provider-agnostic classification pro queue worker / CS3.
+
+**Dohledatelnost po success:**
+- `queue.provider_message_id` → provider sent folder (Gmail Sent / ESP activity log)
+- `queue.provider_thread_id` → Gmail thread (pokud Gmail adapter)
+- `_asw_logs` řádek s `event_id` → run history kontext
+- `queue.run_id_last` / `queue.event_id_last` → CS2 run correlation
+
+**Dohledatelnost po fail:**
+- `queue.failure_reason` + `queue.failure_class` → CS3 dead-letter
+- `queue.dead_letter_id` → `_asw_dead_letters` row → operator workflow
+- `_asw_logs` řádek (level=ERROR) s plným normalized payloadem → post-mortem
+- `response.provider_response_excerpt` + `response.provider_http_status` → provider support ticket content
+
+### 10. Sender selection rules
+
+**Config-level decision (zapisováno jednou, vyhodnocováno při startu queue workera):**
+
+| Mechanismus | Hodnota | Kde |
+|-------------|---------|-----|
+| Script Property `EMAIL_PROVIDER` | `"GMAIL"` (default) / `"SENDGRID"` / `"MAILGUN"` | PROPOSED FOR C-06 — nepřidává se v tomto tasku |
+| Fallback pokud property není set | `"GMAIL"` (matches current state — `OutboundEmail.gs` používá `GmailApp`) | Adapter factory |
+| Per-request override | **ZAKÁZÁNO** v1.0 | Business logika se nesmí větvit podle providera |
+
+**Runtime decision:** žádné. Provider je fixní per runtime — queue worker ho čte jednou, adapter instance cachuje.
+
+**Jak zajistit, že změna providera nevyžaduje změnu business logiky:**
+1. Queue worker importuje pouze `EmailSender` interface (type), ne konkrétní adapter.
+2. `getEmailSender()` factory čte `EMAIL_PROVIDER` property a vrací `EmailSender`-compatible instance.
+3. Adapter instance je jediný entry point; queue worker nevolá `GmailApp` ani `fetch()` přímo.
+4. Změna providera = změna 1 Script Property hodnoty + nasazení příslušného adapteru. Queue worker kód beze změny.
+
+**Multi-provider fallback (out of scope):**
+Pokud primary provider fail RATE_LIMIT → secondary provider retry. **Není C-06 v1.0.** Důvody:
+- Zvýšená složitost sender selection, conflicting provider configs, consistency problém (`provider_message_id` mezi dvěma providery nelze korelovat).
+- CS3 S12 max_attempts=1 pravidlo odpor. Multi-provider fallback by vyžadoval nové CS3 pravidlo.
+- Business priorita zatím nežádá (1 primary provider = Gmail, přechod na ESP je migrace, ne A/B).
+
+Budoucí C-06 v2 může zavést. Proto `NormalizedSendResponse.provider_name` existuje (audit, který provider response vyprodukoval) — forward-compat.
+
+### 11. Sample pseudocode flow
+
+```
+// Queue worker loop (illustrative; neimplementuje C-06; scope je jen rozhraní)
+function processOutboundQueueBatch() {
+  sender      = getEmailSender()         // config-level: GmailAdapter | SendGridAdapter | …
+  rows        = claimReadyQueueRows(max=25)  // atomic: QUEUED→SENDING per row
+
+  foreach row in rows:
+    request = buildSendRequest(row)      // C-05 payload → SendRequest
+    try:
+      response = sender.send(request)    // EmailSender.send — provider-agnostic
+    catch unexpected_exception e:        // adapter má vrátit normalized, ne házet
+      response = normalizedUnknownFailure(request, e)
+
+    if response.success:
+      row.send_status         = "SENT"
+      row.sent_at             = response.sent_at
+      row.provider_message_id = response.provider_message_id
+      row.provider_thread_id  = response.provider_thread_id
+      row.updated_at          = now()
+      persistLifecycleTransition(row.lead_id, "EMAIL_SENT")  // T18
+      logToAswLogs(INFO,  "QueueWorker.send", row, response)
+    else:
+      row.send_status    = "FAILED"
+      row.failure_reason = response.error_message
+      row.failure_class  = mapToFailureClass(response.error_class)  // CS3 TRANSIENT/PERMANENT/AMBIGUOUS
+      row.updated_at     = now()
+      row.dead_letter_id = promoteToDeadLetter(row, response)       // CS3 S12 — immediate
+      logToAswLogs(ERROR, "QueueWorker.send", row, response)
+      // NEPROVÁDĚT CS1 transition na FAILED — to je operator menu akce T25
+
+    persistQueueRow(row)
+}
+```
+
+**Klíčové:**
+- `sender.send(request)` je jediný volání provideru; adapter vše schová.
+- `mapToFailureClass()` je fixní lookup table, ne větev podle `provider_name`.
+- `persistLifecycleTransition()` se volá **pouze při success** — C-06 netriggeruje CS1 FAILED; to je operator workflow.
+- Exception handler (`catch`) je safety net; správně napsaný adapter nikdy nevyhazuje, vždy vrací normalized.
+
+### 12. Boundary rules / handoff
+
+| Task / vrstva | Vztah k C-06 | Stav |
+|---------------|--------------|------|
+| **C-05 Outbound queue** | C-06 konzumuje queue payload (přes `SendRequest` derivát). C-06 emituje výstup, který queue worker mapuje na `send_status` + failure fields. | Handoff připravený; C-05 merged. |
+| **CS1 Lifecycle (EMAIL_SENT)** | C-06 success → queue worker T18 (`EMAIL_QUEUED → EMAIL_SENT`). C-06 fail → CS1 zůstává `EMAIL_QUEUED` (C-06 netriggeruje FAILED CS1 state). | Compatible; žádná nová CS1 state. |
+| **CS3 Reliability (failure_class, retry, dead-letter)** | `NormalizedSendErrorClass` je jemnější než CS3 `failure_class`; queue worker mapuje 1:N na fixním lookup table. CS3 S12 max_attempts=1 je respektovaný — C-06 nikdy neretryuje. | Compatible; reuses CS3. |
+| **CS2 Orchestrator (S12 + `_asw_logs`)** | C-06 neemituje `_asw_logs` sám; queue worker to dělá s normalized payloadem. `sender_run_id` + `sender_event_id` jsou echoed zpět v response pro audit. | Compatible; reuses CS2. |
+| **C-04 Sendability Gate** | C-04 žije před queue; C-06 žije za queue. Žádná přímá interakce — oddělené C-05 queue vrstvou. | Compatible. |
+| **C-07 Follow-up cadence** | Follow-up je další queue row s `thread_hint` (v C-06 `SendRequest` schema) nastaveným na předchozí `provider_thread_id`. Gmail adapter ho propne do reply-in-thread. ESP adapter do `In-Reply-To` headeru. | Forward-compat; C-06 připravený. |
+| **C-08 Rate limiting / quiet hours** | C-06 hlásí `rate_limit_reset_at`; C-08 ho použije pro scheduled re-queue. C-06 sám nerozhoduje o timingu. | Forward-compat; C-08 specifikace mimo C-06. |
+| **C-09 Suppression list** | Suppression je v C-04 gate (reason B7/B8). C-06 nevidí suppressed leady (nedoputují do queue). Nicméně provider-level suppression (bounce history) může vrátit `INVALID_RECIPIENT` — to je separate. | Compatible; disjoint. |
+| **Mailbox sync (reply/bounce)** | C-06 končí u provider response. Reply/bounce je downstream. Cross-ref přes `provider_message_id` / `provider_thread_id`. | Downstream; mimo C-06. |
+| **Budoucí implementační task — adaptery** | Materializuje `GmailAdapter` (reusuje existing `OutboundEmail.gs` + `GmailApp`), volitelně `SendGridAdapter` / `MailgunAdapter`. Implementuje `EmailSender` interface podle C-06 sekce 3. Zavede `getEmailSender()` factory + `EMAIL_PROVIDER` Script Property. | C-06 handoff ready. |
+| **Budoucí provider onboarding task** | Pro přidání nového providera: vytvořit adapter (≤1 soubor), implementovat 7-hodnotový `provider_status` mapping, implementovat 8-třídový `error_class` mapping, zajistit PII safety. Queue worker kód beze změny. | C-06 handoff ready. |
+
+### 13. Non-goals (explicitní)
+
+- Neimplementuje `GmailAdapter`, `SendGridAdapter`, `MailgunAdapter` v `apps-script/`.
+- Neimplementuje `getEmailSender()` factory / `EMAIL_PROVIDER` Script Property.
+- Neimplementuje queue worker loop.
+- Neimplementuje mailbox sync.
+- Neimplementuje frontend provider config UI.
+- Neimplementuje multi-provider fallback / primary+secondary routing.
+- Neimplementuje provider webhook ingest (bounce, complaint, open, click).
+- Neimplementuje attachment support (v1.0 `SendRequest.attachments` je rezerva, vždy prázdné).
+- Neimplementuje HTML body rendering (v1.0 `SendRequest.body.html` je rezerva; queue worker předává `plain`).
+- Neimplementuje thread reply (v1.0 `SendRequest.thread_hint` je rezerva pro C-07).
+- Neprovádí runtime Config.gs changes — všechny nové enumy (`NormalizedProviderStatus`, `NormalizedSendErrorClass`) + Script Property (`EMAIL_PROVIDER`) jsou PROPOSED FOR C-06.
+- Nezavádí nové canonical lifecycle states (CS1 18 stavů beze změny).
+- Nezavádí nové queue statusy (C-05 5 statusů beze změny).
+
+### 14. Acceptance checklist
+
+- [x] Sender interface je provider-agnostický (sekce 3.1 `SendRequest`, žádná pole specifická pro konkrétního providera).
+- [x] Response kontrakt pokrývá success i fail (sekce 3.2 `NormalizedSendResponse` — required tabulka rozlišuje success vs fail).
+- [x] Provider-specific detaily oddělené od business logiky (sekce 4 pravidla, sekce 11 pseudocode — queue worker nevidí provider SDK).
+- [x] Rate limiting popsaný jako kontrakt + failure class; nerozbije batch (sekce 6 vrstvy).
+- [x] 3 fail scénáře mají jasné mapování (sekce 7: TIMEOUT, RATE_LIMIT, INVALID_RECIPIENT — každý s tabulkou NormalizedSendResponse fields + CS3 handoff + zdůvodnění proč nevyžaduje změnu business logiky).
+- [x] Gmail vs generic ESP mapping jednoznačný (sekce 5.1 Gmail + 5.2 generic ESP + tabulka odlišností).
+- [x] Provider status normalization: 4-vrstvová separace (A raw, B `NormalizedProviderStatus`, C `QUEUE_SEND_STATUS`, D CS1) s deterministickým mapping pravidlem (sekce 8).
+- [x] Auditability + cross-ref do `_asw_logs` a queue (sekce 9).
+- [x] Sender selection je config-level, not runtime (sekce 10); multi-provider fallback explicitně out-of-scope.
+- [x] Pseudocode flow propojuje vše (sekce 11).
+- [x] Všechny nové enumy / pole / Script Property označené jako PROPOSED FOR C-06 / INFERRED / VERIFIED (sekce 15).
+
+### 15. PROPOSED vs INFERRED vs VERIFIED label summary
+
+**VERIFIED IN REPO (reuse existing):**
+- `GmailApp.sendEmail()`, `GmailApp.search()`, `GmailThread.getId()`, `GmailMessage.getId()` — existují v `apps-script/OutboundEmail.gs` (řádky 233, 281, 296) a `apps-script/SyncMailbox.gs`.
+- `_asw_logs` sheet + `aswLog_()` helper — existuje (`apps-script/Helpers.gs`).
+- `_asw_outbound_queue` queue row fields `outreach_queue_id`, `lead_id`, `recipient_email`, `email_subject`, `email_body`, `idempotency_key`, `send_status`, `provider_message_id`, `sent_at`, `failure_reason`, `failure_class`, `dead_letter_id`, `run_id_last`, `event_id_last` — z C-05 spec (merged PR #28).
+
+**INFERRED FROM EXISTING SYSTEM:**
+- `sender_run_id` / `sender_event_id` — reuses CS2 run history identifiers (`_asw_logs` payload schema, CS2 sekce 6.1).
+- CS3 `failure_class` mapping — reuses CS3 sekce 5.1 (TRANSIENT / PERMANENT / AMBIGUOUS).
+- Gmail idempotency absence — deduce z `OutboundEmail.gs` current pattern (5min double-send window + outreach_stage monotonic guard stojí místo provider idempotency).
+
+**PROPOSED FOR C-06 (new, implementation task will materialize):**
+- `EmailSender` interface (1 metoda `send()` s 17-field `SendRequest` input a 17-field `NormalizedSendResponse` output).
+- `NormalizedProviderStatus` enum (7 hodnot: ACCEPTED, QUEUED_BY_PROVIDER, REJECTED, THROTTLED, TIMEOUT, AUTH_FAILED, UNKNOWN).
+- `NormalizedSendErrorClass` enum (8 hodnot: TIMEOUT, RATE_LIMIT, INVALID_RECIPIENT, AUTH_FAILED, PROVIDER_UNAVAILABLE, PROVIDER_REJECTED, INVALID_REQUEST, UNKNOWN) + fixní mapping na CS3 `failure_class`.
+- `provider_thread_id` field v queue schema (rozšíření C-05 sekce 3 — PROPOSED dodatek; implementační task formalizuje).
+- Script Property `EMAIL_PROVIDER` (hodnoty: `GMAIL` default / `SENDGRID` / `MAILGUN`).
+- `getEmailSender()` factory pattern.
+- Payload/response `payload_version = "1.0"` konstanta.
+- PII safety invariant pro `provider_response_excerpt` + `error_message` sanitizaci.
