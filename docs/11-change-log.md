@@ -91,6 +91,68 @@ Task NEDODÁVÁ:
 - **Code:** — (—)
 - **Docs:** docs/24-automation-workflows.md, docs/20-current-state.md
 
+### [C/C-06] Provider abstraction + sender interface — SPEC-only vrstva mezi outbound queue a konkretnim ESP — DONE
+- **Scope:** Formalizuje provider-agnostickou vrstvu mezi `_asw_outbound_queue` a konkretnim ESP (Gmail / SendGrid / Mailgun / …). Oddeluje ctyri vrstvy identity statusu: provider raw response / normalized provider status / queue send status / CS1 lifecycle state. Definuje `EmailSender` interface (1 metoda), `SendRequest` (17 poli), `NormalizedSendResponse` (17 poli), `NormalizedProviderStatus` (7 hodnot), `NormalizedSendErrorClass` (8 hodnot) s fixnim mappingem na CS3 `failure_class`, rate limiting jako kontrakt, 3 fail scenare, Gmail vs generic ESP sample mapping a sender selection via config (ne runtime).
+
+Scope je **SPEC-only** — zadny runtime sender, Gmail adapter, SendGrid adapter, Mailgun adapter, queue worker, factory, mailbox sync, frontend UI ani provider webhook ingest se neimplementuje. Zadne nove enumy ani Script Property se v tomto tasku nezapisuji do `apps-script/Config.gs`. Vsechny nove artefakty jsou oznacene PROPOSED FOR C-06 a budou materializovany implementacnim taskem.
+
+Task dodava:
+- `EmailSender` interface (1 metoda `send(request: SendRequest) → NormalizedSendResponse`)
+- `SendRequest` kontrakt (17 poli — 13 immutable snapshot z C-05 payload v1.0 + 4 runtime-derived, PII-safe)
+- `NormalizedSendResponse` kontrakt (17 poli — 7 povinnych per zadani + 10 auditability rozsireni se zduvodnenim)
+- `NormalizedProviderStatus` enum (7 hodnot: ACCEPTED, QUEUED_BY_PROVIDER, REJECTED, THROTTLED, TIMEOUT, AUTH_FAILED, UNKNOWN)
+- `NormalizedSendErrorClass` enum (8 hodnot: TIMEOUT, RATE_LIMIT, INVALID_RECIPIENT, AUTH_FAILED, PROVIDER_UNAVAILABLE, PROVIDER_REJECTED, INVALID_REQUEST, UNKNOWN) s deterministickym mappingem na CS3 `failure_class`
+- 4-vrstva separace statusu (A: provider raw / B: `NormalizedProviderStatus` / C: `QUEUE_SEND_STATUS` / D: CS1 lifecycle state) s fixnim deterministickym lookup table
+- Provider adapter model (shared logic / provider-specific logic / anti-branching rules — queue worker nevi, jaky provider je aktivni)
+- Rate limiting jako kontrakt: adapter report `rate_limit_reset_at` + `THROTTLED` status; scheduling rozhoduje C-08 (mimo C-06)
+- 3 fail scenare s plnymi `NormalizedSendResponse` tabulkami a CS3 handoffem (TIMEOUT → AMBIGUOUS HOLD, RATE_LIMIT → TRANSIENT, INVALID_RECIPIENT → PERMANENT)
+- Gmail sample mapping (`GmailApp.sendEmail` + `GmailApp.search` pro message_id retrieval, constraints: no native message_id, no API idempotency)
+- Generic ESP sample mapping (SendGrid 202 + 429 examples; HTTP+JSON payload + X-Message-Id header)
+- Gmail vs generic ESP tabulka odlisnosti (idempotency / rate limit signal / authentication / bounce signal / attachments)
+- Auditability + cross-ref do `_asw_logs` + queue (correlation_id, sender_run_id, sender_event_id, provider_response_excerpt)
+- Sender selection via Script Property `EMAIL_PROVIDER` (GMAIL default / SENDGRID / MAILGUN), multi-provider fallback explicitly out-of-scope
+- Sample pseudocode flow (queue worker volajici sender.send)
+- PII safety invariant pro `provider_response_excerpt` a `error_message` (sanitizace pre-log)
+- 13 boundary rules / handoff body do C-05 / CS1 / CS2 / CS3 / C-04 / C-07 / C-08 / C-09 / mailbox sync / 2x budoucich implementacnich tasku
+- VERIFIED / INFERRED / PROPOSED labely
+
+**CS3 kompatibilita:**
+- `NormalizedSendErrorClass` (8 hodnot) je jemnejsi nez CS3 `failure_class` (TRANSIENT / PERMANENT / AMBIGUOUS). C-06 definuje **deterministicky 1:N lookup table** (TIMEOUT→AMBIGUOUS, RATE_LIMIT→TRANSIENT, INVALID_RECIPIENT→PERMANENT, AUTH_FAILED→PERMANENT, PROVIDER_UNAVAILABLE→TRANSIENT, PROVIDER_REJECTED→PERMANENT, INVALID_REQUEST→PERMANENT, UNKNOWN→AMBIGUOUS). Queue worker mapuje 1:N.
+- CS3 S12 `process_email_queue` invariant `max_attempts=1` je respektovany — `EmailSender.send` nikdy nerestrykuje interne. Retry = novy queue row (C-05 pravidlo). C-06 pouze emituje `retryable: boolean` hint pro diagnostiku.
+- C-06 neemituje `_asw_logs` sam; queue worker to dela s normalized payloadem. `sender_run_id` + `sender_event_id` jsou echoed zpet v response.
+
+**C-05 kompatibilita:**
+- `SendRequest` je stavebni derivat C-05 payload kontraktu v1.0 (sekce 6 docs/24). 13 poli je immutable snapshot z queue row; 4 pole (`sender_run_id`, `sender_event_id`, `timeout_ms`, `payload_version`) jsou runtime-derived.
+- `NormalizedSendResponse.provider_message_id` + `sent_at` jsou pole, ktera queue worker zapise do queue row pri `QUEUED → SENT` transition.
+- Queue statusy (`QUEUED`, `SENDING`, `SENT`, `FAILED`, `CANCELLED`) nejsou touto SPEC dotcene — ortogonalne existuji vuci `NormalizedProviderStatus`.
+- C-05 `idempotency_key` je predavan do `SendRequest.idempotency_key`; adapter rozhoduje, zda ho propne do provider API (SendGrid `X-Message-Id` header) nebo drzi pouze lokalne (Gmail nema native idempotency).
+
+**CS1 kompatibilita:**
+- C-06 nezavadi zadny novy canonical lifecycle state. T18 (`EMAIL_QUEUED → EMAIL_SENT`) je triggered queue workerem po `success: true`. C-06 samotny nezapisuje do LEADS.
+- C-06 fail → CS1 zustava `EMAIL_QUEUED`. Transition na potencialny `EMAIL_FAILED` je manualni operator akce (T25), ne C-06 responsibility.
+
+**C-04 kompatibilita:**
+- C-04 zije **pred** queue; C-06 zije **za** queue. Zadna prima interakce. Oddelene C-05 queue vrstvou.
+
+Task NEDODAVA:
+- Runtime `EmailSender` implementaci / `GmailAdapter` / `SendGridAdapter` / `MailgunAdapter`
+- `getEmailSender()` factory / sender registry
+- Queue worker loop (worker, ktery volа adapter, je budouci implementacni task)
+- Zapis `EMAIL_PROVIDER` Script Property (vcetne default GMAIL)
+- Zapis `NormalizedProviderStatus` / `NormalizedSendErrorClass` do `apps-script/Config.gs`
+- Mailbox sync zmeny / bounce/reply ingest
+- Provider webhook ingest (bounce, complaint, open, click)
+- Rate limiting / quiet hours / daily caps scheduling (handoff → C-08)
+- Follow-up engine / thread reply (handoff → C-07)
+- Suppression list management (handoff → C-09)
+- Multi-provider fallback / primary+secondary routing
+- Attachment support (v1.0 `SendRequest.attachments` je rezerva, vzdy prazdne)
+- HTML body rendering (v1.0 `SendRequest.body.html` je rezerva; queue worker predava `plain`)
+- Frontend provider config UI
+- **Owner:** Claude
+- **Code:** — (—)
+- **Docs:** docs/24-automation-workflows.md, docs/20-current-state.md
+
 ## 2026-04-20
 
 ### [A/A8] Preview queue → BRIEF_READY — DONE
