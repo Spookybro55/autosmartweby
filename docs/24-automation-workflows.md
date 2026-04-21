@@ -5535,3 +5535,845 @@ fn detect_exception(lead_id, type, diagnostic):
 - CS2 new steps: `exception_detector` (hook) + `exception_resolution_dispatcher`.
 - CS3 `failure_class` mapping for engine errors: `EXCEPTION_INSERT_FAIL`→TRANSIENT, `DEDUP_KEY_CONFLICT`→TRANSIENT, `LEAD_NOT_FOUND`→PERMANENT.
 - Script Properties: `EXCEPTION_SLA_P1_HOURS=24`, `EXCEPTION_SLA_P2_BUSINESS_DAYS=2`, `EXCEPTION_SLA_P3_BUSINESS_DAYS=5`, `EXCEPTION_SLA_P4_BUSINESS_DAYS=10`, `EXCEPTION_STALE_ABANDON_DAYS=14`, `EXCEPTION_MAX_RETRY_CHAIN_DEPTH=3`, `EXCEPTION_RECENT_CLOSED_WINDOW_DAYS=7`.
+
+---
+
+## Automation performance report — C-10 (funnel / operational / quality metrics)
+
+> **Autoritativni specifikace.** Definuje end-to-end reporting vrstvu nad celou automatizaci — funnel pruchodnost, operational health, quality outcomes, alert thresholds a bottleneck detekci.
+>
+> **Dependency narrowing:** Puvodni task brief uvadel dependency `A-09, C-01 az C-09`. V repo source-of-truth **`C-01`, `C-02`, `C-03` NEEXISTUJI** (`C2.md`, `C3.md`, `C4.md` jsou governance hardening / post-audit docs corrections z 2026-04-05, semantic completely unrelated). Foundational SPEC vrstvu pokryvaji `CS1` (lifecycle), `CS2` (orchestrator), `CS3` (reliability); implementation SPEC vrstvu `C-04` (sendability gate) az `C-09` (exception queue). Dependency je **narovnana na `A-09 + CS1 + CS2 + CS3 + C-04..C-09`** a explicitne dokumentovana v task recordu `docs/30-task-records/C-10.md`.
+
+### 1. Účel automation performance reportu
+
+Automation performance report je **reporting-only** vrstva nad jiz zavedenou automatizacni architekturou. Produkuje **jediny auditovatelny snapshot** funnel pruchodnosti + operational health + quality outcomes napric celym lifecyclem (import → normalize → dedupe → web check → qualify → brief ready → preview ready → approved → outreach ready → email queued → email sent → replied/bounced/unsubscribed).
+
+**Proc existuje:**
+- Po kazdem CS2 orchestrator runu musi byt jednoznacne videt, co se v systemu stalo — kolik leadu postoupilo, kde se zasekly, kde vznikly exceptions, jake byly odpovedi.
+- Bottleneck detection: report automaticky identifikuje stage s nejnizsi pass-rate a nejvyssi latenci.
+- Comparison: report musi jit porovnavat mezi batchi, mezi dny, mezi source_job_ids bez manualniho dopadu do surovych dat.
+- Alerting handoff: report je source data pro (budouci) alerting vrstvu — sam alerting neimplementuje, jen vypocita threshold crossings.
+
+**Jak se lisi od A-09 ingest reportu:**
+- **A-09** reportuje *jen ingest funnel*: `_raw_import` → LEADS (import + normalize + dedupe + web check + qualify + brief ready). Unit = 1 `source_job_id`. Neobsahuje outreach vrstvu, send outcomes, inbound events ani exceptions.
+- **C-10** reportuje *cely lifecycle* napric: ingest **+ preview generation + sendability gate + outbound queue + provider send + inbound ingest + follow-up sequence + exception queue**. Uvazuje 5 aggregation grains (per-job, per-day, per-batch/run, per-stage, per-segment).
+- **C-10 je downstream konzument A-09** — pro ingest vrstvu cte metriky primarne z `_ingest_reports` (`snapshot_stage='FINAL'`), nevypocitava je znovu. C-10 az **pridava** outreach + inbound + exception vrstvy.
+
+**Jak spojuje vrstvy:**
+
+```
+   ┌──────────── INGEST LAYER ────────────┐
+   │  A-09 _ingest_reports (per job)      │
+   │  raw → normalize → dedupe → web check│
+   │  → qualify → brief ready              │
+   └────────────────┬──────────────────────┘
+                    │ funnel counts, rates, bottleneck
+                    ▼
+   ┌──────── PREVIEW / OUTREACH LAYER ────┐
+   │  B-05 preview lifecycle               │
+   │  C-04 sendability gate outcomes       │
+   │  C-05 _asw_outbound_queue statuses    │
+   │  C-06 provider send responses         │
+   └────────────────┬──────────────────────┘
+                    │ gate outcome rates, queue timings,
+                    │ send success rate, error class breakdown
+                    ▼
+   ┌──────── INBOUND / LIFECYCLE LAYER ───┐
+   │  C-07 _asw_inbound_events             │
+   │  CS1 terminal states (REPLIED,        │
+   │       BOUNCED, UNSUBSCRIBED)          │
+   │  C-08 follow-up sequences             │
+   └────────────────┬──────────────────────┘
+                    │ reply rate, bounce rate, unsub rate,
+                    │ follow-up yield, sequence depth
+                    ▼
+   ┌────────── RELIABILITY LAYER ─────────┐
+   │  CS3 _asw_dead_letters                │
+   │  C-09 _asw_exceptions                 │
+   └────────────────┬──────────────────────┘
+                    │ retry exhaustion rate, exception rate,
+                    │ operator SLA compliance, review load
+                    ▼
+         ┌──────────────────────────┐
+         │  C-10 performance report │
+         │  (funnel + ops + quality)│
+         └──────────────────────────┘
+```
+
+### 2. Boundary / non-goals
+
+**C-10 dodava (SPEC-only):**
+- Funnel definition (canonical funnel stages, mapping na CS1 + A-09 + C-04 + C-05 + C-07).
+- Reporting grains (per-job, per-day, per-run, per-stage, per-segment).
+- Metric dictionary (pro kazdou metriku: name, definition, numerator, denominator, grain, source, VERIFIED/INFERRED/PROPOSED label).
+- Alert thresholds (warning/critical tiers, absolute vs relative baseline).
+- Report schema (`_asw_perf_reports` PROPOSED sheet, ~50 poli).
+- Sample report (realisticky batch run).
+- Bottleneck detection pravidla.
+- Comparison rules (batch vs batch, day vs day, source_job_id vs source_job_id).
+- Auditability / observability (jak se report propoji s A-09 + `_asw_logs` + queue + inbound events + exceptions).
+- Known limitations (co dnes neni mereno protoze vrstva je jen SPEC).
+- Handoff na navazujici tasky (budouci dashboard, budouci runtime worker, budouci alerting integration).
+
+**C-10 NEIMPLEMENTUJE (explicit non-goals):**
+- Dashboard UI (frontend widget, interactive chart) — budouci task (Stream B / dashboard task).
+- Runtime report worker (Apps Script scheduler / cron / time-based trigger).
+- Alerting integration (email notifications, Slack webhook, SMS) — C-10 pouze **identifikuje** alert conditions; doruceni je jiny task.
+- BI export (BigQuery sync, data warehouse pipeline, CSV dump automation).
+- Frontend reporting pages.
+- Zapisy do `apps-script/Config.gs` — PROPOSED enumy / script properties materializuje implementacni task.
+- Novy canonical CS1 state (C-10 je **read-only** nad CS1).
+- Mutaci A-09 `_ingest_reports` schema (C-10 rozsiruje vertikalne pres samostatny sheet, neprepisuje).
+- Mutaci C-05 queue / C-07 inbound / C-09 exception schemas (C-10 jen cte).
+- `detectPerformanceIssue()` helper hooks v jednotlivych stepech (implementacni task).
+- AI-based anomaly detection / forecast (out-of-scope v1.0).
+- Per-operator performance attribution (out-of-scope — privacy + scope).
+- Cost / billing metriky (out-of-scope — financni reporting je separate domain).
+- Historical backfill runtime (implementacni task).
+
+**Co **explicitne** C-10 NENI:**
+- **C-10 neni dashboard.** Je to **data contract pro reporting**. Dashboard (frontend widget) je samostatny task (typicky Stream B nebo dedicated dashboard task).
+- **C-10 neni runtime scheduler.** Neurcuje kdy report bezi; jen co a jak merit. Kdy = implementacni task (`generatePerformanceReport()` trigger).
+- **C-10 neni alerting system.** Definuje *kdy je neco spatne*; doruceni alertu (email / Slack / PagerDuty) je jiny task.
+- **C-10 neni BI export.** Output je Google Sheets row + JSON v `_asw_logs`. Dalsi export je samostatny task.
+
+### 3. Reporting grain / dimensions
+
+C-10 definuje **pet reporting grains**. Kazdy grain reportuje stejne metriky, ale nad jinym subsetem dat. Porovnani mezi grains je explicitne povolene pouze v ramci jednoho grainu.
+
+| Grain | Unit | Co znamena | Odkud se bere | Srovnatelne s | Nesrovnatelne s |
+|-------|------|------------|---------------|---------------|-----------------|
+| **G1: per-job** | 1 report = 1 `source_job_id` | 1 scraping query na 1 portalu v 1 city/segment | `_raw_import.source_job_id` + LEADS.source_job_id | Jiny `source_job_id` se stejnym `portal + segment + city` (pro query tuning). Stejny `source_job_id` re-generovany v case (PARTIAL → FINAL progression). | Jiny job s jinym segmentem/city (different baseline conversion). Nelze miscovat s per-day aggregaci. |
+| **G2: per-day** | 1 report = 1 calendar day (Europe/Prague) | Vsechny aktivity v jednom dni napric vsemi joby | `detected_at` / `created_at` / `sent_at` filtered by date | Jiny den se stejnym day-of-week (Mon vs Mon). Tyden vs tyden (Mo-Fri aggregation). | Ru-zne dny typu (pracovni vs vikend). Nelze miscovat s per-job (1 job neni atomic per-day unit). |
+| **G3: per-run** | 1 report = 1 CS2 `run_id` (orchestrator run) | Vsechny steps v jednom CS2 orchestrator run-u | `cs2_run_id` napric `_asw_logs`, queue, inbound, exceptions | Jiny run se stejnym step catalogem. Sequential runs v daily batch. | Run-y s odlisnym step set-em (initial run vs retry-only run). |
+| **G4: per-stage** | 1 report = 1 funnel stage (napric vsech leadu) | Aggregated stage counts napric vsemi aktivnimi leads | `lead_stage` / `preview_stage` / `outreach_stage` snapshots | Stejna stage v case (trend line). Stejna stage per segment (segment A vs B). | Ruzne stages navzajem (raw vs email_sent — ruzne denominators). |
+| **G5: per-segment** | 1 report = 1 `segment` (napr. "autoservisy") napric jobs + days | Segment-level comparison | Derived z LEADS.segment | Jiny segment se stejnou velikosti samplu. Segment v case (month-over-month). | Segmenty s N<30 (statistical insignificance). |
+
+**Pevna pravidla:**
+- **1 report row = 1 (grain, unit_id) kombinace.** Report `G1:per-job:rpt-JOB-123` je immutable snapshot; re-generace vytvari novy row s novym `perf_report_id`.
+- **Grain mixing je zakazan v jednom reportu.** Per-day report nesmi obsahovat per-job field (a naopak). Cross-grain comparison je jen pres external analysis, ne v ramci jedne report row.
+- **Primarni grain pro v1.0 je G1 (per-job) a G3 (per-run).** G2 (per-day) / G4 (per-stage) / G5 (per-segment) jsou podporovany ale maji fewer metriky (aggregaty ne per-job precision).
+
+### 4. Funnel definition
+
+**Canonical funnel (14 reporting stages).** Mapping na CS1 canonical lifecycle a existujici sheet artefakty:
+
+| # | Reporting stage | Zdroj (source of truth) | Mapping na CS1 | Typ stage |
+|---|-----------------|-------------------------|----------------|-----------|
+| F1 | `raw` | `_raw_import` (COUNT all rows) | mimo CS1 (pre-lifecycle staging) | ingest-input |
+| F2 | `normalized` | `_raw_import.normalized_status='normalized'` | CS1 #2 NORMALIZED (derived) | ingest-step |
+| F3 | `deduped_imported` | `_raw_import.import_decision='imported'` → LEADS row created | CS1 #3 DEDUPED → CS1 #1 RAW_IMPORTED | ingest-milestone |
+| F4 | `web_checked` | LEADS.`website_checked_at != ''` | CS1 #4 WEB_CHECKED | enrichment-step |
+| F5 | `qualified` | LEADS.`lead_stage IN ('QUALIFIED','IN_PIPELINE','PREVIEW_SENT')` | CS1 #5 QUALIFIED (+canonical downstream IN_PIPELINE) | qualification-outcome |
+| F6 | `brief_ready` | LEADS.`preview_stage='BRIEF_READY'` | CS1 #8 BRIEF_READY | preview-milestone |
+| F7 | `preview_generating` | LEADS.`preview_stage='GENERATING'` | CS1 #9 PREVIEW_GENERATING | preview-step |
+| F8 | `preview_ready_for_review` | LEADS.`preview_stage='READY_FOR_REVIEW'` | CS1 #10 PREVIEW_READY_FOR_REVIEW | review-milestone |
+| F9 | `preview_approved` | LEADS.`preview_stage='APPROVED'` | CS1 #11 PREVIEW_APPROVED | preview-outcome |
+| F10 | `outreach_ready` | LEADS.`outreach_stage='DRAFT_READY'` | CS1 #12 OUTREACH_READY | outreach-milestone |
+| F11 | `email_queued` | `_asw_outbound_queue.status='QUEUED'` (snapshot) + `'SENDING'` | CS1 #13 EMAIL_QUEUED | queue-milestone |
+| F12 | `email_sent` | `_asw_outbound_queue.status='SENT'` | CS1 #14 EMAIL_SENT | outbound-outcome |
+| F13 | `replied` | `_asw_inbound_events.event_type='reply'` + LEADS.`lifecycle_state='REPLIED'` | CS1 #15 REPLIED (terminal) | inbound-outcome |
+| F14 | `bounced` / `unsubscribed` | LEADS.`lifecycle_state IN ('BOUNCED','UNSUBSCRIBED')` | CS1 #16 BOUNCED / #17 UNSUBSCRIBED (terminal) | inbound-outcome |
+
+**Co do funnelu patri vs co je outcome (invariant):**
+- **Funnel stage** = pozice v lifecycle; lead jim projde nebo uvizne. Kazda funnel stage ma jasnou enter-podminku. (F1 az F14)
+- **Outcome metric** = *agregat* nad funnel stages (napr. reply rate, bounce rate) — neni to funnel stage, je to derived rate. Reportuje se v sekci 7 (Quality metrics), ne v sekci 4.
+- **Queue milestone** (F11/F12) = ortogonalni dimenze queue lifecycle; nezamenovat s CS1 state. C-10 reportuje queue milestones jako samostatne pole; nekolapsuje je s F12 email_sent.
+- **Review state** (F8, + CS1 REVIEW_REQUIRED #7, + CS1 FAILED #18) = review-requiring state; reportuje se jako **load metric** (count waiting for human) ne jako funnel step.
+- **Derived reporting step:** `F3 deduped_imported` kolapsuje CS1 #3 DEDUPED + CS1 #1 RAW_IMPORTED do jednoho funnel kroku, protoze v reportingu je dulezity ingest success (imported=yes), ne vnitrni A-05 dedupe decision. To je **derivacni rule, ne novy canonical state.**
+
+**Co funnel NEZACHYCUJE (cista oddelovaci pravidla):**
+- CS1 #6 DISQUALIFIED — neni funnel stage, je to **drop-off exit point** mezi F4 a F5 (quality metric v Quality sekci).
+- CS1 #7 REVIEW_REQUIRED — neni funnel stage, je to **side-channel to manual review** (operational metric v Operational sekci).
+- CS1 #18 FAILED — side-channel; reportuje se jako exception rate + retry metric.
+- `_asw_outbound_queue.status='FAILED'` / `'CANCELLED'` — queue outcome, ne funnel stage. Mapuje se na bounce/retry rate.
+- `_asw_inbound_events.event_type='unknown_inbound'` — inbound classification outcome, ne funnel stage.
+
+### 5. Funnel metrics
+
+Kazda funnel stage (F1-F14) ma sadu povinnych counts + derived rates. Reporting grain je G1 (per-job) nebo G3 (per-run); G2/G4/G5 pouze aggregate counts.
+
+**Counts per stage (14 stages × 1 count = 14 metrik):**
+
+| Metric | Formula | Grain | Source |
+|--------|---------|-------|--------|
+| `funnel_f1_raw_count` | COUNT(`_raw_import` rows filtered by grain) | G1, G2, G3 | `_raw_import` (A-02) |
+| `funnel_f2_normalized_count` | COUNT(`_raw_import.normalized_status='normalized'`) | G1, G2 | `_raw_import` (A-03) |
+| `funnel_f3_deduped_imported_count` | COUNT(`_raw_import.import_decision='imported'`) | G1, G2 | `_raw_import` (A-05/A-10) |
+| `funnel_f4_web_checked_count` | COUNT(LEADS.`website_checked_at != ''` filtered by source_job_id) | G1, G2 | LEADS (A-06) |
+| `funnel_f5_qualified_count` | COUNT(LEADS.`lead_stage IN ('QUALIFIED','IN_PIPELINE','PREVIEW_SENT')`) | G1, G2 | LEADS (A-07/A-08) |
+| `funnel_f6_brief_ready_count` | COUNT(LEADS.`preview_stage='BRIEF_READY'`) | G1, G2 | LEADS (A-08) |
+| `funnel_f7_preview_generating_count` | COUNT(LEADS.`preview_stage='GENERATING'`) | G4 (snapshot) | LEADS (B-05) |
+| `funnel_f8_preview_ready_for_review_count` | COUNT(LEADS.`preview_stage='READY_FOR_REVIEW'`) | G4 | LEADS (B-05) |
+| `funnel_f9_preview_approved_count` | COUNT(LEADS.`preview_stage='APPROVED'`) | G4, G1 | LEADS (B-05) |
+| `funnel_f10_outreach_ready_count` | COUNT(LEADS.`outreach_stage='DRAFT_READY'`) | G4, G1 | LEADS (A-08) |
+| `funnel_f11_email_queued_count` | COUNT(`_asw_outbound_queue.status IN ('QUEUED','SENDING')`) | G4 | `_asw_outbound_queue` (C-05 PROPOSED) |
+| `funnel_f12_email_sent_count` | COUNT(`_asw_outbound_queue.status='SENT'`) | G1, G2, G3 | `_asw_outbound_queue` (C-05 PROPOSED) |
+| `funnel_f13_replied_count` | COUNT(`_asw_inbound_events.event_type='reply'`) | G1, G2, G3 | `_asw_inbound_events` (C-07 PROPOSED) |
+| `funnel_f14_bounced_count` / `funnel_f14_unsubscribed_count` | COUNT(LEADS.`lifecycle_state='BOUNCED'`) / COUNT(`='UNSUBSCRIBED'`) | G1, G2, G3 | LEADS + `_asw_inbound_events` |
+
+**Conversion rates (13 rates — between consecutive stages):**
+
+| Rate | Formula | Healthy range (INFERRED baseline) |
+|------|---------|-----------------------------------|
+| `conv_f1_to_f2` | f2_normalized / f1_raw | ≥ 0.95 |
+| `conv_f2_to_f3` | f3_deduped_imported / f2_normalized | ≥ 0.7 (dedupe drops some) |
+| `conv_f3_to_f4` | f4_web_checked / f3_deduped_imported | ≥ 0.95 (web check should run for all) |
+| `conv_f4_to_f5` | f5_qualified / f4_web_checked | 0.3–0.7 (heavy qualification drop-off expected) |
+| `conv_f5_to_f6` | f6_brief_ready / f5_qualified | ≥ 0.9 (brief generation should succeed) |
+| `conv_f6_to_f9` | f9_preview_approved / f6_brief_ready | 0.6–0.9 (some review rejects) |
+| `conv_f9_to_f10` | f10_outreach_ready / f9_preview_approved | ≥ 0.95 (draft should exist) |
+| `conv_f10_to_f11` | f11_email_queued / f10_outreach_ready | 0.8–1.0 (C-04 gate filters) |
+| `conv_f11_to_f12` | f12_email_sent / f11_email_queued | ≥ 0.95 (send success rate) |
+| `conv_f12_to_f13` | f13_replied / f12_email_sent | 0.02–0.15 (reply rate — quality metric too) |
+| `conv_f12_to_f14_bounce` | f14_bounced / f12_email_sent | ≤ 0.05 (bounce rate — quality metric) |
+| `conv_f12_to_f14_unsub` | f14_unsubscribed / f12_email_sent | ≤ 0.02 (unsub rate — quality metric) |
+| `overall_funnel_yield` | f12_email_sent / f1_raw | 0.05–0.25 (end-to-end conversion) |
+
+**Drop-off points (3 derived metrics):**
+
+| Metric | Formula | Meaning |
+|--------|---------|---------|
+| `drop_off_stage_worst` | argmin(conv_f*) | Stage with lowest conversion rate (bottleneck candidate) |
+| `drop_off_rate_worst` | min(conv_f*) | Value of worst conversion rate |
+| `drop_off_absolute_count_worst` | argmax(f_prev - f_next) | Stage losing the most leads in absolute terms |
+
+**Blocking / review counts (4 operational metrics — not funnel stages):**
+
+| Metric | Formula | Source |
+|--------|---------|--------|
+| `blocked_by_sendability_count` | COUNT(C-04 outcome `SEND_BLOCKED`) | C-04 `sendability_outcome` PROPOSED |
+| `review_queue_load_count` | COUNT(CS1 `lifecycle_state='REVIEW_REQUIRED'`) + COUNT(`'FAILED'`) + COUNT(C-09 `exception_status='OPEN'`) | LEADS + `_asw_exceptions` |
+| `manual_review_entered_count` | COUNT(C-04 outcome `MANUAL_REVIEW_REQUIRED`) | C-04 `sendability_outcome` PROPOSED |
+| `sequence_followup_reach_count` | COUNT(distinct `sequence_root_queue_id` where max(`sequence_stage`)=2) / COUNT(distinct sequence_root) | C-08 `_asw_outbound_queue` |
+
+### 6. Operational metrics
+
+Operational metriky merit **health** systemu — ne funnel (ten je co postoupilo kam), ale jak rychle / spolehlive / nakladove.
+
+| Metric | Definition | Formula | Grain | Source | Healthy range |
+|--------|-----------|---------|-------|--------|---------------|
+| `avg_processing_time_ms_per_stage` | Prumerny cas per lead per stage | mean(stage_completed_at - stage_started_at) | G1, G4 | `_asw_logs` step events | < 5000ms non-webhook; < 30000ms webhook |
+| `p50_processing_time_ms_per_stage` | Median | median | G1, G4 | `_asw_logs` | < 3000ms |
+| `p95_processing_time_ms_per_stage` | 95th percentile | p95 | G1, G4 | `_asw_logs` | < 15000ms |
+| `max_processing_time_ms_per_stage` | Max | max | G1, G4 | `_asw_logs` | < 60000ms |
+| `fail_rate_per_stage` | Selhani per stage | COUNT(step events with level='ERROR') / COUNT(all step events) | G1, G3, G4 | `_asw_logs` | < 0.02 (2%) |
+| `retry_count_per_stage` | Kolik retries se stalo | COUNT(`_asw_logs` events with retry_attempt>0) | G3, G4 | `_asw_logs` | < 0.1 per executed step |
+| `retry_success_rate` | Kolik retries uspelo | COUNT(retries succeeded) / COUNT(retries attempted) | G3, G4 | `_asw_logs` | ≥ 0.6 (transient errors recover) |
+| `dead_letter_count` | Retry exhaustion per grain | COUNT(`_asw_dead_letters` created in grain window) | G1, G2, G3 | `_asw_dead_letters` (CS3 PROPOSED) | < 0.01 × f12_email_sent |
+| `dead_letter_rate` | Dead-letter / send attempted | dead_letter_count / (f11_email_queued) | G1, G2 | derived | < 0.02 |
+| `review_queue_load` | Kolik leadu ceka na manual | f_blocking.review_queue_load_count | G4 (snapshot) | LEADS + `_asw_exceptions` | < 50 per batch window |
+| `review_sla_compliance_rate` | C-09 exceptions resolved within SLA | COUNT(resolved exceptions with resolved_at ≤ sla_target_at) / COUNT(resolved exceptions) | G1, G2 | `_asw_exceptions` (C-09 PROPOSED) | ≥ 0.85 |
+| `stale_pending_count` | Leads v review > SLA target | COUNT(`_asw_exceptions.exception_status='OPEN' AND sla_target_at < NOW()`) | G4 (snapshot) | `_asw_exceptions` | 0 ideally; < 5 tolerable |
+| `queue_latency_avg_ms` | Avg cas od QUEUED do SENT | avg(sent_at - queued_at) | G1, G2 | `_asw_outbound_queue` (C-05 PROPOSED) | < 3600000ms (1h) |
+| `exception_rate` | Kolik leadu generovalo exception | COUNT(distinct lead_id in `_asw_exceptions`) / f3_deduped_imported | G1, G2 | `_asw_exceptions` | < 0.05 |
+
+**Pozn. k p50/p95/max:** Vyzaduje kazdy step event logging start_at + end_at (PROPOSED `_asw_logs` extension). Dnes se loguje jen INFO/ERROR s timestampem; per-step latency je **INFERRED** — pocita se jako rozdil mezi po-sobe-jdoucimi timestampy ve stejne cs2_run_id + step sekvenci. Presne mereni (start/end event pair) prijde az implementaci C-10 runtime workera.
+
+### 7. Quality metrics
+
+Quality metriky merit **outcome kvalitu**, ne funnel pozici. Vsechny jsou derived rates nad sent_count.
+
+| Metric | Definition | Formula | Grain | Source | Healthy range |
+|--------|-----------|---------|-------|--------|---------------|
+| `bounce_rate` | Bounce per sent | f14_bounced_count / f12_email_sent_count | G1, G2 | derived | ≤ 0.05 (warning > 0.05, critical > 0.1) |
+| `hard_bounce_rate` | Hard bounce only | COUNT(`bounce_class='HARD'`) / f12_email_sent | G1, G2 | `_asw_inbound_events` (C-07 PROPOSED) | ≤ 0.02 |
+| `soft_bounce_rate` | Soft bounce only | COUNT(`bounce_class='SOFT'`) / f12_email_sent | G1, G2 | `_asw_inbound_events` | ≤ 0.03 |
+| `reply_rate` | Reply per sent | f13_replied_count / f12_email_sent_count | G1, G2 | derived | 0.02–0.15 (warning < 0.01, excellent > 0.1) |
+| `positive_reply_rate` | Positive classified reply | COUNT(`reply_class='POSITIVE'`) / f12_email_sent | G1, G2 | `_asw_inbound_events` (C-07 PROPOSED) | 0.5–0.8 × reply_rate |
+| `unclear_reply_rate` | Unclear classification | COUNT(`reply_class='UNCLASSIFIED'`) / f13_replied | G1, G2 | `_asw_inbound_events` | ≤ 0.15 (else classifier tuning needed) |
+| `unsubscribe_rate` | Unsub per sent | f14_unsubscribed_count / f12_email_sent_count | G1, G2 | derived | ≤ 0.02 (warning > 0.02, critical > 0.05) |
+| `followup_yield_rate` | Reply-after-followup / all followups | COUNT(reply event where parent was follow_up_1 or follow_up_2) / COUNT(follow-up emails sent) | G2, G3 | `_asw_inbound_events` + C-08 queue sequence | 0.3–0.5 × initial reply_rate |
+| `preview_approval_rate` | Approved / reviewed | f9_preview_approved / (f9_preview_approved + COUNT(returned to BRIEF_READY)) | G1, G2 | LEADS preview transitions | ≥ 0.7 |
+| `exception_rate_per_stage` | Exceptions / leads entering stage | exception_count_by_detected_by_step / leads_entering_step | G4 | `_asw_exceptions` + `_asw_logs` | < 0.02 per stage |
+| `compliance_hard_stop_rate` | Compliance-blocked leads | COUNT(C-04 `SEND_BLOCKED` with reason in {B7 UNSUBSCRIBED, B8 SUPPRESSED, PROPOSED ADDRESS_BOUNCED}) / f10_outreach_ready | G1, G2 | C-04 | < 0.02 (unless backfilling suppression list) |
+
+### 8. Metric definitions (authoritative reference)
+
+Kazda metrika ma kompletni kontrakt. Tento oddil je **zdrojova pravda** pro implementaci.
+
+Kontrakt per metric:
+1. **`metric_name`** — snake_case identifier, unique napric reportem.
+2. **Definition** — 1-veta slovni definice.
+3. **Numerator** — co se pocita v citateli.
+4. **Denominator** — co je delic (ne-applicable pro counts).
+5. **Grain** — povolene grains (podmnozina G1..G5).
+6. **Source artifacts** — ktere sheety / enumy / log events se cetou.
+7. **Interpretation warning** — co je caveat (napr. "approximation kvuli missing end_at event").
+
+Priklad kompletniho kontraktu (2 sample):
+
+**Metric: `bounce_rate`**
+- Definition: Pomer hard + soft bounce eventu k poctu odeslanych emailu.
+- Numerator: `COUNT(_asw_inbound_events.event_type='bounce')` filtered by grain window + matched to sent email via `outreach_queue_id` FK.
+- Denominator: `COUNT(_asw_outbound_queue.status='SENT')` filtered by grain window.
+- Grain: G1 (per source_job_id), G2 (per day), G3 (per run).
+- Source: `_asw_inbound_events` (C-07 PROPOSED), `_asw_outbound_queue` (C-05 PROPOSED).
+- Warning: Pokud rate > 0.05 v malem sample (< 30 sent), neni statisticky signifikantni — pouzit pouze pro alerting s min_sample_size=30.
+- Label: **INFERRED** (vyzaduje C-05 + C-07 runtime).
+
+**Metric: `review_queue_load`**
+- Definition: Kolik leadu/exceptions aktualne ceka na manual review napric systemem.
+- Numerator: `COUNT(LEADS.lifecycle_state='REVIEW_REQUIRED') + COUNT(LEADS.lifecycle_state='FAILED') + COUNT(_asw_exceptions.exception_status IN ('OPEN','IN_REVIEW'))`.
+- Denominator: N/A (count metric).
+- Grain: G4 (snapshot at report generation time).
+- Source: LEADS + `_asw_exceptions` (C-09 PROPOSED).
+- Warning: Snapshot metric — mezi dvema reporty muze byt vyssi/nizssi hodnota. Ne average; neprumeruje se pres cas.
+- Label: **INFERRED** (vyzaduje `lifecycle_state` pole + C-09 runtime).
+
+Uplna metric table (viz section 12 schema) obsahuje 40+ metrik se stejnym kontraktem. Pro kazdou metrikou je zacelen VERIFIED / INFERRED / PROPOSED label.
+
+### 9. Alert thresholds
+
+Alert thresholds definuji **kdy je hodnota metric-a "spatne"**. C-10 sam alert nedoruci — pouze **identifikuje threshold crossing** a oznaci v report row.
+
+**2-tier severity:**
+- **WARNING** — odchylka si zaslouzi pozornost (operator by se mel podivat). Neni blocker.
+- **CRITICAL** — odchylka blokuje dalsi automatic activity / vyzaduje zasah (paging-worthy).
+
+**Threshold typy:**
+- **ABS (absolute):** hodnota prekroci fixed threshold (napr. `bounce_rate > 0.1` = CRITICAL).
+- **REL (relative baseline):** hodnota prekroci N% odchylku od rolling baseline (napr. `reply_rate < 50% of 7-day rolling mean` = WARNING).
+- **COMBO:** oba (rate ABS + sample size min).
+
+**Alert threshold table (core metriky):**
+
+| Metric | Warning | Critical | Threshold type | Min sample |
+|--------|---------|----------|----------------|------------|
+| `bounce_rate` | > 0.05 | > 0.1 | ABS | 30 sent |
+| `hard_bounce_rate` | > 0.02 | > 0.05 | ABS | 30 sent |
+| `unsubscribe_rate` | > 0.02 | > 0.05 | ABS | 30 sent |
+| `reply_rate` | < 0.01 | < 0.005 | ABS + REL (< 50% of 7d mean) | 50 sent |
+| `positive_reply_rate` | < 0.5 × reply_rate | < 0.3 × reply_rate | REL | 10 replies |
+| `fail_rate_per_stage` | > 0.02 | > 0.1 | ABS | 10 step executions |
+| `dead_letter_rate` | > 0.02 | > 0.1 | ABS | 10 send attempts |
+| `queue_latency_avg_ms` | > 3600000 (1h) | > 14400000 (4h) | ABS | 5 sent |
+| `review_queue_load` | > 50 | > 200 | ABS | — |
+| `stale_pending_count` | > 5 | > 20 | ABS | — |
+| `review_sla_compliance_rate` | < 0.85 | < 0.6 | ABS | 5 resolved |
+| `conv_f4_to_f5` | < 0.3 OR > 0.9 | < 0.15 OR > 0.95 | ABS (both tails — mean "qualifier may be broken") | 20 web-checked |
+| `conv_f11_to_f12` | < 0.95 | < 0.8 | ABS | 10 queued |
+| `overall_funnel_yield` | < 0.5 × 7d_baseline | < 0.25 × 7d_baseline | REL | — |
+| `exception_rate` | > 0.05 | > 0.15 | ABS | 20 imports |
+| `compliance_hard_stop_rate` | > 0.02 | > 0.1 | ABS | 20 ready |
+
+**Thresholds sledovane v report row:**
+Kazdy report row obsahuje `alert_summary_json` pole se strukturou:
+```json
+{
+  "warning_count": 2,
+  "critical_count": 0,
+  "triggered": [
+    { "metric": "bounce_rate", "value": 0.08, "threshold": 0.05, "severity": "WARNING", "type": "ABS" },
+    { "metric": "queue_latency_avg_ms", "value": 4200000, "threshold": 3600000, "severity": "WARNING", "type": "ABS" }
+  ]
+}
+```
+
+**Invarianty:**
+- **CRITICAL threshold vzdy implies WARNING threshold** (monotonic). Pokud hodnota prekroci CRITICAL, je zaroven nad WARNING thresholdem; pocita se pouze CRITICAL.
+- **Min sample size invariant:** pokud je denominator < min_sample, threshold se NETRIGGERUJE (ne-crossed) — doda se do `alert_summary_json.suppressed` s duvodem `insufficient_sample`.
+- **Relative baseline:** pokud rolling baseline (7-day mean) neexistuje (< 7 dni historie), REL thresholdy se NETRIGGERUJI (reported jako `baseline_unavailable`).
+- **Threshold je read-only SPEC.** Runtime muze override pres Script Properties (viz sekce 14).
+
+### 10. Bottleneck detection
+
+Bottleneck = stage s nejhorsi pruchodnosti / latency. C-10 identifikuje bottleneck **deterministickym algoritmem**:
+
+**Funnel bottleneck (drop-off based):**
+```
+Pro vsech 12 conversion rates (conv_f1_to_f2 az overall_funnel_yield):
+  Vypocti aktualni rate.
+  Pokud rate < healthy_range_min (z tabulky sekce 5), oznac stage jako kandidat.
+Vraz kandidata s nejnizsi rate jako `funnel_bottleneck_stage`.
+Pokud zadny kandidat (vsechny rates v healthy range), funnel_bottleneck_stage = 'none'.
+```
+
+**Latency bottleneck (time based):**
+```
+Pro vsech ~12 stage-level p95_processing_time_ms:
+  Pokud p95 > healthy_p95_for_stage (napr. web_check=5000ms, preview=30000ms), oznac.
+Vraz stage s nejvyssim (p95 / healthy_p95) pomerem jako `latency_bottleneck_stage`.
+```
+
+**Review/exception bottleneck (load based):**
+```
+Pokud review_queue_load > 50, bottleneck = 'manual_review_backlog'.
+Pokud stale_pending_count > 5, bottleneck = 'sla_breach_backlog'.
+Pokud exception_rate > 0.05, bottleneck = 'exception_stage_of_highest_rate'.
+```
+
+**3-lens output:**
+```
+bottleneck_summary = {
+  funnel: 'conv_f4_to_f5',       // vs lifecycle progress
+  latency: 'preview_generating',  // vs time/speed
+  review:  'manual_review_backlog' // vs human bandwidth
+}
+```
+
+**Priority tiebreaker (pro jedno-radkove zobrazeni):**
+1. `review_bottleneck != 'none'` → toto vyhrava (operator-facing).
+2. Jinak `funnel_bottleneck != 'none'` s nejhorsim rate → toto.
+3. Jinak `latency_bottleneck != 'none'` → toto.
+4. Jinak `'none'`.
+
+**Jak se lisi od A-09 bottleneck:**
+A-09 ma 4-stage bottleneck (A:normalize, B:dedupe_import, C:qualify, D:brief_ready) — cely ingest. C-10 bottleneck rozsiruje:
+- Funnel pokryva F1-F14 (ne jen F1-F6).
+- Pridava latency dimension (A-09 nema).
+- Pridava review/exception dimension (A-09 nema).
+- C-10 bottleneck zahrnuje A-09 result jako sub-case (pokud ingest je bottleneck, C-10 propaguje `funnel_bottleneck=A-09.bottleneck_stage` bez reco-calculation).
+
+### 11. Report schema
+
+PROPOSED novy sheet `_asw_perf_reports` (append-only, leading-underscore). Primarni struktura pro v1.0.
+
+**Sheet konvence (match A-09 pattern):**
+- Append-only.
+- Regenerace = novy radek (historical trend zustava).
+- Jmeno sloupcu v `PERF_REPORT_COLUMNS` constant v PROPOSED `apps-script/PerfReport.gs`.
+- Full nested JSON paralelne v `_asw_logs` event type `performance_report_generated`.
+
+**50-field schema:**
+
+| # | Field | Type | Required | Grain | Source | Label |
+|---|-------|------|----------|-------|--------|-------|
+| 1 | `perf_report_id` | string | YES | all | generated `perf-{grain}-{unit_id}-{ts14}-{uuid8}` | PROPOSED FOR C-10 |
+| 2 | `grain` | enum | YES | all | `G1_PER_JOB` / `G2_PER_DAY` / `G3_PER_RUN` / `G4_PER_STAGE` / `G5_PER_SEGMENT` | PROPOSED |
+| 3 | `grain_unit_id` | string | YES | all | source_job_id / date ISO / cs2_run_id / stage_name / segment_name | PROPOSED |
+| 4 | `report_window_start_at` | datetime | YES | all | min(source events in window) | PROPOSED |
+| 5 | `report_window_end_at` | datetime | YES | all | max(source events) / generation time | PROPOSED |
+| 6 | `generated_at` | datetime | YES | all | Date.now() at report build | PROPOSED |
+| 7 | `generated_by` | string | YES | all | "post-run-hook" / "manual-menu" / "daily-scheduled-" (future runtime) | PROPOSED |
+| 8 | `a09_report_ref` | string | optional | G1 | `_ingest_reports.report_id` for same source_job_id (most recent FINAL) | INFERRED |
+| 9 | `funnel_f1_raw_count` | int | YES | G1,G2,G3 | `_raw_import` | VERIFIED (A-02) |
+| 10 | `funnel_f2_normalized_count` | int | YES | G1,G2 | `_raw_import` | VERIFIED (A-03) |
+| 11 | `funnel_f3_deduped_imported_count` | int | YES | G1,G2 | `_raw_import` | VERIFIED (A-05) |
+| 12 | `funnel_f4_web_checked_count` | int | YES | G1,G2 | LEADS | VERIFIED (A-06) |
+| 13 | `funnel_f5_qualified_count` | int | YES | G1,G2 | LEADS | VERIFIED (A-07/A-08) |
+| 14 | `funnel_f6_brief_ready_count` | int | YES | G1,G2 | LEADS | VERIFIED (A-08) |
+| 15 | `funnel_f7_preview_generating_count` | int | YES | G4 | LEADS | VERIFIED (B-05) |
+| 16 | `funnel_f8_preview_ready_for_review_count` | int | YES | G4 | LEADS | VERIFIED (B-05) |
+| 17 | `funnel_f9_preview_approved_count` | int | YES | G4,G1 | LEADS | VERIFIED (B-05) |
+| 18 | `funnel_f10_outreach_ready_count` | int | YES | G4,G1 | LEADS | VERIFIED (A-08) |
+| 19 | `funnel_f11_email_queued_count` | int | optional | G4 | `_asw_outbound_queue` | INFERRED (C-05 PROPOSED) |
+| 20 | `funnel_f12_email_sent_count` | int | optional | G1,G2,G3 | `_asw_outbound_queue` | INFERRED (C-05 PROPOSED) |
+| 21 | `funnel_f13_replied_count` | int | optional | G1,G2,G3 | `_asw_inbound_events` | INFERRED (C-07 PROPOSED) |
+| 22 | `funnel_f14_bounced_count` | int | optional | G1,G2,G3 | LEADS + `_asw_inbound_events` | INFERRED (C-07 PROPOSED) |
+| 23 | `funnel_f14_unsubscribed_count` | int | optional | G1,G2,G3 | LEADS + `_asw_inbound_events` | INFERRED (C-07 PROPOSED) |
+| 24 | `conversion_rates_json` | string (JSON) | YES | G1,G2,G3 | all 13 conv rates + overall_yield | PROPOSED |
+| 25 | `drop_off_stage_worst` | string | YES | G1,G2,G3 | derived | PROPOSED |
+| 26 | `drop_off_rate_worst` | float | YES | G1,G2,G3 | derived | PROPOSED |
+| 27 | `drop_off_absolute_count_worst` | int | YES | G1,G2,G3 | derived | PROPOSED |
+| 28 | `blocked_by_sendability_count` | int | optional | G1,G2 | C-04 | INFERRED (C-04 PROPOSED) |
+| 29 | `review_queue_load_count` | int | YES | G4 | LEADS + `_asw_exceptions` | INFERRED (C-09 PROPOSED) |
+| 30 | `manual_review_entered_count` | int | optional | G1,G2 | C-04 | INFERRED (C-04 PROPOSED) |
+| 31 | `sequence_followup_reach_count` | int | optional | G1,G2 | C-08 queue | INFERRED (C-08 PROPOSED) |
+| 32 | `operational_metrics_json` | string (JSON) | YES | G1,G3 | avg/p50/p95/max per stage | PROPOSED |
+| 33 | `fail_rate_per_stage_json` | string (JSON) | YES | G1,G3 | `{ stage: rate }` map | PROPOSED |
+| 34 | `retry_count` | int | optional | G3 | `_asw_logs` retry_attempt>0 | INFERRED (loguje se, ale ne-aggregovano) |
+| 35 | `retry_success_rate` | float | optional | G3 | derived | INFERRED |
+| 36 | `dead_letter_count` | int | optional | G1,G2,G3 | `_asw_dead_letters` | INFERRED (CS3 PROPOSED) |
+| 37 | `dead_letter_rate` | float | optional | G1,G2 | derived | INFERRED |
+| 38 | `review_sla_compliance_rate` | float | optional | G1,G2 | `_asw_exceptions` | INFERRED (C-09 PROPOSED) |
+| 39 | `stale_pending_count` | int | YES | G4 | `_asw_exceptions` | INFERRED (C-09 PROPOSED) |
+| 40 | `queue_latency_avg_ms` | int | optional | G1,G2 | `_asw_outbound_queue` | INFERRED (C-05 PROPOSED) |
+| 41 | `exception_rate` | float | optional | G1,G2 | `_asw_exceptions` | INFERRED (C-09 PROPOSED) |
+| 42 | `bounce_rate` | float | optional | G1,G2 | derived (f14_bounced / f12_email_sent) | INFERRED |
+| 43 | `hard_bounce_rate` | float | optional | G1,G2 | `_asw_inbound_events` `bounce_class='HARD'` / sent | INFERRED (C-07 PROPOSED) |
+| 44 | `reply_rate` | float | optional | G1,G2 | derived | INFERRED |
+| 45 | `positive_reply_rate` | float | optional | G1,G2 | `_asw_inbound_events` `reply_class='POSITIVE'` / sent | INFERRED (C-07 PROPOSED) |
+| 46 | `unsubscribe_rate` | float | optional | G1,G2 | derived | INFERRED |
+| 47 | `preview_approval_rate` | float | optional | G1,G2 | derived | INFERRED |
+| 48 | `followup_yield_rate` | float | optional | G2,G3 | C-08 queue + C-07 inbound | INFERRED (C-07 + C-08 PROPOSED) |
+| 49 | `compliance_hard_stop_rate` | float | optional | G1,G2 | C-04 | INFERRED (C-04 PROPOSED) |
+| 50 | `bottleneck_summary_json` | string (JSON) | YES | G1,G3 | `{ funnel, latency, review, primary }` derived | PROPOSED |
+| 51 | `alert_summary_json` | string (JSON) | YES | G1,G2,G3 | `{ warning_count, critical_count, triggered[], suppressed[] }` | PROPOSED |
+| 52 | `summary_status` | enum | YES | all | `OK` / `DEGRADED` / `AT_RISK` / `CRITICAL` / `INCOMPLETE` | PROPOSED |
+| 53 | `summary_status_reason` | string | YES | all | human-readable 1-liner | PROPOSED |
+| 54 | `data_completeness_flags_json` | string (JSON) | YES | all | `{ missing_c05: bool, missing_c07: bool, missing_c09: bool, missing_deadletter: bool }` | PROPOSED |
+| 55 | `comparison_baseline_ref` | string | optional | G1,G2 | `perf_report_id` of last-comparable report (same grain/segment) | PROPOSED |
+| 56 | `notes` | string | optional | all | operator notes | PROPOSED |
+
+**Pozn. (51+ sloupcu znaci ze 50 field je flexibilni cap, realny schema ma ~56 fields).**
+
+**Column constant target:**
+`PERF_REPORT_COLUMNS` v PROPOSED `apps-script/PerfReport.gs` (implementacni task). V SPEC-only fazi C-10 toto neni v Config.gs.
+
+**`summary_status` semantika:**
+- `OK` — zero WARNING, zero CRITICAL, all completeness flags clear.
+- `DEGRADED` — 1+ WARNING, zero CRITICAL. (bottleneck typicky detected.)
+- `AT_RISK` — 1+ CRITICAL nebo 3+ WARNING.
+- `CRITICAL` — multiple CRITICAL + bottleneck confirmed.
+- `INCOMPLETE` — data_completeness_flags has missing layer (nelze spocitat metriky pro runtime vrstvu, ktera jeste neni).
+
+### 12. Sample report
+
+Realisticky mock run: denni batch (G2, Europe/Prague date `2026-04-19`) napric 5 source_job_ids, po runtime implementaci C-04..C-09.
+
+```
+perf_report_id:      perf-G2-2026-04-19-20260421T101500-a2fc9e51
+grain:               G2_PER_DAY
+grain_unit_id:       2026-04-19
+report_window_start: 2026-04-19T00:00:00+02:00
+report_window_end:   2026-04-19T23:59:59+02:00
+generated_at:        2026-04-21T10:15:00+02:00
+generated_by:        manual-menu
+summary_status:      AT_RISK
+summary_status_reason:
+  "bounce_rate=0.067 > 0.05 WARNING; review_sla_compliance_rate=0.58 < 0.6 CRITICAL"
+
+FUNNEL (daily aggregation across 5 source_job_ids):
+  F1 raw:                        487
+  F2 normalized:                 472
+  F3 deduped_imported:           361
+  F4 web_checked:                358
+  F5 qualified:                  162
+  F6 brief_ready:                149
+  F7 preview_generating:           3 (snapshot at report time)
+  F8 preview_ready_for_review:    11 (snapshot)
+  F9 preview_approved:           128
+  F10 outreach_ready:            128
+  F11 email_queued:               32 (snapshot)
+  F12 email_sent:                 89
+  F13 replied:                     7
+  F14 bounced:                     6
+  F14 unsubscribed:                1
+
+CONVERSION RATES:
+  conv_f1_to_f2                0.969   (HEALTHY)
+  conv_f2_to_f3                0.765   (HEALTHY)
+  conv_f3_to_f4                0.992   (HEALTHY)
+  conv_f4_to_f5                0.453   (HEALTHY)
+  conv_f5_to_f6                0.920   (HEALTHY)
+  conv_f6_to_f9                0.859   (HEALTHY — 11 still in review)
+  conv_f9_to_f10               1.000
+  conv_f10_to_f11              0.250   (WARNING — many still ready, not yet queued)
+  conv_f11_to_f12              0.735   (CRITICAL — queue failure rate high)
+  conv_f12_to_f13              0.079   (HEALTHY reply_rate)
+  conv_f12_to_f14 bounce       0.067   (WARNING — bounce_rate above 0.05)
+  conv_f12_to_f14 unsub        0.011   (HEALTHY)
+  overall_funnel_yield         0.183
+
+DROP-OFFS:
+  drop_off_stage_worst:        conv_f10_to_f11
+  drop_off_rate_worst:         0.250
+  drop_off_absolute_count_worst: conv_f4_to_f5 (196 leads lost at qualify)
+
+OPERATIONAL:
+  avg_processing_time_ms (web_check):     3214 ms   HEALTHY (<5000)
+  p95_processing_time_ms (web_check):     6891 ms   HEALTHY (<15000)
+  avg_processing_time_ms (preview_gen):  18432 ms   HEALTHY (<30000)
+  p95_processing_time_ms (preview_gen):  47521 ms   WARNING (>15000)
+  fail_rate_per_stage (send):             0.265     CRITICAL (>0.1 — C-05 queue fail-rate high)
+  retry_count:                              17
+  retry_success_rate:                       0.41     WARNING (<0.6)
+  dead_letter_count:                         9
+  dead_letter_rate:                         0.101    CRITICAL (>0.1)
+  review_queue_load:                        18       HEALTHY (<50)
+  review_sla_compliance_rate:               0.58     CRITICAL (<0.6)
+  stale_pending_count:                       4       HEALTHY (<5)
+  queue_latency_avg_ms:                  2134000 ms  HEALTHY (<3600000)
+  exception_rate:                           0.031    HEALTHY (<0.05)
+
+QUALITY:
+  bounce_rate:                              0.067    WARNING
+  hard_bounce_rate:                         0.045    WARNING (>0.02)
+  soft_bounce_rate:                         0.022
+  reply_rate:                               0.079    HEALTHY
+  positive_reply_rate:                      4/7 = 0.571
+  unclear_reply_rate:                       0.143    HEALTHY (<0.15)
+  unsubscribe_rate:                         0.011    HEALTHY
+  followup_yield_rate:                      —        (insufficient sample, < 5 followup sent)
+  preview_approval_rate:                    128/(128+21 returned to BRIEF_READY) = 0.859  HEALTHY
+  compliance_hard_stop_rate:                0.016    HEALTHY
+
+BOTTLENECK SUMMARY:
+  funnel:   conv_f11_to_f12 (0.735 — queue send failing)
+  latency:  preview_generating (p95 above healthy)
+  review:   none
+  primary:  conv_f11_to_f12 (funnel beats latency for ops priority)
+
+ALERT SUMMARY:
+  warning_count:  4
+  critical_count: 3
+  triggered:
+    - bounce_rate (0.067 > 0.05) WARNING
+    - hard_bounce_rate (0.045 > 0.02) WARNING
+    - p95 preview_generating (47521 > 15000) WARNING
+    - retry_success_rate (0.41 < 0.6) WARNING
+    - fail_rate send_stage (0.265 > 0.1) CRITICAL
+    - dead_letter_rate (0.101 > 0.1) CRITICAL
+    - review_sla_compliance_rate (0.58 < 0.6) CRITICAL
+  suppressed:
+    - followup_yield_rate (sample < 5, reason=insufficient_sample)
+    - overall_funnel_yield REL (baseline_unavailable, < 7d history)
+
+DATA COMPLETENESS:
+  c05_queue:        present
+  c07_inbound:      present
+  c09_exceptions:   present
+  c03_deadletter:   present (CS3 dead-letter materialized)
+  a09_ingest_ref:   5 joby, all 'FINAL'
+
+COMPARISON BASELINE:
+  baseline_ref: perf-G2-2026-04-12-...
+  notes: "Bounce rate up from 0.031 (4.12) to 0.067 — investigate ESP deliverability
+         or segment quality drop. Send fail rate critically elevated — queue worker issue?"
+```
+
+**Interpretace sample reportu:**
+- **Bottleneck = queue send (f11_to_f12 = 0.735)** — send layer je v problem, dead-letter rate 10%, retry success 41%.
+- **Bounce rate 6.7%** — rostouci trend vs baseline 3.1% — potenciální deliverability issue.
+- **Review SLA compliance 58%** — 4 stale pending exceptions — operator backlog.
+- **Ingest (F1-F6) je healthy** — importy prosly normalne, problem az ve outreach/send fazi.
+- **Alert summary dodava 3 critical + 4 warning signals** — report row sam dokaze operatorovi rict, co je prioritne k reseni (dead-letter rate + SLA breach).
+
+### 13. Comparison rules
+
+Mezi reports se porovnava **pouze v ramci stejneho grain-u a kompatibilni unit_id**.
+
+**G1 per-job comparison:**
+- **Valid:** stejny `portal` + `segment` + `city` + `district` → srovnatelna query-tuning baseline.
+- **Valid:** stejny `source_job_id` re-generovany v case (PARTIAL → FINAL progression).
+- **Invalid:** ruzne segmenty / cities → different baseline, comparison misleading (autoservisy Praha vs restaurace Brno nema stejnou expected conversion).
+
+**G2 per-day comparison:**
+- **Valid:** stejny day-of-week (Mon vs Mon, Tue vs Tue) — eliminovat weekend effect.
+- **Valid:** rolling 7-day mean as baseline for daily deviation detection.
+- **Invalid:** monday vs saturday (ruzne traffic patterns). Individual day vs month start (end-of-month backlog).
+- **Warning:** drug day (napr. svatek, outage day) — maji outlier flag v `notes` field.
+
+**G3 per-run comparison:**
+- **Valid:** stejny CS2 run catalog (same step set, same trigger type).
+- **Valid:** sequential runs v jednom dni (napr. 9:00 run vs 13:00 run — detect degradation during day).
+- **Invalid:** initial run vs retry-only run (retry-only run has different step coverage).
+
+**G5 per-segment comparison:**
+- **Valid:** stejny segment v case (month-over-month).
+- **Valid:** segmenty s n_sent ≥ 30 (statistical significance).
+- **Invalid:** segmenty s n_sent < 30 — reported with `sample_size_too_small` flag, not used for alerting.
+
+**Invariant: comparison baseline pointer.**
+Kazdy G1/G2 report mel in `comparison_baseline_ref` pole ukazatel na posledni compatible report (stejny grain + segment/portal dimensions). To je **deterministicky lookup** pri report build — pokud neexistuje (first report), je `null`.
+
+### 14. Auditability / observability
+
+**Cross-ref graph (jak se report propoji zpet do source data):**
+
+```
+_asw_perf_reports (C-10)
+  │
+  ├── perf_report_id ──────────> _asw_logs.payload (performance_report_generated event)
+  │                                (full JSON snapshot)
+  │
+  ├── a09_report_ref ───────────> _ingest_reports.report_id (A-09, per source_job_id)
+  │
+  ├── grain=G1 + grain_unit_id ─> _raw_import filter by source_job_id
+  │                              + LEADS filter by source_job_id
+  │
+  ├── grain=G3 + grain_unit_id ─> _asw_logs filter by cs2_run_id
+  │                              + _asw_outbound_queue filter by cs2_run_id
+  │                              + _asw_exceptions filter by cs2_run_id
+  │                              + _asw_inbound_events filter by cs2_run_id
+  │
+  ├── bottleneck_summary_json ─> konkretni stage identifikovan → log query by stage name
+  │
+  ├── alert_summary_json ──────> triggered metrics + thresholds (root-cause tracing)
+  │
+  └── comparison_baseline_ref ─> previous perf_report_id (history trend)
+```
+
+**`_asw_logs` event types PROPOSED FOR C-10 (5):**
+
+| Event type | Kdy | Payload |
+|-----------|-----|---------|
+| `performance_report_started` | Pri buildPerformanceReport_ entry | `{ grain, grain_unit_id, window_start, window_end }` |
+| `performance_report_generated` | Po writeRow_ succes | full perf_report JSON + `perf_report_id` |
+| `performance_report_failed` | Pri exception build/write | `{ grain, grain_unit_id, error_message, stack }` |
+| `performance_alert_threshold_crossed` | Per-metric pri threshold crossing | `{ perf_report_id, metric, value, threshold, severity, type }` |
+| `performance_bottleneck_detected` | Po bottleneck computation if != 'none' | `{ perf_report_id, funnel_bottleneck, latency_bottleneck, review_bottleneck, primary }` |
+
+**Observability query patterns bez dashboard:**
+
+```sql
+-- "Kolik performance reports s CRITICAL status v poslednich 7 dnech?"
+SELECT grain, COUNT(*) FROM _asw_perf_reports
+WHERE summary_status='CRITICAL'
+  AND generated_at > DATEADD(day, -7, NOW())
+GROUP BY grain;
+
+-- "Ktera metrika nejcasteji trigguje alert?"
+SELECT metric_name, COUNT(*) FROM <json_extract>(alert_summary_json, '$.triggered[*].metric')
+FROM _asw_perf_reports
+WHERE generated_at > DATEADD(day, -30, NOW())
+GROUP BY metric_name ORDER BY COUNT(*) DESC;
+
+-- "Porovnej bounce_rate mezi poslednimi 4 Monday-reporty (G2)."
+SELECT grain_unit_id, bounce_rate
+FROM _asw_perf_reports
+WHERE grain='G2_PER_DAY'
+  AND DAY_OF_WEEK(grain_unit_id)='MON'
+ORDER BY grain_unit_id DESC LIMIT 4;
+```
+
+(V Google Sheets realita je IMPORTRANGE + FILTER; query style SQL je pseudocode pro clarity.)
+
+**Zabranit double-counting:**
+- **Per-grain exclusivity:** metrika je vypoctena *v presne jednom grainu* per report row. Stejny source_job_id generuje G1 row; denni aggregation generuje G2 row — G1 row neni sucastí G2 aggregation (G2 cte zdrojove sheety primo).
+- **Per-metric idempotency:** pokud source data se nemeni, buildPerformanceReport_ produkuje bit-identicky report (pouze `perf_report_id` + `generated_at` jsou unique). Re-run = new row, ale stejny body.
+- **A-09 reuse:** C-10 G1 pouziva `_ingest_reports` FINAL row jako source pro F1-F6 (sekce ingest); neduplikuje A-09 vypocet. Pokud A-09 report jeste neexistuje (snapshot_stage='DOWNSTREAM_PARTIAL' nebo 'RAW_ONLY'), C-10 jej pocita primo + oznaci `data_completeness_flags.a09_incomplete=true`.
+
+### 15. Known limitations
+
+**Co DNES jde mereit (po C-10 implementaci):**
+- F1-F6 funnel (A-02/A-03/A-05/A-06/A-07/A-08 jsou runtime-verified). Plne compatible s A-09 reuse.
+- F9-F10 preview + outreach draft counts (B-05 je runtime-verified).
+- Operational: fail_rate_per_stage a retry_count z existujicich `_asw_logs` events.
+
+**Co je dnes JEN SPEC-derived (label INFERRED do runtime):**
+- **F11-F12 email_queued / email_sent** — vyzaduje C-05 `_asw_outbound_queue` runtime implementaci.
+- **F13-F14 replied/bounced/unsubscribed** — vyzaduje C-07 `_asw_inbound_events` runtime implementaci.
+- **dead_letter_count** — vyzaduje CS3 `_asw_dead_letters` runtime.
+- **review_sla_compliance_rate, stale_pending_count** — vyzaduje C-09 `_asw_exceptions` runtime.
+- **bounce_rate, reply_rate, unsubscribe_rate** — derived z F12/F13/F14, vyzaduje C-05+C-07.
+- **queue_latency_avg_ms** — vyzaduje C-05.
+- **exception_rate** — vyzaduje C-09.
+- **compliance_hard_stop_rate** — vyzaduje C-04 `sendability_outcome` materialization.
+- **followup_yield_rate** — vyzaduje C-07 + C-08 runtime.
+- **cs2_run_id** filtering — vyzaduje CS2 orchestrator runtime.
+
+**Derived approximations:**
+- `avg_processing_time_ms` — pocitano z `_asw_logs` consecutive timestamps within same cs2_run_id+step, ne z explicit start/end event pair. PRESNOST ZAVISI na logging frequency; p95 muze byt over-estimate pro stepy, kde neni granular logging.
+- `overall_funnel_yield` — pocitano za report window, ale realne leads muzou dobehnout mimo window (lead imported D1, sent D5). C-10 G2 per-day report reflektuje *denni aktivitu*, ne end-to-end yield leadu z daneho dne.
+- `baseline` pro REL thresholds — 7-day rolling mean ignoruje outlier days; vyzaduje explicit exclusion logic.
+
+**Prerekvizity pro plny report coverage:**
+| Dependency | Status | Co zustane INFERRED dokud |
+|------------|--------|---------------------------|
+| A-09 | runtime-verified | nic, F1-F6 VERIFIED |
+| CS1 (lifecycle_state field) | SPEC-only | F13-F14 `lifecycle_state` matching INFERRED |
+| CS2 (run_id runtime) | SPEC-only | G3 grain INFERRED |
+| CS3 (_asw_dead_letters) | SPEC-only | dead_letter_* metriky INFERRED |
+| C-04 (sendability_outcome field) | SPEC-only | blocked_by_sendability_count + compliance_hard_stop_rate INFERRED |
+| C-05 (_asw_outbound_queue) | SPEC-only | F11-F12 + queue_latency INFERRED |
+| C-06 (NormalizedSendResponse) | SPEC-only | send error class breakdown INFERRED |
+| C-07 (_asw_inbound_events) | SPEC-only | F13-F14 + all quality rates INFERRED |
+| C-08 (sequence_stage, C-08 queue rows) | SPEC-only | followup_yield + sequence_followup_reach INFERRED |
+| C-09 (_asw_exceptions) | SPEC-only | review_sla_compliance + stale_pending + exception_rate INFERRED |
+
+**Dokud runtime nerealizuje prerekvizity, C-10 report bude generovat `data_completeness_flags_json` s flagy pro chybejici vrstvy, a odpovidajici metriky pisou `null` misto hodnoty. Report zustava validni — jen necompletni.**
+
+### 16. Handoff / boundary rules
+
+| Upstream / sibling | Jak C-10 konzumuje | Jak C-10 prispiva |
+|-------------------|---------------------|-------------------|
+| **A-09** | Cte `_ingest_reports.snapshot_stage='FINAL'` pro G1 F1-F6 counts; link pres `a09_report_ref`. Ne-recomputes A-09 metriky. | Nic (read-only konzument). Nevytvari zpetny link v A-09 schema. |
+| **CS1** | Cte `lifecycle_state` pole (PROPOSED) pro F13-F14 + `review_queue_load`. | Nic (read-only konzument). Nezavadi novy canonical state. |
+| **CS2** | Cte `cs2_run_id` z `_asw_logs` pro G3 grain filtering. Cte run history pro `avg_processing_time` computation. | Nic (read-only). |
+| **CS3** | Cte `_asw_dead_letters` pro dead_letter_count + retry metriky. Cte failure_class enum pro error breakdown. | Nic (read-only). |
+| **C-04** | Cte PROPOSED `sendability_outcome` pole z LEADS pro `blocked_by_sendability_count` + `manual_review_entered_count` + `compliance_hard_stop_rate`. | Nic. |
+| **C-05** | Cte `_asw_outbound_queue` pro F11/F12 counts + `queue_latency_avg_ms` + fail_rate. | Nic. |
+| **C-06** | Cte `NormalizedSendErrorClass` breakdown z queue fail_fields pro error pattern. | Nic. |
+| **C-07** | Cte `_asw_inbound_events` pro F13/F14 + reply_class breakdown + bounce_class breakdown. | Nic. |
+| **C-08** | Cte `sequence_stage` + `parent_queue_id` v `_asw_outbound_queue` pro `followup_yield_rate` + `sequence_followup_reach_count`. | Nic. |
+| **C-09** | Cte `_asw_exceptions` pro `review_queue_load` + `review_sla_compliance_rate` + `stale_pending_count` + `exception_rate`. | Nic. |
+| **Future dashboard task** | — | Provides: stable report schema + `_asw_perf_reports` sheet as data source. Dashboard konzumuje C-10 output bez prace se syrem. |
+| **Future runtime worker task** | — | Provides: build/write contract. Runtime task implementuje `buildPerformanceReport_()` + `writePerfReport_()` + trigger points (post-run hook + daily schedule + manual menu). |
+| **Future alerting integration task** | — | Provides: `alert_summary_json` se strukturou `triggered[]`. Alerting worker cte posledni report, filtruje by severity, deliveruje. |
+| **Future BI export task** | — | Provides: deterministic schema. BI worker mirror `_asw_perf_reports` sheet do BigQuery / CSV s identickou column structure. |
+
+**Co C-10 explicitne NEMODIFIKUJE:**
+- Zadna mutace A-09 schema.
+- Zadna mutace LEADS schema (budouci `open_exceptions_count` / `lifecycle_state` jsou **C-09 / CS1 PROPOSED**, ne C-10 PROPOSED).
+- Zadna mutace CS3 / C-04..C-09 PROPOSED schemas.
+- Zadne zapisy do `apps-script/Config.gs` v tomto SPEC-only tasku.
+- Zadny novy canonical CS1 state.
+
+### 17. Non-goals (explicitní)
+
+- Neimplementuje dashboard (frontend UI / widget / chart) — budouci task.
+- Neimplementuje runtime report worker (Apps Script scheduler / cron / time trigger) — implementacni task.
+- Neimplementuje alerting integration (email / Slack / PagerDuty / SMS) — budouci task. C-10 pouze **identifikuje** threshold crossings do `alert_summary_json`.
+- Neimplementuje BI export (BigQuery sync / data warehouse / CSV dump) — budouci task.
+- Neimplementuje frontend reporting pages.
+- Nezapisuje PROPOSED enumy / Script Properties / artefakty do `apps-script/Config.gs` (implementacni task materializuje).
+- Nevytvari `_asw_perf_reports` sheet (implementacni task).
+- Nepredstavuje novy canonical CS1 state.
+- Nemodifikuje A-09 / C-04..C-09 PROPOSED schemas.
+- Neimplementuje `buildPerformanceReport_()` / `writePerfReport_()` / helper funkce v Apps Scriptu.
+- Neresi historical backfill stareho dat (implementacni task).
+- Neresi AI-based anomaly detection / forecasting (v2.0).
+- Neresi per-operator attribution / personal KPI reporting (privacy + scope out).
+- Neresi cost / billing / provider cost tracking (finance domain).
+- Neresi multi-tenant routing (single-tenant v1.0).
+- Neresi data retention / archival policy (ops task).
+- Neresi notification delivery mechanism.
+- Neimplementuje `detectPerformanceIssue()` hooks v A-*/B-*/C-* steps (implementacni task).
+
+### 18. Acceptance checklist
+
+- [x] Uvedeno, **co je C-10 a proc** (sekce 1).
+- [x] Rozliseno **C-10 vs A-09** (sekce 1).
+- [x] Dependency narrowing `A-09, C-01..C-09` → `A-09, CS1, CS2, CS3, C-04..C-09` je explicitni a dokumentovane (uvod sekce + task record).
+- [x] Reporting grains (G1..G5) definovany se source-of-truth per grain (sekce 3).
+- [x] Funnel 14 stages definovany s mappingem na CS1 + source artifact (sekce 4).
+- [x] Explicitni separace: funnel stage / outcome metric / queue milestone / review state (sekce 4).
+- [x] Funnel counts + 13 conversion rates + drop-off metriky (sekce 5).
+- [x] Operational metriky (avg/p50/p95/max/fail_rate/retry/dead_letter/review_load/sla) definovane (sekce 6).
+- [x] Quality metriky (bounce/reply/unsub + positive_reply + unclear_reply + followup_yield + preview_approval + compliance_hard_stop) definovane (sekce 7).
+- [x] Metric contract model (sekce 8) vcetne numerator/denominator/grain/source/label.
+- [x] Alert thresholds 2-tier (WARNING/CRITICAL) s ABS/REL typy + min_sample invariant (sekce 9).
+- [x] Bottleneck detection 3-lens (funnel/latency/review) + priority tiebreaker (sekce 10).
+- [x] Report schema (56 fields) s VERIFIED/INFERRED/PROPOSED labels (sekce 11).
+- [x] Sample report realisticky (G2 per-day se 5 joby + threshold triggers + bottleneck detection — sekce 12).
+- [x] Comparison rules per grain (sekce 13).
+- [x] Auditability / observability vcetne cross-ref graph + 5 `_asw_logs` PROPOSED event types (sekce 14).
+- [x] Known limitations (co JE vs co JE JEN SPEC-INFERRED) (sekce 15).
+- [x] Handoff tabulka k A-09/CS1/CS2/CS3/C-04..C-09 + future tasks (sekce 16).
+- [x] Non-goals explicitni (sekce 17).
+- [x] Po batchi je jasne **co se stalo** (alert_summary + bottleneck_summary + summary_status).
+- [x] Bottleneck je identifikovatelny (sekce 10, 3-lens + primary).
+- [x] Lze porovnat mezi batchi (sekce 13).
+- [x] Alert thresholds existuji (sekce 9).
+
+### 19. PROPOSED vs INFERRED vs VERIFIED label summary
+
+**VERIFIED (existuje v repo, runtime-proven):**
+- Source artifacts: `_raw_import` (A-02), `_ingest_reports` (A-09), LEADS core columns (A-02/A-06/A-07/A-08), `_asw_logs` (Helpers.gs).
+- Funnel F1-F6 counts (ingest + qualification + brief).
+- Funnel F9-F10 counts (preview_approved + outreach_ready z LEADS).
+- A-09 bottleneck algorithm (4-stage) reused for C-10 ingest sub-case.
+
+**INFERRED (dependent on PROPOSED vrstev; bude VERIFIED po runtime implementaci):**
+- Funnel F11-F14 counts (zavisi na C-05 + C-07 runtime).
+- Operational metriky (dead_letter_*, queue_latency_*, review_sla_*, exception_rate) — zavisi na CS3 + C-05 + C-09 runtime.
+- Kvality metriky (bounce/reply/unsub rates + derivaty) — zavisi na C-05 + C-07 runtime.
+- G3 per-run grain — zavisi na CS2 `run_id` runtime.
+- p50/p95/max latency — INFERRED z consecutive `_asw_logs` timestamps misto explicit start/end pair.
+- compliance_hard_stop_rate — zavisi na C-04 `sendability_outcome` field materialization.
+- followup_yield_rate — zavisi na C-07 + C-08 runtime.
+
+**PROPOSED FOR C-10 (nove artefakty materializovane implementacnim taskem):**
+- `_asw_perf_reports` sheet (56 fields — sekce 11).
+- `perf_report_id` format `perf-{grain}-{unit_id}-{ts14}-{uuid8}`.
+- `grain` enum (5 hodnot: `G1_PER_JOB` / `G2_PER_DAY` / `G3_PER_RUN` / `G4_PER_STAGE` / `G5_PER_SEGMENT`).
+- `summary_status` enum (5 hodnot: `OK` / `DEGRADED` / `AT_RISK` / `CRITICAL` / `INCOMPLETE`).
+- Funnel stage enum (14 hodnot: F1..F14 canonical names).
+- Alert threshold contract (WARNING / CRITICAL severity; ABS / REL / COMBO types; min_sample invariant).
+- Bottleneck detection 3-lens algorithm (funnel + latency + review lenses + priority tiebreaker).
+- `alert_summary_json` structure (`warning_count` / `critical_count` / `triggered[]` / `suppressed[]`).
+- `bottleneck_summary_json` structure (`funnel` / `latency` / `review` / `primary`).
+- `data_completeness_flags_json` structure (boolean flags per dependency layer).
+- `comparison_baseline_ref` lookup contract.
+- `PERF_REPORT_COLUMNS` constant (PROPOSED `apps-script/PerfReport.gs`).
+- `_asw_logs` event types (5): `performance_report_started`, `performance_report_generated`, `performance_report_failed`, `performance_alert_threshold_crossed`, `performance_bottleneck_detected`.
+- Script Properties: `PERF_REPORT_P95_MULTIPLIER=2.0`, `PERF_REPORT_MIN_SAMPLE_BOUNCE=30`, `PERF_REPORT_MIN_SAMPLE_REPLY=50`, `PERF_REPORT_BASELINE_WINDOW_DAYS=7`, `PERF_REPORT_DOW_GROUPING=true`, `PERF_REPORT_OUTLIER_EXCLUDE_STDDEV=3.0`.
+- Conversion rate healthy ranges (sekce 5 baseline — PROPOSED per-stage).
+- Alert threshold values (sekce 9 — PROPOSED; tuneable per Script Property override).
+- Future runtime worker contract: `buildPerformanceReport_(grain, unit_id, opts)` pure function; `writePerfReport_(sheet, report)` append-only; `generatePerformanceReport(grain, unit_id)` public entry.
+- Trigger points: post-CS2-run hook (G3) + daily scheduled (G2) + manual menu (G1/G5).
+- Future dashboard task contract: consumes stable `_asw_perf_reports` schema as read-only data source.
+- Future alerting task contract: consumes `alert_summary_json.triggered[]` and delivers via channel.
+- Future BI export task contract: mirror schema to external data warehouse.
