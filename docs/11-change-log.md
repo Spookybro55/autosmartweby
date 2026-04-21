@@ -16,6 +16,36 @@ B-05 NEMENI B-04 endpoint contract, NEMENI B-01 `PreviewBrief`, NEMENI B-03 mapp
 - **Code:** apps-script/Config.gs (modified), apps-script/EnvConfig.gs (modified), apps-script/PreviewPipeline.gs (modified), apps-script/PreviewPipeline.gs (modified), scripts/test-b05-preview-webhook.mjs (new), package.json (modified)
 - **Docs:** docs/20-current-state.md, docs/22-technical-architecture.md, docs/23-data-model.md, docs/24-automation-workflows.md, docs/26-offer-generation.md, docs/30-task-records/B5.md
 
+### [C/C-04] Sendability Gate pravidla — autoritativni SPEC gate mezi preview a outreach — DONE
+- **Scope:** Formalizuje rozhodovaci logiku, ktera stoji mezi fazi "preview hotove" a fazi "outreach queued". Definuje jedine autoritativni pravidlo pro kazdy lead, zda smi jit do auto-send, zda potrebuje manualni review, nebo zda je blokovan. Scope je **SPEC-only** — zadny runtime sender, queue, UI, webhook ani observability pipeline se v tomto tasku neimplementuje.
+
+Task dodava:
+- 3 **gate outcomes** (ne lifecycle states): `AUTO_SEND_ALLOWED` / `MANUAL_REVIEW_REQUIRED` / `SEND_BLOCKED`
+- 19 hard conditions (H1–H19) pro pripusteni auto-sendu
+- 21 blocking reasons (B1–B21) se stabilnimi reason codes, **rozclenenymi do 4 kategorii** (canonical-lifecycle / compliance / outbound-signal / data-deficit)
+- 3 review reasons (R1–R3)
+- 8-ORDER precedence rules (terminal > compliance > already-sent > qualifier > identity > content > review > allow)
+- Deterministicky pseudocode evaluatoru (lookup-only, zadny side-effect)
+- 5 sample leadu (2x AUTO_SEND + 2x BLOCK + 1x REVIEW) pro acceptance
+- Observability contract (reason codes, log schema) a boundary rules proti double-send
+- Handoff do C-05 (outbound queue), C-06 (ESP abstrakce), C-08/C-09 (rate limit / suppression)
+
+**CS1 konzistence (2026-04-21 fix round):**
+- `TERMINAL_STATE_*` block reasons (B2–B5) pokryvaji **pouze** CS1 canonical terminals: `DISQUALIFIED`, `REPLIED`, `BOUNCED`, `UNSUBSCRIBED`.
+- `WON` a `LOST` jsou downstream sales outcomes (hodnoty auxiliary pole `outreach_stage`), **NE** canonical lifecycle states. CS1 sekce 10.4 je derivuje na `effective_lifecycle_state = REPLIED` → B3.
+- `DEAD` neni canonical lifecycle state, neni to aux hodnota a neni to gate outcome. V C-04 spec se nepouziva.
+- Sample leady pouzivaji pouze CS1 canonical states.
+
+Task NEDODAVA:
+- Runtime sender, ESP provider, queue, retry stroj, outbound rate limiter
+- UI pro review frontu ani Sheets sloupec `sendability_outcome` jako editable pole
+- Apps Script zmeny, webhooky, cron scheduler
+- Frontend zmeny (read-only preview renderer zustava)
+- Zadne PROPOSED pole se **nezapisuji** do LEADS v ramci C-04 — navrh je pouze v SPEC sekci "Implementation notes" jako podklad pro C-05/C-06
+- **Owner:** Claude
+- **Code:** — (—)
+- **Docs:** docs/24-automation-workflows.md, docs/21-business-process.md, docs/20-current-state.md
+
 ## 2026-04-20
 
 ### [A/A8] Preview queue → BRIEF_READY — DONE

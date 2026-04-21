@@ -112,6 +112,8 @@ They will become physically observable in LEADS only after the `lifecycle_state`
 - Obchodni vysledky po reakci (WON, LOST v aktualnim outreach_stage) jsou **downstream sales outcome** mimo scope tohoto lifecycle. Jsou zdokumentovany v sekci 10.2 jako mapping na aktualni system, ale nejsou soucasti canonical lifecycle states.
 - Stav FAILED je non-terminal review stav pro chyby v preview/outreach vrstvach — lead v nem ceka na lidsky zasah, ktery ho vrati do flow (→ BRIEF_READY nebo → EMAIL_QUEUED).
 
+**Sendability gate (C-04):** Prechod `PREVIEW_APPROVED / OUTREACH_READY → EMAIL_QUEUED` je gated formalnim sendability evaluatorem. Specifikace pravidel, blocking reasons, review reasons a decision tree zije v `docs/24-automation-workflows.md` sekce "Sendability Gate — C-04". CS1 neimplementuje sendability logiku — pouze definuje lifecycle stavy, ktere gate cte jako vstup.
+
 ---
 
 ### 2. Canonical lifecycle principle
