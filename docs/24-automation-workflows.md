@@ -2101,3 +2101,489 @@ Pro kazde kriticke tvrzeni v C-04:
 | **C-06 (Provider abstraction)** | Gate je nezavisly na provideru; C-06 pracuje az po gate-allow. | Handoff pripraveny |
 | **C-08 (Follow-up engine)** | Follow-up ma vlastni gate (mimo scope C-04); C-04 je pouze first-touch. | Mimo scope C-04 |
 | **C-09 (Exception queue)** | Lead s outcome `MANUAL_REVIEW_REQUIRED` + reason R1–R3 je kandidat do review queue. C-04 neimplementuje queue persistence. | Handoff pripraveny |
+
+---
+
+## Outbound Queue — C-05
+
+> **Autoritativni specifikace.** Definuje datovou vrstvu mezi C-04 sendability gate a budoucim senderem.
+> **Task ID:** C-05
+> **Scope:** SPEC-only. Neimplementuje runtime worker, ESP provider, mailbox sync, ani frontend.
+> **Zavislosti:** C-04 (gate outcome je queue precondition), CS1 (EMAIL_QUEUED lifecycle state), CS2 (S12 `process_email_queue` step), CS3 (idempotency + retry + dead-letter).
+
+### 1. Ucel queue vrstvy
+
+Queue rozděluje jedinou událost "lead je schopen přijmout email" na čtyři nezávisle pozorovatelné fáze:
+
+1. **Lead je sendable** — C-04 evaluator vrátí `AUTO_SEND_ALLOWED`. Pouhé rozhodnutí. Zatím nic nebylo zapsáno do fronty.
+2. **Queue item čeká na odeslání** — v `_asw_outbound_queue` vznikne řádek se statusem `QUEUED`. Sender se ho ještě nedotkl.
+3. **Sender se pokouší odeslat** — worker řádek claimne, přechází do `SENDING`. Provider request je in-flight.
+4. **Provider potvrdil výsledek** — `SENT` (úspěch), `FAILED` (dead-letter trigger), `CANCELLED` (před odesláním zrušeno).
+
+Tato separace existuje, protože:
+- Send je **ireverzibilní** (S4/S12 v CS3 section 5.2: transient fail → max_attempts=1 → dead-letter, nikdy auto-retry).
+- Operator a audit vrstva potřebují dohledat každý pokus o odeslání, ne jen jeho finální výsledek.
+- Gate (C-04) je čistá funkce bez side-effectu; queue je trvalý zápis. Mezi nimi není žádné skryté rozhodnutí.
+- CS1 canonical lifecycle state `EMAIL_QUEUED` popisuje **lead**, ne queue řádek. Queue status (`QUEUED`/`SENDING`/`SENT`/…) je ortogonální dimenze nad queue řádkem.
+
+### 2. Queue boundary / non-goals
+
+**Co C-05 řeší:**
+- Persistentní frontu outbound emailů v systémovém sheetu `_asw_outbound_queue`.
+- Kontrakt na payload, který sender dostane od queue.
+- Queue status enum + povolené/zakázané přechody.
+- Immediate vs scheduled send pravidla na úrovni polí (kdy smí být řádek ke zpracování připuštěn).
+- Auditovatelnost: dohledatelnost každého vytvoření, každého pokusu, každého výsledku.
+- Vazba queue řádku na C-04 gate outcome (snapshot v čase queue), na `_asw_logs` (CS2 run history), na `_asw_dead_letters` (CS3), a na `lead_id` (LEADS).
+
+**Co C-05 NEŘEŠÍ:**
+- Samotný sender / worker loop — budoucí implementační task.
+- Gmail/ESP provider integrace (C-06 Provider abstraction).
+- Mailbox sync / reply detekci (stávající `SyncMailbox.gs` flow).
+- Follow-up engine (C-07 Follow-up cadence).
+- Rate limiting & quiet hours (C-08; queue zachycuje pouze `scheduled_at`, nikoli tempo odesílání).
+- Suppression list management (C-09; queue spotřebovává pouze vstup z C-04 gate, který již `suppressed`/`unsubscribed` zachytí).
+- Frontend queue UI / exception review UI.
+- Běhové změny v `apps-script/Config.gs` a `EXTENSION_COLUMNS` — všechny nové sloupce jsou **PROPOSED FOR C-05** a budou zapsány implementačním taskem (ne C-05 sám).
+- Přepsání CS1 lifecycle — C-05 **nezavádí žádný nový canonical state**. `EMAIL_QUEUED` existuje v CS1 a zůstává beze změny.
+
+### 3. `_asw_outbound_queue` schema
+
+Sheet name: `_asw_outbound_queue` (leading underscore per konvenci `_asw_logs`, `_asw_dead_letters`, `_raw_import`, `_ingest_reports`).
+Storage: append-only pro INSERT; in-place update pro status transitions (ne nový řádek per attempt — stejný řádek, aktualizované sloupce, timestamp audit trail v log vrstvě).
+
+| # | Field | Typ | Required | Nullable | Povinné pri create | Povinné pri update (status change) | Popis / source | Label |
+|---|-------|-----|----------|----------|--------------------|-------------------------------------|---------------|-------|
+| 1 | `outreach_queue_id` | string | ANO | NE | ANO | NE (immutable) | UUID nebo `QUE-{yyyyMMdd}-{nanoid}`. Generován při insertu. Primary key fronty. | PROPOSED FOR C-05 |
+| 2 | `lead_id` | string | ANO | NE | ANO | NE (immutable) | FK na LEADS. VERIFIED IN REPO: `lead_id` existuje v `EXTENSION_COLUMNS` (Config.gs). | VERIFIED (reuse) |
+| 3 | `source_job_id` | string | ANO | ANO | ANO (z LEADS snapshot) | NE (immutable) | Pro dohledání, z jakého ingest jobu lead pochází. VERIFIED IN REPO (Config.gs). | VERIFIED (reuse) |
+| 4 | `recipient_email` | string | ANO | NE | ANO | NE (immutable) | Snapshot `email` z LEADS v čase queue. C-04 H1–H4 již garantovalo validitu. | PROPOSED FOR C-05 |
+| 5 | `send_channel` | enum | ANO | NE | ANO | NE (immutable) | Zatím jediná hodnota `EMAIL`. Rezerva pro pozdější `SMS` / `LINKEDIN` (mimo scope). | PROPOSED FOR C-05 |
+| 6 | `email_subject` | string | ANO | NE | ANO | NE (immutable) | Snapshot `email_subject_draft`. Immutable — změna draftu po queue vytváří nový queue řádek. | PROPOSED FOR C-05 |
+| 7 | `email_body` | string | ANO | NE | ANO | NE (immutable) | Snapshot `email_body_draft`. Immutable — viz subject. | PROPOSED FOR C-05 |
+| 8 | `preview_url` | string | NE | ANO | ANO pokud `send_allowed=TRUE` a `preview_url` není prázdné | NE (immutable) | Snapshot `preview_url` v čase queue. Pokud bude v body použit, musí být freeznutý. | VERIFIED (reuse) |
+| 9 | `personalization_json` | string (JSON) | NE | ANO | NE | NE (immutable) | Serializovaný merge snapshot (placeholders použité v subject/body). Pro audit rekonstrukce, proč email vypadal takto. | PROPOSED FOR C-05 |
+| 10 | `send_status` | enum | ANO | NE | ANO (vždy `QUEUED`) | ANO (při každé transition) | `QUEUED` / `SENDING` / `SENT` / `FAILED` / `CANCELLED`. Viz sekce 4. | PROPOSED FOR C-05 |
+| 11 | `send_mode` | enum | ANO | NE | ANO | NE (immutable) | `IMMEDIATE` / `SCHEDULED`. Viz sekce 8. | PROPOSED FOR C-05 |
+| 12 | `scheduled_at` | timestamp (ISO 8601) | NE | ANO | ANO pokud `send_mode=SCHEDULED` | NE (immutable) | Nejbližší okamžik, kdy smí worker row claimnout. Null pro `IMMEDIATE`. | PROPOSED FOR C-05 |
+| 13 | `queued_at` | timestamp | ANO | NE | ANO (čas insertu) | NE (immutable) | Kdy byl řádek vložen do fronty. | PROPOSED FOR C-05 |
+| 14 | `sent_at` | timestamp | NE | ANO | NE | ANO při přechodu na `SENT` | Čas potvrzení od providera. Null do té doby. | PROPOSED FOR C-05 |
+| 15 | `send_attempts` | integer | ANO | NE | ANO (init `0`) | ANO (+1 při `QUEUED→SENDING`) | Kolik claim-attemptů proběhlo. Per CS3 S12 rule: max 1 attempt u ireverzibilního send. | PROPOSED FOR C-05 |
+| 16 | `last_attempt_at` | timestamp | NE | ANO | NE | ANO při `QUEUED→SENDING` | Čas posledního claimu. | PROPOSED FOR C-05 |
+| 17 | `provider_message_id` | string | NE | ANO | NE | ANO při přechodu na `SENT` | Gmail message ID / ESP message ID (provider-dependent). | PROPOSED FOR C-05 |
+| 18 | `failure_reason` | string | NE | ANO | NE | ANO při přechodu na `FAILED` | Human-readable zpráva pro operator. | PROPOSED FOR C-05 |
+| 19 | `failure_class` | enum | NE | ANO | NE | ANO při přechodu na `FAILED` | `TRANSIENT` / `PERMANENT` / `AMBIGUOUS` — per CS3 section 5.1. | PROPOSED FOR C-05 |
+| 20 | `cancelled_at` | timestamp | NE | ANO | NE | ANO při přechodu na `CANCELLED` | Čas cancellation. | PROPOSED FOR C-05 |
+| 21 | `cancel_reason` | string | NE | ANO | NE | ANO při přechodu na `CANCELLED` | Strukturovaný důvod (např. `RE_EVAL_SENDABILITY_BLOCKED`, `OPERATOR_CANCEL`, `LEAD_REPLIED_FIRST`). | PROPOSED FOR C-05 |
+| 22 | `priority` | integer | ANO | NE | ANO (default `100`) | NE (immutable) | 0–999, nižší číslo = vyšší priorita. Default 100. Pro budoucí C-08 ordering. Queue sám nepoužívá — pouze uchovává. | PROPOSED FOR C-05 |
+| 23 | `idempotency_key` | string | ANO | NE | ANO | NE (immutable) | `send:{lead_id}:{SHA256(recipient_email + email_subject + email_body)}`. Per CS3 section 4 S12 (reuses S4 formal_key pattern). Unique constraint pro prevenci duplicitního queueingu totožného obsahu. | INFERRED (reuse S4 formal_key pattern) |
+| 24 | `payload_version` | string | ANO | NE | ANO (fixed `1.0`) | NE (immutable) | Verze payload kontraktu (sekce 6). Pro forward-compatibility. | PROPOSED FOR C-05 |
+| 25 | `created_from_sendability_outcome` | enum | ANO | NE | ANO (`AUTO_SEND_ALLOWED`) | NE (immutable) | Snapshot C-04 outcome v čase queue. Queue audit invariant: pouze `AUTO_SEND_ALLOWED` smí vygenerovat queue řádek. | PROPOSED FOR C-05 |
+| 26 | `sendability_primary_reason_snapshot` | string | NE | ANO | ANO (obvykle prázdné pro AUTO_SEND_ALLOWED) | NE (immutable) | Snapshot C-04 `sendability_primary_reason` (pro AUTO_SEND_ALLOWED obvykle null/empty; drží se pro audit konzistence). | PROPOSED FOR C-05 |
+| 27 | `sendability_evaluated_at_snapshot` | timestamp | ANO | NE | ANO | NE (immutable) | Snapshot C-04 `sendability_evaluated_at`. Kolik je gate outcome starý v době queue. | PROPOSED FOR C-05 |
+| 28 | `created_at` | timestamp | ANO | NE | ANO | NE (immutable) | Row creation time. Zpravidla = `queued_at`. | PROPOSED FOR C-05 |
+| 29 | `updated_at` | timestamp | ANO | NE | ANO | ANO (při každé transition) | Row last-modified time. | PROPOSED FOR C-05 |
+| 30 | `run_id_last` | string | NE | ANO | NE | ANO při každé worker akci | Cross-ref do `_asw_logs` (CS2 run history) posledního claimu. | INFERRED (reuse CS2 run_id) |
+| 31 | `event_id_last` | string | NE | ANO | NE | ANO při každé worker akci | Cross-ref do `_asw_logs` posledního eventu. | INFERRED (reuse CS2 event_id) |
+| 32 | `dead_letter_id` | string | NE | ANO | NE | ANO při přechodu na `FAILED` pokud row byl promoted | Cross-ref do `_asw_dead_letters` řádku (CS3 section 6.3). | INFERRED (reuse CS3) |
+
+**Sumární počet polí:** 32. Z toho 15 minimum povinných per zadání + 17 auditability/integrity rozšíření s vazbou na CS2/CS3/C-04.
+
+**Zdůvodnění doplněných polí** (nad 15 z původního zadání):
+
+| Pole | Proč nutné |
+|------|-----------|
+| `send_mode` | Bez něj nelze odlišit immediate od scheduled na schema úrovni. Worker query jinak nemá bezpečný filtr. |
+| `queued_at`, `last_attempt_at`, `cancelled_at`, `created_at`, `updated_at` | Auditovatelnost každé fáze. Bez nich není dohledatelné, kdy se co stalo. |
+| `failure_class` | CS3 section 5.1 rozlišuje TRANSIENT/PERMANENT/AMBIGUOUS. Bez failure_class nelze queue failure napojit na CS3 retry matici. |
+| `cancel_reason` | Bez důvodu cancellace je nemožné diagnostikovat, zda byl cancel legitimní. |
+| `priority` | Pro C-08 ordering. Queue ho pouze drží (nepoužívá). |
+| `idempotency_key` | CS3 section 4 S12 vyžaduje `send:{lead_id}:{SHA256(email + subject + body)}`. Bez něj duplicate queueing. |
+| `payload_version` | Forward compatibility; nutné pokud se payload kontrakt v budoucnu evolvuje. |
+| `created_from_sendability_outcome`, `sendability_primary_reason_snapshot`, `sendability_evaluated_at_snapshot` | Bez nich queue řádek neví, **jaký** gate outcome ho povolil. Audit invariant: kdyby se gate semantika změnila, musíme vědět, která verze řádek propustila. |
+| `run_id_last`, `event_id_last` | Cross-ref do `_asw_logs` — bez nich není queue propojená s CS2 run history. |
+| `dead_letter_id` | Cross-ref do `_asw_dead_letters` — bez něj nelze z queue řádku skočit do dead-letter detailu. |
+
+### 4. Queue status enum + transition rules
+
+| Status | Definice | Kdo zapisuje | Povolené transitions | Zakázané transitions | Terminal? | Retry-eligible? |
+|--------|----------|--------------|----------------------|----------------------|-----------|-----------------|
+| `QUEUED` | Řádek čeká na worker claim. Nic se zatím neodeslalo. | Queue producer (volaný po C-04 gate AUTO_SEND_ALLOWED). | → `SENDING` (worker claim), → `CANCELLED` (operator/re-eval) | → `SENT` (porušuje separaci), → `FAILED` (porušuje separaci: fail musí být attributable k attemptu) | NE | — (ještě se nepokoušelo) |
+| `SENDING` | Worker řádek claimnul, provider request je in-flight. | Worker (při claimu). `send_attempts += 1`, `last_attempt_at = now`. | → `SENT` (provider success), → `FAILED` (provider fail) | → `QUEUED` (send je IREVERZIBILNÍ, rollback je nebezpečný), → `CANCELLED` (nelze cancel už in-flight request; racing condition) | NE | NE (CS3 S12 max_attempts=1) |
+| `SENT` | Provider potvrdil přijetí. `provider_message_id` přítomné. | Worker (on success). `sent_at = now`, `provider_message_id = X`. | — | všechny | ANO | NE |
+| `FAILED` | Provider selhal nebo byl ambiguous. `failure_reason` + `failure_class` přítomné. Řádek zpravidla promoted do `_asw_dead_letters`. | Worker (on fail). | — | → `QUEUED` (CS3: ne auto-retry; manual re-drive znamená **nový** queue řádek, ne přepis stávajícího) | ANO | NE (manual-only; vytvoří nový queue řádek) |
+| `CANCELLED` | Řádek byl zrušen před SENDING. | Operator (manual), nebo queue cancel job (např. re-evaluate sendability vrátí BLOCKED, nebo lead `REPLIED` před odeslání). | — | → `SENDING`, → `SENT`, → `FAILED` | ANO | NE |
+
+**Invarianty přechodů:**
+1. `QUEUED` je jediný neterminálni status, který přijímá claim.
+2. `SENDING` je jednosměrný — jakmile řádek projde přes `SENDING`, už nemůže do `QUEUED`. To je esenciální guard proti duplicitnímu odeslání.
+3. `SENT` a `FAILED` jsou per CS3 terminální — retry matrice nezakládá **auto** retry na stejné row; manuální re-drive kreuje nový queue řádek se stejným `lead_id`, novým `outreach_queue_id`, novým `idempotency_key` (pokud se změnil subject/body) nebo BLOCKEM (pokud se nezměnil — duplicate key).
+4. `CANCELLED` je povoleno pouze z `QUEUED`. Z `SENDING` není cancel možný, protože provider request už běží a jeho výsledek může být `SENT` nezávisle na tom, co queue chtěla.
+5. Žádná transition nemění `outreach_queue_id`, `lead_id`, `source_job_id`, `recipient_email`, `email_subject`, `email_body`, `preview_url`, `personalization_json`, `send_mode`, `scheduled_at`, `idempotency_key`, `payload_version`, `created_from_sendability_outcome`, `created_at`, `queued_at`, `send_channel`, `priority` (= immutable snapshot set).
+
+### 5. Queue lifecycle / decision flow
+
+```
+C-04 gate evaluator:
+  IF outcome == AUTO_SEND_ALLOWED:
+    # Pre-insert duplicate guard (CS3 idempotency)
+    idempotency_key = "send:" + lead_id + ":" + sha256(recipient_email + email_subject + email_body)
+    IF queue sheet contains row with same idempotency_key AND send_status IN { QUEUED, SENDING, SENT }:
+      LOG "duplicate queue insert blocked" + existing outreach_queue_id
+      RETURN existing row reference
+      # Do not insert a duplicate. Do not update. Idempotency at the producer boundary.
+    # Build queue row
+    row = {
+      outreach_queue_id:                generate_uuid(),
+      lead_id:                          lead.lead_id,
+      source_job_id:                    lead.source_job_id,
+      recipient_email:                  lead.email,
+      send_channel:                     "EMAIL",
+      email_subject:                    lead.email_subject_draft,
+      email_body:                       lead.email_body_draft,
+      preview_url:                      lead.preview_url,
+      personalization_json:             serialize(personalization_snapshot),
+      send_status:                      "QUEUED",
+      send_mode:                        caller_supplied | default "IMMEDIATE",
+      scheduled_at:                     caller_supplied | null,
+      queued_at:                        now(),
+      created_at:                       now(),
+      updated_at:                       now(),
+      send_attempts:                    0,
+      priority:                         caller_supplied | 100,
+      idempotency_key:                  idempotency_key,
+      payload_version:                  "1.0",
+      created_from_sendability_outcome: "AUTO_SEND_ALLOWED",
+      sendability_primary_reason_snapshot: lead.sendability_primary_reason,
+      sendability_evaluated_at_snapshot:   lead.sendability_evaluated_at,
+      // sent_at, last_attempt_at, provider_message_id, failure_*, cancelled_at, cancel_reason, run_id_last, event_id_last, dead_letter_id — null initially
+    }
+    append row to _asw_outbound_queue
+    LOG "queue_row_created" with outreach_queue_id, lead_id, idempotency_key
+    RETURN row
+  IF outcome != AUTO_SEND_ALLOWED:
+    # Queue is never created. C-04 MANUAL_REVIEW_REQUIRED routes to C-09 review queue (separate). SEND_BLOCKED terminates.
+    RETURN null
+```
+
+**Worker claim (out of C-05 scope — specified only for contract clarity):**
+
+```
+worker_claim(row):
+  PRE:  row.send_status == "QUEUED"
+  PRE:  row.send_mode == "IMMEDIATE" OR (row.send_mode == "SCHEDULED" AND now() >= row.scheduled_at)
+  PRE:  C-04 re-evaluation for lead_id still returns AUTO_SEND_ALLOWED
+        (staleness guard — gate může být invalidated např. UNSUBSCRIBED)
+  atomic:
+    row.send_status   = "SENDING"
+    row.send_attempts = row.send_attempts + 1
+    row.last_attempt_at = now()
+    row.updated_at    = now()
+    row.run_id_last   = current_run_id
+    row.event_id_last = current_event_id
+```
+
+**Cancel:**
+
+```
+cancel_row(row, reason):
+  PRE: row.send_status == "QUEUED"
+  IF row.send_status != "QUEUED":
+    REJECT "not cancellable" (SENDING/SENT/FAILED/CANCELLED)
+  row.send_status   = "CANCELLED"
+  row.cancelled_at  = now()
+  row.cancel_reason = reason
+  row.updated_at    = now()
+```
+
+**Fail:**
+
+```
+mark_failed(row, reason, failure_class):
+  PRE: row.send_status == "SENDING"
+  row.send_status     = "FAILED"
+  row.failure_reason  = reason
+  row.failure_class   = failure_class  # TRANSIENT | PERMANENT | AMBIGUOUS
+  row.updated_at      = now()
+  # CS3 S12: ireverzibilni; dead-letter okamzite (max_attempts=1 fresh attempt)
+  dl_id = promote_to_dead_letter(row)
+  row.dead_letter_id  = dl_id
+```
+
+### 6. Send payload contract (queue → sender)
+
+**Payload kontrakt** (verze `1.0`) — ten, který sender od queue dostane. Sender nevolá LEADS znovu; všechny hodnoty jsou snapshoty v čase queue insertu.
+
+| Field | Typ | Required | Význam | Source | Immutable snapshot / runtime-derived |
+|-------|-----|----------|-------|--------|---------------------------------------|
+| `outreach_queue_id` | string | ANO | Queue row PK. Předá se do `provider_message_id` correlation hlaviček (např. `X-Correlation-Id`). | queue row | immutable snapshot |
+| `lead_id` | string | ANO | Cross-ref do LEADS. | queue row | immutable snapshot |
+| `idempotency_key` | string | ANO | Pro provider-level dedup. | queue row | immutable snapshot |
+| `recipient` | object `{ email: string }` | ANO | Pouze email pro v1.0. Rezerva pro `{ email, name, display }` v pozdější verzi. | queue row `recipient_email` | immutable snapshot |
+| `channel` | enum `"EMAIL"` | ANO | Pro v1.0 pouze email. | queue row `send_channel` | immutable snapshot |
+| `subject` | string | ANO | Email subject. | queue row `email_subject` | immutable snapshot |
+| `body` | string | ANO | Email body (HTML nebo plain — decision v C-06). | queue row `email_body` | immutable snapshot |
+| `preview_url` | string/null | NE | Pokud je v body zmíněná, musí být freeznuta. | queue row `preview_url` | immutable snapshot |
+| `personalization` | object (JSON) | NE | Placeholders použité při renderu subject/body. Pro audit. | queue row `personalization_json` | immutable snapshot |
+| `scheduling` | object `{ mode: "IMMEDIATE"\|"SCHEDULED", scheduled_at: ISO8601\|null, queued_at: ISO8601 }` | ANO | Metadata. Sender v1.0 nepoužívá, ale dostává pro konzistenci. | queue row | immutable snapshot |
+| `correlation` | object `{ run_id: string\|null, event_id: string\|null, source_job_id: string\|null, sendability_outcome: "AUTO_SEND_ALLOWED", sendability_evaluated_at: ISO8601 }` | ANO | CS2/C-04 cross-ref. | queue row | runtime-derived (`run_id`, `event_id` set at claim; zbytek snapshot) |
+| `payload_version` | string `"1.0"` | ANO | Protokol verze. | queue row | immutable snapshot |
+
+**Payload invarianty:**
+- Všechny textové obsahy (subject, body, preview_url, personalization) jsou **immutable snapshots** — sender nikdy nečte aktuální stav LEADS; čte queue. Zaručuje, že co bylo schváleno gatem, to je i odesláno.
+- `correlation.run_id` a `correlation.event_id` jsou **runtime-derived** — nastavují se v momentu claimu, ne při queue insertu.
+- `payload_version` je **povinné** a **pevné pro v1.0**. Změna struktury payloadu = nové payload_version + sender musí umět rozlišit.
+
+### 7. Ready vs queued vs sent separation
+
+| Situace | Kde je to vyjádřeno |
+|---------|---------------------|
+| **Lead má `AUTO_SEND_ALLOWED`** | LEADS řádek, `sendability_outcome = AUTO_SEND_ALLOWED` (PROPOSED FOR C-04). Queue řádek **ještě neexistuje**. Nikdo nebyl obeslán. |
+| **Queue řádek existuje a je `QUEUED`** | `_asw_outbound_queue` řádek s `send_status = QUEUED`. Worker ho zatím nepřevzal. Lead CS1 state = `EMAIL_QUEUED` (T17). |
+| **Sender právě posílá (`SENDING`)** | Stejný queue řádek, `send_status = SENDING`, `send_attempts = 1`, `last_attempt_at` nastavený. Provider request je in-flight. Lead CS1 state = `EMAIL_QUEUED` (nemění se; transition na `EMAIL_SENT` proběhne až při terminální `SENT`). |
+| **Provider potvrdil odeslání (`SENT`)** | Queue řádek `send_status = SENT`, `sent_at` + `provider_message_id` nastavené. Lead CS1 state přejde z `EMAIL_QUEUED` na `EMAIL_SENT` (T18). |
+
+**Ostré hranice (proto existuje queue):**
+- "Gate řekl ANO" neznamená, že kdokoliv byl obeslán. `AUTO_SEND_ALLOWED` bez queue řádku = lead je teoreticky způsobilý, prakticky nic neproběhlo.
+- Queue řádek `QUEUED` neznamená, že email odešel. Znamená, že vznikl záměr ho odeslat.
+- Queue řádek `SENDING` neznamená, že email odešel. Znamená, že se o to právě pokoušíme a ještě neznáme výsledek.
+- `SENT` znamená, že provider potvrdil přijetí do své sítě. Nezaručuje delivery do inboxu (to je doména C-06/provider).
+- `FAILED` znamená, že provider request selhal. Neznamená nutně, že email neodešel (u TRANSIENT nebo AMBIGUOUS tříd může být provider stav nejistý — proto CS3 max_attempts=1 a okamžitý dead-letter).
+
+### 8. Immediate vs scheduled send rules
+
+| Rozhodnutí | `IMMEDIATE` | `SCHEDULED` |
+|------------|-------------|-------------|
+| Create-time `send_mode` | `IMMEDIATE` | `SCHEDULED` |
+| Create-time `scheduled_at` | MUSÍ být `null` | MUSÍ být nenull ISO 8601 timestamp v budoucnu (>= now při insertu) |
+| Rozhoduje o `scheduled_at` | — | Caller při queue insertu (operator / budoucí C-08 rate limiter / budoucí batch orchestrator) |
+| Worker může claim | Ihned po insertu (worker polling / trigger) | Pouze pokud `now() >= scheduled_at` |
+| Cancel před `scheduled_at` | OK (status je `QUEUED` → `CANCELLED`) | OK (status je `QUEUED` → `CANCELLED`). `scheduled_at` se nemaže, audit drží záznam. |
+| Rescheduling | NENÍ povoleno. Cancel + new queue row. | NENÍ povoleno. Cancel + new queue row. `scheduled_at` je **immutable**. |
+| Chování po `scheduled_at` bez claimu | Žádné — řádek zůstává `QUEUED`. Worker polling ho chytne při dalším průchodu. | Žádné — řádek zůstává `QUEUED`, dokud ho worker nechytne. `scheduled_at` v minulosti je validní (worker claim je eligible). |
+
+**Zdůvodnění immutability `scheduled_at`:**
+- Rescheduling by vyžadoval rollback-style update, který porušuje separaci snapshot-vs-runtime. Cleaner: cancel + new queue row.
+- Rescheduling bez auditu (přepsání `scheduled_at` in-place) by znemožnil zpětně rekonstruovat, kdy jsme plánovali odeslat email.
+
+### 9. Failure design
+
+**Každý failed queue řádek MUSÍ obsahovat:**
+
+| Pole | Proč |
+|------|------|
+| `send_status = FAILED` | Status terminál. |
+| `failure_reason` | Human-readable zpráva (např. "Gmail API returned 401 Unauthorized"). |
+| `failure_class ∈ { TRANSIENT, PERMANENT, AMBIGUOUS }` | Pro mapping na CS3 retry matici (section 5.1). |
+| `send_attempts >= 1` | Invariant: FAILED může nastat pouze z SENDING, SENDING inkrementoval `send_attempts`. |
+| `last_attempt_at` | Čas pokusu. |
+| `updated_at` | Čas zápisu failure. |
+| `run_id_last`, `event_id_last` | Cross-ref do `_asw_logs` posledního pokusu. |
+| `dead_letter_id` | Cross-ref do `_asw_dead_letters` — promocí per CS3 S12 (max_attempts=1 → dead-letter okamžitě). |
+
+**Dohledatelnost každého pokusu:**
+- Queue row sám je **per-lead-per-content scope**: jeden queue řádek = jedno `lead_id` + jeden obsah (subject+body+recipient). Z queue řádku získáme nanejvýš 1 pokus (CS3 S12 rule).
+- Pokus jako událost je dohledatelný v `_asw_logs` přes `run_id_last` + `event_id_last`. `_asw_logs` je CS2 source of truth pro run history.
+- Retry jako event není na stejné row — retry = **nový** queue row s novým `outreach_queue_id`. Pokud se subject/body nezměnil, `idempotency_key` je stejný a producer-side duplicate guard (sekce 5) **zablokuje** nový insert. Retry po FAILED tedy vyžaduje **operator intent**: buď vynucená změna obsahu (nový idempotency_key), nebo explicitní operator re-drive z dead-letter resolution (viz CS3 section 6.2).
+- Dead-letter row v `_asw_dead_letters` obsahuje `last_run_id`, `last_event_id` a referenci na queue row (přes correlation metadata, schema CS3 section 6.3). Cross-ref je bi-directional: queue.`dead_letter_id` ↔ dead_letter.`step_key` / `lead_id`.
+
+**Vztah k CS3 retry a dead-letter:**
+- CS3 section 5.2: S12 `process_email_queue` má `max_attempts = 1` pro všechny třídy (TRANSIENT/PERMANENT/AMBIGUOUS). Důvod: send je ireverzibilní; retry nad ambiguous stavem může vést k duplicitnímu emailu.
+- CS3 section 6: dead-letter je povinný outcome po vyčerpání pokusů. C-05 respektuje: každý FAILED queue row je promoted do `_asw_dead_letters` (nebo reference dříve promotovaného, viz CS3 6.2).
+- C-05 NEDEFINUJE tělo `_asw_dead_letters` schema — to je CS3 section 6.3. C-05 pouze drží `dead_letter_id` cross-ref.
+
+### 10. Auditability / observability
+
+**Vytvoření queue row je dohledatelné:**
+- `outreach_queue_id` (PK)
+- `lead_id` (FK do LEADS)
+- `idempotency_key` (unique lookup)
+- `created_at`, `queued_at` (identické v zdravém stavu)
+- Log event `queue_row_created` do `_asw_logs` s payloadem `{ outreach_queue_id, lead_id, idempotency_key, sendability_evaluated_at_snapshot }`
+
+**Každý pokus o odeslání je dohledatelný:**
+- Queue row in-place update: `send_status = SENDING`, `send_attempts += 1`, `last_attempt_at`, `run_id_last`, `event_id_last`.
+- Log event `queue_row_sending` do `_asw_logs` s payloadem `{ outreach_queue_id, lead_id, send_attempts, run_id }`.
+- Cross-ref: `_asw_logs` row má `lead_id` + `run_id` + `event_id` + `outreach_queue_id` v payloadu.
+
+**Vazby (cross-ref graph):**
+
+```
+LEADS row (lead_id)
+   ↓ 1:N
+_asw_outbound_queue (outreach_queue_id)
+   ↓ 1:1 per attempt
+_asw_logs (run_id, event_id)   ← CS2 run history
+   ↓ 1:0..1 (pouze pro FAILED)
+_asw_dead_letters              ← CS3 dead-letter
+```
+
+- LEADS.`lead_id` ↔ queue.`lead_id`: FK. Jeden lead může mít N queue řádků (sekvence obsahů / first touch + follow-up / retry po dead-letter resolution).
+- queue.`outreach_queue_id` ↔ `_asw_logs`.payload.outreach_queue_id: N queue events per queue row (create, claim, sent/fail/cancel).
+- queue.`dead_letter_id` ↔ `_asw_dead_letters`.{PK}: 1:1. Pouze pro FAILED queue rows.
+- Queue.`source_job_id` ↔ `_raw_import`/`_ingest_reports`.source_job_id: queue → ingest origin traceback.
+- Queue.`created_from_sendability_outcome` + `sendability_evaluated_at_snapshot`: capture C-04 gate verdict v čase. I když C-04 spec změní pravidla později, queue řádek ví, **která verze** evaluace ho propustila.
+
+### 11. Sample rows
+
+Sheet headery (zkrácený subset pro readability — plné 32 polí viz sekce 3):
+
+```
+outreach_queue_id | lead_id | recipient_email | email_subject | send_status | send_mode | scheduled_at | queued_at | sent_at | send_attempts | last_attempt_at | provider_message_id | failure_reason | failure_class | cancelled_at | cancel_reason | idempotency_key | created_from_sendability_outcome | dead_letter_id
+```
+
+**Sample 1 — queue row after creation (QUEUED, IMMEDIATE):**
+
+| Pole | Hodnota |
+|------|---------|
+| `outreach_queue_id` | `QUE-20260421-a7k3p8n2` |
+| `lead_id` | `ASW-00412` |
+| `source_job_id` | `firmy-cz:praha:instalater:20260416` |
+| `recipient_email` | `info@novak-instalater.cz` |
+| `send_channel` | `EMAIL` |
+| `email_subject` | `Dobry den pane Novak, vase firma potrebuje web` |
+| `email_body` | (snapshot draftu) |
+| `preview_url` | `https://preview.autosmartweb.cz/novak-instalater-abc123` |
+| `send_status` | `QUEUED` |
+| `send_mode` | `IMMEDIATE` |
+| `scheduled_at` | `null` |
+| `queued_at` | `2026-04-21T09:12:03+02:00` |
+| `sent_at` | `null` |
+| `send_attempts` | `0` |
+| `last_attempt_at` | `null` |
+| `provider_message_id` | `null` |
+| `failure_reason` | `null` |
+| `failure_class` | `null` |
+| `cancelled_at` | `null` |
+| `cancel_reason` | `null` |
+| `idempotency_key` | `send:ASW-00412:9f3b1e...c8a2` |
+| `payload_version` | `1.0` |
+| `created_from_sendability_outcome` | `AUTO_SEND_ALLOWED` |
+| `sendability_evaluated_at_snapshot` | `2026-04-21T09:11:58+02:00` |
+| `dead_letter_id` | `null` |
+
+**Semantics:** Právě vznikl queue item. C-04 gate vrátil `AUTO_SEND_ALLOWED` 5 sekund před insertem. Worker ho může claim okamžitě.
+
+**Sample 2 — queue row after successful send (SENT):**
+
+Stejný řádek po úspěšném claimu + provider success:
+
+| Pole | Hodnota |
+|------|---------|
+| `send_status` | `SENT` |
+| `send_attempts` | `1` |
+| `queued_at` | `2026-04-21T09:12:03+02:00` (nezměněno) |
+| `last_attempt_at` | `2026-04-21T09:14:27+02:00` |
+| `sent_at` | `2026-04-21T09:14:29+02:00` |
+| `provider_message_id` | `<CAH5XYZ@mail.gmail.com>` |
+| `run_id_last` | `run-20260421-send-0914` |
+| `event_id_last` | `evt-send-ASW-00412-0001` |
+| `updated_at` | `2026-04-21T09:14:29+02:00` |
+
+**Semantics:** Worker claimnul řádek v 09:14:27 (`last_attempt_at`), Gmail vrátil message ID v 09:14:29 (`sent_at`). Lead CS1 state byl T18 transitioned z `EMAIL_QUEUED` na `EMAIL_SENT`.
+
+**Sample 3 — queue row after failed send (FAILED):**
+
+Queue řádek pro jiný lead, který selhal na Gmail 401:
+
+| Pole | Hodnota |
+|------|---------|
+| `outreach_queue_id` | `QUE-20260421-b8m4q9p3` |
+| `lead_id` | `ASW-00517` |
+| `recipient_email` | `kontakt@elektrikar-brno.cz` |
+| `send_status` | `FAILED` |
+| `send_mode` | `IMMEDIATE` |
+| `queued_at` | `2026-04-21T09:20:00+02:00` |
+| `sent_at` | `null` |
+| `send_attempts` | `1` |
+| `last_attempt_at` | `2026-04-21T09:22:11+02:00` |
+| `provider_message_id` | `null` |
+| `failure_reason` | `Gmail API returned 401 Unauthorized — token expired` |
+| `failure_class` | `TRANSIENT` |
+| `run_id_last` | `run-20260421-send-0922` |
+| `event_id_last` | `evt-send-ASW-00517-0001` |
+| `dead_letter_id` | `DL-20260421-send-ASW00517` |
+| `updated_at` | `2026-04-21T09:22:11+02:00` |
+
+**Semantics:** Provider failed s TRANSIENT třídou, ale CS3 S12 pravidlo: max_attempts=1 i pro TRANSIENT (send je ireverzibilní). Řádek je terminální FAILED, okamžitě promoted do `_asw_dead_letters`. Operator musí manuálně rozhodnout o re-drive (nový queue řádek). Lead CS1 state zůstává `EMAIL_QUEUED` (FAILED queue neuzavírá CS1 — transition na `EMAIL_SENT` nenastal; operator může T25 DROP na `FAILED` CS1 state přes menu akci).
+
+**Sample 4 — queue row cancelled before sending (CANCELLED):**
+
+Queue řádek, který byl zrušen protože lead mezitím odpověděl sám (pre-emptive reply):
+
+| Pole | Hodnota |
+|------|---------|
+| `outreach_queue_id` | `QUE-20260421-c9n5r0q4` |
+| `lead_id` | `ASW-00389` |
+| `send_status` | `CANCELLED` |
+| `send_mode` | `SCHEDULED` |
+| `scheduled_at` | `2026-04-21T14:00:00+02:00` |
+| `queued_at` | `2026-04-21T09:30:00+02:00` |
+| `sent_at` | `null` |
+| `send_attempts` | `0` |
+| `last_attempt_at` | `null` |
+| `provider_message_id` | `null` |
+| `cancelled_at` | `2026-04-21T11:17:02+02:00` |
+| `cancel_reason` | `LEAD_REPLIED_FIRST` |
+| `updated_at` | `2026-04-21T11:17:02+02:00` |
+
+**Semantics:** Queue row byl naplánován na 14:00, ale v 11:17 mailbox sync detekoval inbound reply od tohoto leadu. Cancel job přepsal status na `CANCELLED` před tím, než worker stihl claim. Worker už tento řádek neclaimne (precondition `send_status == QUEUED`). Lead CS1 state přejde T19 na `REPLIED` (terminal). `cancel_reason` zachová důvod pro audit.
+
+### 12. Boundary rules / handoff
+
+| Task | Vztah k C-05 | Stav |
+|------|--------------|------|
+| **C-04 Sendability Gate** | Producer C-05 queue rows. Pouze `AUTO_SEND_ALLOWED` outcome smí vytvořit queue řádek. Gate nesmí zapsat do queue jiný outcome — invariant na queue schema (`created_from_sendability_outcome`). | Handoff připravený; C-04 spec stable. |
+| **CS1 Lifecycle (EMAIL_QUEUED, EMAIL_SENT)** | C-05 queue je ortogonální datová vrstva, která implementuje T17 (`OUTREACH_READY → EMAIL_QUEUED`, nastává při queue row insertu) a T18 (`EMAIL_QUEUED → EMAIL_SENT`, nastává při queue.send_status=SENT). CS1 canonical states se neměnily. | Handoff připravený; CS1 stable. |
+| **CS2 Orchestrator (S12 process_email_queue)** | Worker loop, který queue řádky claimne a volá sender, je S12 v CS3 katalogu. C-05 pouze definuje schema a pre/post conditions; worker body je implementační task. | Handoff připravený; S12 je „scheduled (future C-05)" v CS2 sekci 3. |
+| **CS3 Reliability (idempotency, retry, dead-letter)** | C-05 reuses `send:{lead_id}:{SHA256(email + subject + body)}` idempotency key pattern (CS3 section 4 S12). C-05 respektuje max_attempts=1 + okamžitý dead-letter (CS3 section 5.2 S12). C-05 cross-refuje `_asw_dead_letters` přes `dead_letter_id`. | Handoff připravený; CS3 stable. |
+| **C-06 Provider abstraction (ESP)** | C-06 konzumuje payload kontrakt (sekce 6) a emituje `provider_message_id` + failure classification. C-05 je provider-agnostický; payload field `channel=EMAIL` je zatím jediný podporovaný. | Handoff připravený pro C-06. |
+| **C-07 Follow-up cadence** | Follow-up je **další** queue row na stejný lead_id se **změněným** subject/body (tedy nový `idempotency_key`) a vlastním C-04 gate pass. C-05 queue schema je kompatibilní s N-queue-rows-per-lead. | Compatible. C-07 specifikace mimo scope C-05. |
+| **C-08 Rate limiting & quiet hours** | C-08 ovlivní `scheduled_at` populaci (a `priority`), ne queue schema. C-05 drží `scheduled_at` + `priority` jako PROPOSED pole, aby C-08 implementace nevyžadovala schema migration. | Compatible. C-08 specifikace mimo scope C-05. |
+| **C-09 Suppression list / Exception queue** | Suppression (compliance block) je řešený v C-04 gate (reason B7/B8 atd.) — queue řádek tedy pro suppressed leada vůbec nevznikne. Exception queue pro MANUAL_REVIEW_REQUIRED je **jiná** datová struktura, ne queue. | Compatible. Out of C-05 scope. |
+| **Budoucí implementační task** | Převede SPEC na: `apps-script/OutboundQueue.gs` s writer helpery, `_asw_outbound_queue` sheet vytvoření, `EXTENSION_COLUMNS` update (PROPOSED fields z sekce 3 promotnout na VERIFIED), enumy `QUEUE_SEND_STATUS_*`, `QUEUE_SEND_MODE_*`, `QUEUE_FAILURE_CLASS_*`. | C-05 je handoff ready. |
+
+### 13. Non-goals (explicitní)
+
+- Neimplementuje worker / polling loop / trigger / cron.
+- Neimplementuje ESP / Gmail / SMTP call.
+- Neimplementuje mailbox sync (reply/bounce detekci).
+- Neimplementuje follow-up cadence (druhý, třetí email v thread).
+- Neimplementuje rate limiting, quiet hours, daily caps.
+- Neimplementuje frontend queue UI / exception review UI.
+- Neimplementuje `_asw_outbound_queue` sheet creation v runtime kódu.
+- Neimplementuje write `send_status` do LEADS — `send_status` žije pouze v queue, **ne** v LEADS. LEADS má CS1 `lifecycle_state` (budoucí) / existující `email_sync_status` / `outreach_stage`. Queue je orthogonální.
+- Nezavádí nové canonical lifecycle states (CS1 18 stavů zůstává beze změny).
+- Nezavádí nové gate outcomes (C-04 3 outcomes zůstávají beze změny).
+- Neprovádí runtime Config.gs changes — všechny nové sloupce jsou PROPOSED FOR C-05.
+
+### 14. Acceptance checklist
+
+- [x] Queue schema má všech 15 povinných polí + 17 auditability rozšíření (32 celkem).
+- [x] Send statusy mají jednoznačné allowed / disallowed transitions + invarianty.
+- [x] Ready (sendability) vs QUEUED vs SENDING vs SENT je separované na schema + semantics úrovni (sekce 7).
+- [x] Failed row má `failure_reason`, `failure_class`, `send_attempts`, `last_attempt_at`, `run_id_last`, `event_id_last`, `dead_letter_id` — dost pro diagnostiku.
+- [x] Každý pokus je dohledatelný přes queue row + `_asw_logs` run history.
+- [x] Send payload kontrakt je definován v sekci 6 (payload_version=1.0).
+- [x] Immediate vs scheduled send je jednoznačně oddělený v sekci 8 (fields, worker eligibility, cancel rules).
+- [x] CS3 alignment: idempotency key pattern, max_attempts=1, dead-letter promote, cross-ref.
+- [x] CS1 alignment: žádný nový canonical state; T17/T18 transitions naznačeny.
+- [x] C-04 alignment: pouze `AUTO_SEND_ALLOWED` → queue row; snapshot `created_from_sendability_outcome`.
+- [x] Všechna nová pole / enumy / sheety jsou označeny PROPOSED FOR C-05 / INFERRED / VERIFIED.
+
+### 15. PROPOSED vs INFERRED vs VERIFIED label summary
+
+**VERIFIED IN REPO (reuse existing):**
+- `lead_id`, `source_job_id`, `email`, `preview_url`, `last_email_sent_at`, `email_sync_status`, `outreach_stage`, `email_subject_draft`, `email_body_draft` — existují v `EXTENSION_COLUMNS` (`apps-script/Config.gs:68–119`).
+
+**INFERRED FROM EXISTING SYSTEM:**
+- `idempotency_key` = CS3 section 4 S12 pattern `send:{lead_id}:{SHA256(email + subject + body)}` — reuses S4 formal_key strategy.
+- `run_id_last`, `event_id_last` — cross-ref do CS2 run history (`_asw_logs` payload schema).
+- `dead_letter_id` — cross-ref do CS3 `_asw_dead_letters` schema (CS3 section 6.3).
+
+**PROPOSED FOR C-05 (new, implementation task will materialize):**
+- Sheet `_asw_outbound_queue` (32 sloupců).
+- Queue row fields 1, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25, 26, 27, 28, 29 (viz tabulka v sekci 3).
+- Enumy: `QUEUE_SEND_STATUS` (`QUEUED`/`SENDING`/`SENT`/`FAILED`/`CANCELLED`), `QUEUE_SEND_MODE` (`IMMEDIATE`/`SCHEDULED`), `QUEUE_FAILURE_CLASS` (`TRANSIENT`/`PERMANENT`/`AMBIGUOUS` — reuses CS3).
+- Cancel reasons enum set: `RE_EVAL_SENDABILITY_BLOCKED`, `OPERATOR_CANCEL`, `LEAD_REPLIED_FIRST`, `LEAD_UNSUBSCRIBED`, `LEAD_BOUNCED`. Rozšiřitelný; implementační task formalizuje.
+- Payload contract (payload_version 1.0, sekce 6).
