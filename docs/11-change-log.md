@@ -458,7 +458,7 @@ Task dodava:
 - **PROPOSED vs INFERRED vs VERIFIED label summary** (sekce 19).
 
 **A-09 kompatibilita:**
-- A-09 `_ingest_reports` je NEZAVISLE report artefakt (ingest-only, per-job grain). C-10 `_asw_perf_reports` je **rozsireny** report pokryvajici cely funnel (vsech 14 F-stages, operational + quality). A-09 je **upstream zdroj** pro F1-F4 (raw / imported / normalization_error / duplicate counts); C-10 konzumuje `duplicate_count`, `raw_count`, `imported_count`, `bottleneck_stage` z posledniho A-09 zaznamu matchujiciho `source_job_id`.
+- A-09 `_ingest_reports` je NEZAVISLE report artefakt (ingest-only, per-job grain). C-10 `_asw_perf_reports` je **rozsireny** report pokryvajici cely reporting prostor 3-dimension modelu (funnel dim A F1-F10, queue dim B 5 statusu, outcome dim C 4 terminaly + operational + quality). A-09 je **upstream zdroj** pro funnel dim A F1-F4 (raw / imported / normalization_error / duplicate counts); C-10 konzumuje `duplicate_count`, `raw_count`, `imported_count`, `bottleneck_stage` z posledniho A-09 zaznamu matchujiciho `source_job_id`.
 - Report pattern (summary_status enum, append-only, full JSON payload do `_asw_logs`, derived rates, fail_reason_breakdown) je **dedden** z A-09 a rozsiren. A-09 G1 per-job je de facto **subset** C-10 G1 per-job (ingest section).
 - C-10 **nemutuje** A-09 `_ingest_reports` schema. Zadne pridavani sloupcu. A-09 zustava authoritative pro ingest-only reports.
 
