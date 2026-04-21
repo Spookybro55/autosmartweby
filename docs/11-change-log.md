@@ -428,6 +428,125 @@ Task NEDODAVA:
 - **Code:** — (—)
 - **Docs:** docs/24-automation-workflows.md, docs/20-current-state.md
 
+### [C/C-10] Automation performance report — SPEC-only kontrakt pro funnel / operational / quality metriky cele automatizace — DONE
+- **Scope:** Formalizuje **authoritative specifikaci** pro reportovaci vrstvu nad celou automatizaci Autosmartweby — od INGEST (A-01..A-10) pres PREVIEW/OUTREACH (B-01..B-05, C-04..C-06) po INBOUND/LIFECYCLE (C-07, CS1) a RELIABILITY (CS3, C-09). Predmetem SPEC je **jak automatizace cislem odpovi na otazky** typu "kolik leadu dnes proslo do BRIEF_READY?", "jaka je reply rate za minuly tyden?", "kde se zastavuje funnel?", "splnujeme SLA pro review queue?", "kolik exceptions vznikli na 1000 poslanych mailu?".
+
+Scope je **SPEC-only** — neimplementuje runtime report worker, cron trigger, `buildPerformanceReport_()` helper, `_asw_perf_reports` sheet creation, Config.gs zapisy, frontend dashboard UI, alerting integraci (email/Slack notifications), BI export, ani `apps-script/PerfReport.gs` kod. Vsechny nove artefakty jsou oznacene **PROPOSED FOR C-10** a budou materializovany implementacnim taskem.
+
+Task dodava:
+- **Dependency narrowing `A-09, C-01 az C-09` → `A-09, CS1, CS2, CS3, C-04..C-09`:** explicitni dokumentace proc (C-01/C-02/C-03 neexistuji, C2/C3/C4 jsou governance unrelated, CS1/CS2/CS3 jsou foundational SPEC prerekvizity). Uvod docs/24 C-10 sekce + tento task record.
+- **Reporting grain taxonomy:** 5 grains (G1 per-job pro ingest; G2 per-day pro operational rhythms; G3 per-run pro CS2 orchestrator visibility; G4 per-stage pro funnel analysis; G5 per-segment pro business slice) s invariants "jedna zprava = jeden grain" a "grains jsou ortogonalni ne nested".
+- **3-dimension reporting taxonomy (tvrda separace):** **Dim A — Funnel** (10 canonical progression stages F1-F10 mapovane na CS1 az #12 OUTREACH_READY; invariant monotonic progression bez back-edge). **Dim B — Queue** (5 operational statusu QUEUED/SENDING/SENT/FAILED/CANCELLED per C-05 — ORTOGONALNI nad queue radkem, NEJSOU funnel stages). **Dim C — Outcome** (4 terminalni outcomes DISQUALIFIED/REPLIED/BOUNCED/UNSUBSCRIBED mapovane na CS1 terminaly resp. C-07 event_type — ortogonalni end-of-lifecycle metrics, NEJSOU funnel stages). Tvrde oddeleni invariantem: funnel stage ≠ lifecycle state ≠ queue status ≠ outcome ≠ review flag ≠ alert state. Zakazane kolapsy: NIKDY "email_queued funnel stage" (= queue_queued_count v dim B); NIKDY "replied funnel stage" (= outcome_replied_count v dim C); NIKDY mixing queue statusu / outcomes do funnel taxonomy.
+- **Funnel metrics (dim A):** 10 stage counts (F1..F10) + 9 funnel-internal conversion rates (conv_f1_to_f2 .. conv_f9_to_f10) + `funnel_yield_to_outreach_ready` (F10/F1) + drop-off counts (worst-stage by rate + worst-absolute-count).
+- **Queue metrics (dim B):** queue_queued/sending/sent/failed/cancelled_count + queue_status_breakdown_json + send_success_rate (dim B interna: sent/(sent+failed)) + queue_latency_avg_ms.
+- **Outcome metrics (dim C):** outcome_disqualified_count + outcome_replied_count + outcome_bounced_count + outcome_unsubscribed_count + reply_class/bounce_class/unsubscribe_source breakdowns.
+- **Cross-dimension rates (Blok D):** send_yield (A→B: queue_sent / f10_outreach_ready), reply_yield / bounce_yield / unsubscribe_yield (B→C: outcome_* / queue_sent_count), delivery_yield (A+B: (sent − bounced) / f10_outreach_ready).
+- **Review load (Blok E, ortogonalni):** blocked_by_sendability_count + review_queue_load_count + manual_review_entered_count + sequence_followup_reach_count.
+- **Operational metrics:** processing time stats (avg_ms / p50_ms / p95_ms / max_ms per step pres `_asw_logs` consecutive timestamps), fail_rate (fail / total per step), retry_count + retry_success_rate (CS3 retry matrix), dead_letter_count + dead_letter_rate (CS3 `_asw_dead_letters`), review_queue_load (C-09 open exceptions snapshot), review_sla_compliance_rate (resolved_on_time / total_resolved per SLA tier), stale_pending_count (P4 > 14 dni pending), queue_latency_avg_ms (C-05 queued_at → sent_at), exception_rate (C-09 new exceptions per 1000 leadu per period).
+- **Quality metrics:** bounce_rate (C-07 BOUNCE events / sent), hard_bounce_rate (`bounce_class=HARD` / sent), soft_bounce_rate (`bounce_class=SOFT` / sent), reply_rate (C-07 REPLY / sent), positive_reply_rate (`reply_class=POSITIVE` / REPLY), unclear_reply_rate (`reply_class=UNCLASSIFIED` / REPLY), unsubscribe_rate (C-07 UNSUBSCRIBE / sent), followup_yield_rate (C-08 follow-up stages generated response vs initial-only), preview_approval_rate (PREVIEW_READY_FOR_REVIEW → APPROVED / total reviewed), exception_rate_per_stage (C-09 exceptions / stage throughput), compliance_hard_stop_rate (C-04 `compliance_hard_stop` + B7/B8 blocked / total evaluated).
+- **Metric definition contract template:** kazda metrika ma kontrakt (`metric_id`, `name`, `grain`, `unit`, `formula`, `source_fields[]`, `null_handling`, `min_sample_size`, `value_range`, `baseline_ref`, `interpretation`, `alert_enabled`, `warning_threshold`, `critical_threshold`, `threshold_type`) — sekce 8 + 2 plne priklady (bounce_rate, review_queue_load).
+- **Alert threshold model:** WARNING / CRITICAL severity, 3 threshold typy (ABS absolute, REL relative vs baseline, COMBO kombinovany), min_sample invariant (pod min_sample = `summary_status=INCOMPLETE` misto alert), baseline reference pattern (previous_day / previous_week / rolling_7d / rolling_30d / absolute_number).
+- **Bottleneck detection 3-lens algoritmus:** funnel lens (najit stage F_n kde conv_rate(F_n → F_{n+1}) < baseline - threshold; weight by absolute drop-off count), latency lens (najit step s p95_ms > baseline * multiplier; weight by throughput), review lens (najit priority tier s SLA compliance < threshold; weight by open count). Priority tiebreaker: funnel > latency > review pri equal severity; alphabetical stage_id pri equal within lens.
+- **Report schema `_asw_perf_reports`:** 67-field sheet (append-only) v blokove strukture podle dimenze: metadata (8) + Blok A funnel/dim A (14: 10 stage counts + 9 conv rates + funnel_yield + drop-off 3) + Blok B queue/dim B (8: 5 statusy + breakdown_json + send_success_rate + queue_latency) + Blok C outcome/dim C (4: disqualified/replied/bounced/unsubscribed counts) + Blok D cross-dim rates (5: send_yield / reply_yield / bounce_yield / unsubscribe_yield / delivery_yield) + Blok E review load (4: blocked/review_queue/manual_review_entered/sequence_followup_reach) + operational (9) + quality aliases (8) + synthetic summary (7). Per-field VERIFIED / INFERRED / PROPOSED label.
+- **Sample report:** full realisticky G2 per-day report pro 2026-04-19 s 5 jobs, AT_RISK status, 4 warnings + 3 criticals + bottleneck detekce (primary lens=funnel, stage F5→F6 preview approval rate 62% vs baseline 85%).
+- **Comparison rules per grain:** G1 job-vs-job same portal/segment; G2 day-vs-day (weekday-matching DOW grouping); G3 run-vs-run same step; G4 stage-vs-stage cross-day rolling; G5 segment-vs-segment within same day. Outlier handling: >3 stddev excluded pres `PERF_REPORT_OUTLIER_EXCLUDE_STDDEV` Script Property.
+- **Auditability:** 5 `_asw_logs` event types (`performance_report_started` / `performance_report_generated` / `performance_report_failed` / `performance_alert_threshold_crossed` / `performance_bottleneck_detected`) + cross-ref graph (`_ingest_reports` A-09 ↔ `_asw_perf_reports` C-10 ↔ source tables LEADS/queue/inbound_events/exceptions/dead_letters ↔ `_asw_logs`) + observability query patterns bez dashboard UI.
+- **Known limitations:** per-layer dependency completeness flags (`data_completeness_flags_json` structure) — ze pokud C-05/C-06/C-07/C-09 nejsou runtime, report ma null values + `INCOMPLETE` summary_status + data_completeness_flags_json audit trail (proc null).
+- **Handoff tabulka (14 radku):** A-09 / CS1 / CS2 / CS3 / C-04 / C-05 / C-06 / C-07 / C-08 / C-09 / future dashboard / future alerting / future BI-export / future runtime-worker. Per-row "jak C-10 konzumuje" + "jak C-10 prispiva".
+- **Non-goals (18 polozek):** explicit — runtime worker, cron, dashboard UI, alerting integration, BI export, novy canonical CS1 state, mutace existing schema, frontend charts, real-time metrics, per-operator attribution, cost metrics, SEO/marketing KPIs, CS3 retry matrix mutace, A/B testing framework, predictive analytics, AI-based anomaly detection, per-recipient drill-down, multi-tenant reporting.
+- **Acceptance checklist (23 polozek):** vsechny checked.
+- **PROPOSED vs INFERRED vs VERIFIED label summary** (sekce 19).
+
+**A-09 kompatibilita:**
+- A-09 `_ingest_reports` je NEZAVISLE report artefakt (ingest-only, per-job grain). C-10 `_asw_perf_reports` je **rozsireny** report pokryvajici cely reporting prostor 3-dimension modelu (funnel dim A F1-F10, queue dim B 5 statusu, outcome dim C 4 terminaly + operational + quality). A-09 je **upstream zdroj** pro funnel dim A F1-F4 (raw / imported / normalization_error / duplicate counts); C-10 konzumuje `duplicate_count`, `raw_count`, `imported_count`, `bottleneck_stage` z posledniho A-09 zaznamu matchujiciho `source_job_id`.
+- Report pattern (summary_status enum, append-only, full JSON payload do `_asw_logs`, derived rates, fail_reason_breakdown) je **dedden** z A-09 a rozsiren. A-09 G1 per-job je de facto **subset** C-10 G1 per-job (ingest section).
+- C-10 **nemutuje** A-09 `_ingest_reports` schema. Zadne pridavani sloupcu. A-09 zustava authoritative pro ingest-only reports.
+
+**CS1 kompatibilita:**
+- CS1 18-state lifecycle je **zdroj pravdy** pro funnel dim A stages F2-F10 (IMPORTED → WEB_CHECKED → QUALIFIED → IN_PIPELINE → PREVIEW_PENDING → PREVIEW_READY_FOR_REVIEW → BRIEF_READY → DRAFT_READY → … → OUTREACH_READY #12). Funnel dim A konci na F10=OUTREACH_READY; queue a outcome jsou separatni dimenze.
+- CS1 terminal stavy DISQUALIFIED (#6), REPLIED (#15), BOUNCED (#16), UNSUBSCRIBED (#17) jsou zdroj **outcome dim C** (separatni dimenze od funnel dim A, NE drop-off "stages"). CS1 review stavy REVIEW_REQUIRED (#7), PREVIEW_READY_FOR_REVIEW (#10), FAILED (#18) jsou **review flags** (separatni dimenze v Bloku E).
+- C-10 NIKDY neemituje novy canonical CS1 state. Nemutuje `lifecycle_state` field, nemutuje CS1 transitions T1-T24.
+- Funnel stages F1-F10 jsou **reporting abstrakce** nad CS1 + A-09 ingest — zadny vlastni runtime zapis. Queue dim B cte C-05 `_asw_outbound_queue.status`; outcome dim C cte CS1 terminal state + C-07 `_asw_inbound_events.event_type`.
+
+**CS2 kompatibilita:**
+- CS2 `cs2_run_id` je **klic** pro G3 per-run grain. C-10 G3 reports filtrovane per `cs2_run_id` na `_asw_logs`.
+- PROPOSED CS2 step: `performance_report_generator` (nereactive post-run hook + optional daily cron + manual menu trigger).
+- C-10 nemutuje CS2 step taxonomy ani event model. Jen konzumuje `cs2_run_id` + `_asw_logs` timestamps.
+
+**CS3 kompatibilita:**
+- CS3 `_asw_dead_letters` je **primarni zdroj** pro `dead_letter_count` + `dead_letter_rate` + per-step `failure_class` breakdown operational metrics.
+- CS3 `failure_class` enum (TRANSIENT / PERMANENT / AMBIGUOUS) driv per-step fail classification v C-10 reports.
+- CS3 retry matrix zdroj `retry_count` + `retry_success_rate`.
+- CS3 LockService pattern **dedden** pro budouci C-10 runtime worker (lock per-grain report generation race prevention).
+- C-10 nemutuje CS3 dead_letter schema. Jen cte append-only.
+
+**C-04 kompatibilita:**
+- C-04 gate outcomes jsou zdroj `manual_review_required_count` + `compliance_hard_stop_rate` + `send_blocked_count` + `blocking_reason_breakdown_json` (21 blocking reason codes).
+- C-04 gate latency (pres `_asw_logs` timestamps gate_evaluated event) driv operational metrics.
+- PROPOSED C-04 extension: zadne. C-10 cte `sendability_outcome` + `blocking_reasons[]` per-lead.
+
+**C-05 kompatibilita:**
+- C-05 `_asw_outbound_queue.status` je zdroj **queue dim B** (celych 5 statusu QUEUED/SENDING/SENT/FAILED/CANCELLED) + queue_status_breakdown_json + send_success_rate (dim B interna) + queue_latency_avg_ms.
+- C-05 5 queue statusu jsou **ortogonalni dimenze nad queue radkem** per C-05 invariant — NEJSOU funnel stages, NEJSOU lifecycle states. Mapovani do funnel dim A NEEXISTUJE (NEMAPOVAT queue_sent_count na jakoukoli F-stage).
+- C-10 nemutuje `_asw_outbound_queue` schema.
+
+**C-06 kompatibilita:**
+- C-06 `NormalizedSendResponse` + `NormalizedProviderStatus` + `NormalizedSendErrorClass` jsou zdroj provider_status_breakdown + send_latency_stats.
+- C-10 cte `provider_send_duration_ms` + `normalized_status` + `normalized_error_class` per queue row.
+
+**C-07 kompatibilita:**
+- C-07 `_asw_inbound_events.event_type` je zdroj **outcome dim C** (outcome_replied/bounced/unsubscribed counts) + `reply_class` breakdown (POSITIVE / NEGATIVE / UNCLASSIFIED) + `bounce_class` breakdown (HARD / SOFT).
+- Cross-dim rates reply_yield / bounce_yield / unsubscribe_yield (B→C) + quality aliasy reply_rate / bounce_rate / unsubscribe_rate / positive_reply_rate / unclear_reply_rate / hard_bounce_rate jsou **derivaty** s denominatorem `queue_sent_count` z C-05 (NE funnel F-stage count).
+- Outcome dim C NEJSOU funnel stages. Mapovani z outcome na F-stage NEEXISTUJE.
+- C-10 nemutuje `_asw_inbound_events` schema.
+
+**C-08 kompatibilita:**
+- C-08 3-stage follow-up sekvence (initial / follow_up_1 / follow_up_2) je zdroj followup_yield_rate (% sequences kde stage > 1 vygeneroval response) + per-stage sent counts + stop_reason breakdown (10-value enum).
+- `sequence_stage` dimenze zachycena v per-stage sent / reply counts.
+
+**C-09 kompatibilita:**
+- C-09 `_asw_exceptions` je zdroj review_queue_load + review_sla_compliance_rate + exception_rate + exception_type_breakdown (10 types) + retry_chain_depth_breakdown.
+- C-09 4-tier priority (P1/P2/P3/P4) + SLA targets jsou zdroj per-priority SLA compliance metrics.
+- exception_rate_per_stage = C-09 exceptions / C-10 stage throughput (stage-scoped attribution).
+
+**Future dashboard task vztah:**
+- Dashboard **konzumuje** `_asw_perf_reports` schema (read-only). C-10 SPEC je **vstupni kontrakt** pro dashboard task. Dashboard NENI blocker pro C-10.
+
+**Future alerting task vztah:**
+- Alerting konzumuje `alert_summary_json.triggered[]` field + 5 PROPOSED `_asw_logs` event types. Notification channel (email/Slack) mimo C-10 scope.
+
+**Future BI export task vztah:**
+- BI export mirror `_asw_perf_reports` schema do external data warehouse. C-10 poskytuje stable schema contract.
+
+Task NEDODAVA:
+- Runtime report worker / cron / scheduler / `buildPerformanceReport_()` helper v Apps Script
+- `_asw_perf_reports` sheet creation
+- `apps-script/PerfReport.gs` soubor
+- `apps-script/Config.gs` zapisy (PERF_REPORT_* Script Properties)
+- 5 `_asw_logs` event type emissions
+- Dashboard / UI / charts
+- Alerting / notification system (email alerts, Slack integration)
+- BI export / data warehouse mirror
+- Per-operator attribution / workload balancing
+- Cost metrics / token usage / API billing tracking
+- SEO / marketing KPIs / conversion funnel (downstream WON/LOST)
+- CS3 retry matrix mutace
+- A/B testing framework
+- Predictive analytics / forecasting
+- AI-based anomaly detection
+- Per-recipient drill-down
+- Multi-tenant reporting
+- Frontend deployment / CDN
+- Retention / archive policy pro `_asw_perf_reports`
+- Backfill cron pro historicka data
+- Real-time streaming metrics (> daily grain mimo scope v1.0)
+- CI/CD integration (napr. alert na PR merge blok)
+- A-09 `_ingest_reports` schema mutace
+- Novy canonical CS1 state
+- **Owner:** Claude
+- **Code:** — (—)
+- **Docs:** docs/24-automation-workflows.md, docs/20-current-state.md
+
 ## 2026-04-20
 
 ### [A/A8] Preview queue → BRIEF_READY — DONE
