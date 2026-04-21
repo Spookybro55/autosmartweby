@@ -336,6 +336,98 @@ Task NEDODAVA:
 - **Code:** — (—)
 - **Docs:** docs/24-automation-workflows.md, docs/20-current-state.md
 
+### [C/C-09] Exception queue & human-in-the-loop — SPEC-only kontrakt pro centralizovanou review queue + operator resolution — DONE
+- **Scope:** Formalizuje **centralizovanou exception queue** a **operator resolution kontrakt** pro pripady, ktere automat neumi / nesmi rozhodnout sam. Misto "tichych" skipu a sheet error sloupcu roztrousenych po LEADS (`preview_error`, `email_reply_type=UNCLASSIFIED`, `bounce_class=SOFT`) nebo `_asw_dead_letters` (CS3 technicky retry exhaustion) definuje C-09 **jeden human-facing sheet** (`_asw_exceptions`) s jasnym resolution kontraktem, priority modelem, SLA targety, auditabilitou a deterministickym flow re-entry.
+
+Scope je **SPEC-only** — neimplementuje runtime review worker, cron trigger, queue worker, mailbox sync runtime, ESP webhook, frontend UI (B6), suppression list management, AI-based auto-triage ani zapisy do `apps-script/Config.gs`. Vsechny nove artefakty jsou oznacene **PROPOSED FOR C-09** a budou materializovany implementacnim taskem. B6 (operator exception dashboard UI) **NENI blocker** pro C-09 SPEC — operator muze v interim resolvovat exceptions primo v Google Sheets bunce (`_asw_exceptions` row edit).
+
+Task dodava:
+- **Dependency narrowing C-03 → CS3:** explicitni dokumentace proc (C-03 neexistuje, C3 je governance unrelated, CS3 je jediny reliability prerekvizita). Uvod docs/24 sekce + tento task record.
+- **Exception taxonomy:** 10 exception typu (6 kanonickych z user briefu + 4 rozsireni z repo analyzy): `preview_render_fail`, `missing_email`, `ambiguous_duplicate`, `broken_personalization`, `provider_fail_after_max_retries`, `unclear_reply`, `sendability_manual_review`, `compliance_hard_stop`, `normalization_error`, `followup_stale_review`. Kazdy typ ma popis, odkud vznika, severity tier, blocking-vs-review, retry-eligibility, typicky operator role.
+- **Priority model:** 4 tiers P1-P4 (compliance > delivery > content > data-quality) + SLA targets (P1 < 24h, P2 < 2 dny business, P3 < 5 dni business, P4 < 10 dni business), sort order (`priority ASC` / `detected_at ASC` / `exception_type alphabetic` tiebreaker), auto-priority-bump pravidla (pending > 2 SLA → promote; P4 pending > 14 dni → auto-downgrade na CLOSED_STALE; C-08 sekvence v OOO hold > 7 dni → promote P2), compliance precedence invariant (P1 nesmi byt merged/approved/retried, jen reject + audit note).
+- **Co jde do manual review:** 4-cestny routing table (transient retry-exhausted / permanent classifier-status / review-flag / compliance-hard-stop) + invariant "problematicke leady nejsou ztracene".
+- **Exception queue schema:** `_asw_exceptions` sheet 24 poli (append-only-with-resolution-update) — `exception_id` (format `EX-{YYYY-MM-DD}-{NNNNN}`), `lead_id` (FK), `outreach_queue_id` (FK C-05, nullable), `source_job_id` (FK batch), `inbound_event_id` (FK C-07, nullable), `exception_type` (10-value enum), `exception_priority` (1-4), `exception_status` (5-value enum), `detected_at` / `detected_by_step` (step identifier e.g. `A-08:processPreviewQueue`), `summary` (max 500 chars), `diagnostic_payload_json` (PII-masked, max 4KB), `operator_decision` (4-value enum), `operator_note`, `operator_edited_fields_json`, `resolved_at` / `resolved_by`, `resolution_outcome` (6-value enum), `retry_reference_queue_id`, `retry_reference_exception_id` (retry chain), `next_action` (6-value enum), `cs2_run_id`, `related_dead_letter_id`, `sla_target_at`.
+- **Minimal review interface:** sheet-row-based read-only/editable/derived fields, on-edit trigger contract, B6-less interim operator workflow pres Google Sheets bunku.
+- **Resolution outcomes:** 4 discrete operator decisions (`approve`, `reject`, `retry`, `edit_and_continue`) s kompletnim kontraktem per outcome (definice / kdy pouzit / kdo muze / co se stane / next_action derivation / invariants / vytvori novy queue row?).
+- **Resolution outcome × exception type compatibility matrix:** enforced at resolution time (napr. `compliance_hard_stop` + `approve` = validation error; `ambiguous_duplicate` + `retry` = NE, jen merge/reject).
+- **Resolution flow pseudocode:** deterministicky dispatcher od `operator_decision` + `exception_type` → `next_action` → downstream trigger. 5 flow re-entry paths (`RETURN_TO_C04_GATE`, `CREATE_NEW_QUEUE_ROW`, `RESUME_C08_SEQUENCE`, `UPDATE_CS1_LIFECYCLE`, `LEAD_RE_INGEST`, `TERMINAL_STOP`).
+- **Exception status model:** 5 statusu (OPEN / IN_REVIEW / RESOLVED / CLOSED / CANCELLED) s allowed/disallowed transitions + state diagram. Invariants: CLOSED/CANCELLED terminal (no reopen — novy exception row s `retry_reference_exception_id`); OPEN → RESOLVED NELZE (musi projit IN_REVIEW); IN_REVIEW → CLOSED NELZE (musi projit RESOLVED); RESOLVED je mezistav (cekame na engine downstream).
+- **5 sample exception rows** s realistickym `diagnostic_payload_json` (preview_render_fail, missing_email, ambiguous_duplicate, unclear_reply, compliance_hard_stop).
+- **Sample resolutions:** 4 full operator workflows ilustrujici each outcome.
+- **Flow re-entry / continuation rules:** tabulka per resolution outcome × exception type → next_action. 5 invariants (napr. retry chain depth limit=3, CANCELLED/CLOSED immutable, edit_and_continue nesmi mutovat immutable fields, downstream failure = nova exception ne reopen, compliance hard-stop vzdy terminal).
+- **Auditability / observability:** 9 `_asw_logs` event types (`exception_created`, `exception_claimed`, `exception_released`, `exception_resolved`, `exception_flow_reentry`, `exception_closed`, `exception_cancelled`, `exception_priority_bumped`, `exception_retry_chain_broken`) + cross-ref graph (LEADS ↔ exceptions ↔ queue ↔ inbound events ↔ logs ↔ dead_letters) + observability query patterns bez B6 UI.
+- **Idempotency / dedupe rules:** per-type dedup key pattern (napr. `exc:preview_render_fail:{queue_id}`, `exc:unclear_reply:{inbound_event_id}`, `exc:compliance_hard_stop:{lead_id}:{reason_code}`), recent-closed window (7 dni — nezakladej duplicitni exception pokud nedavno closed), reopen rules (vzdy novy row + `retry_reference_exception_id` pointer), CS3 alignment (exception je human-facing vrstva nad dead-letter, ne konkurenci).
+- **Human-in-the-loop boundaries:** oddelene compliance vs operational judgment, decision compatibility matrix, kdo smi vs kdo musi, audit-immutable po resolve.
+- **Handoff tabulka (12 radku)** na C-04/C-05/C-06/C-07/C-08/CS1/CS2/CS3/A-02-A-08/B6/implementacni task/future C-10 s per-row popisem "jak C-09 konzumuje" + "jak C-09 prispiva".
+- **Non-goals (14 polozek)** explicit — runtime review worker, frontend UI, mailbox sync, provider webhook, queue worker, AI auto-triage, Config.gs zapisy, novy canonical CS1 state, suppression list centralizace, per-operator SLA, multi-tenant routing, notification system, archive/retention detail, detectException() hooks v A-*/B-*/C-* steps.
+- **Acceptance checklist (19 polozek)** vcetne dependency narrowing C-03 → CS3 explicit dokumentace.
+- **PROPOSED vs INFERRED vs VERIFIED label summary** (sekce 20).
+
+**CS1 kompatibilita:**
+- C-09 NIKDY neemituje novy canonical CS1 state. Pouziva existujici `REVIEW_REQUIRED` (CS1 #18 non-terminal review flag) pro exception-induced review + canonical terminals DISQUALIFIED (#14), REPLIED (#15), BOUNCED (#16), UNSUBSCRIBED (#17).
+- Exception resolution muze triggerovat CS1 transition pres `UPDATE_CS1_LIFECYCLE` next_action (T14 DISQUALIFIED, T21 BOUNCED, T22 UNSUBSCRIBED). Zapis do `LEADS.lifecycle_state` dela engine resolution dispatcher, ne exception row sama.
+
+**CS2 kompatibilita:**
+- C-09 detection engine je **novy CS2 step** (reactive, triggered z existujicich steps pri fail). Resolution flow re-entry je orchestrator-driven (next CS2 run pro downstream step).
+- PROPOSED CS2 kroky: `exception_detector` (hook do existing steps — A-02/A-03/A-05/A-06/A-07/A-08/B-04/C-04/C-05/C-06/C-07/C-08 pri fail signal) + `exception_resolution_dispatcher` (po operator resolve).
+
+**CS3 kompatibilita:**
+- C-09 je **downstream konzument** CS3 dead-letter. `provider_fail_after_max_retries` vznika z CS3 `_asw_dead_letters` row, FK cross-ref pres `related_dead_letter_id`.
+- CS3 technicky dead-letter (retry exhausted) vs C-09 business exception (operator review) — jasne oddelene vrstvy. C-09 rozsiruje CS3 audit trail human-facing vrstvou bez mutace CS3 schema.
+- `failure_class` mapping pro C-09 engine errors (PROPOSED): `EXCEPTION_INSERT_FAIL`→TRANSIENT, `DEDUP_KEY_CONFLICT`→TRANSIENT, `LEAD_NOT_FOUND`→PERMANENT. LockService pattern dedeno z CS3.
+
+**C-04 kompatibilita:**
+- C-04 gate outcome `MANUAL_REVIEW_REQUIRED` → C-09 exception creation (`sendability_manual_review`, reasons R1-R3).
+- C-04 `SEND_BLOCKED` reasons B7 (UNSUBSCRIBED), B8 (SUPPRESSED), PROPOSED `ADDRESS_BOUNCED` → `compliance_hard_stop` (P1 terminal reject-only).
+- PROPOSED C-04 `MANUAL_REVIEW_OVERRIDE` context parameter — po `approve` resolution operator triggers re-eval gate s override flag.
+
+**C-05 kompatibilita:**
+- `FAILED` queue status + fail fields → CS3 dead-letter → C-09 exception (`provider_fail_after_max_retries`).
+- Retry outcome vytvari novy queue row (C-09 je producer), idempotency_key rozsiren o `retry_of=exception_id` suffix per PROPOSED extension.
+- C-09 **nezapisuje** do existing queue row — retry = novy row per C-05 invariant.
+
+**C-06 kompatibilita:**
+- `NormalizedSendErrorClass` + `failure_class=PERMANENT` (napr. `INVALID_RECIPIENT`, `AUTH_FAILED`) po max_attempts=1 exhausted → CS3 dead-letter → C-09.
+- C-09 **nemutuje** C-06 `EmailSender` interface ani `NormalizedSendResponse`.
+
+**C-07 kompatibilita:**
+- `reply_class=UNCLASSIFIED` + `reply_needs_manual=TRUE` → C-09 exception (`unclear_reply`, P2).
+- `unknown_inbound` event → exception.
+- Operator reclassification z resolve (approve = klasifikuj jako POSITIVE; reject = spam/noise) aktualizuje LEADS reply classification pres `UPDATE_CS1_LIFECYCLE` nebo `RESUME_C08_SEQUENCE` next_action.
+- C-09 **nemutuje** `_asw_inbound_events` schema (append-only, jen C-07 ingest).
+
+**C-08 kompatibilita:**
+- `REVIEW_REQUIRED` decision outcome → C-09 exception (`sendability_manual_review` nebo `unclear_reply` dle duvodu).
+- `followup_stale_review_abandoned` (> 30 dni pending review) → C-09 exception (`followup_stale_review`, P4).
+- Resolution `approve` / `edit_and_continue` → C-08 engine resumes sequence (next_action=`RESUME_C08_SEQUENCE`).
+- Resolution `reject` → C-08 sequence stop (next_action=`TERMINAL_STOP`).
+
+**B6 vztah:**
+- B6 (budouci operator exception dashboard) **NENI blocker** pro C-09 SPEC. Operator v interim resolvuje exceptions **primo v Google Sheets** bunce (`_asw_exceptions` row edit s on-edit trigger).
+- C-09 definuje read/write contract: `_asw_exceptions` sheet schema + resolution flow state machine + editable vs read-only fields. B6 agreguje do per-lead view + per-operator queue.
+
+**Future C-10 (suppression list aggregation) vztah:**
+- Zadna direktni dependency. C-09 audit trail pro `compliance_hard_stop` resolve + `unsubscribed=TRUE` poskytuje source data pro budouci centralizovany suppression list.
+
+Task NEDODAVA:
+- Runtime review worker / cron / scheduler v Apps Script
+- Queue runtime (C-05 implementacni task)
+- Mailbox sync runtime / ESP webhook runtime (C-07 implementacni task)
+- Frontend UI (B6 budouci task)
+- Suppression list management (C-10 future task)
+- AI-based auto-triage / priority prediction (v2.0)
+- Notification system (email alerts, Slack integration)
+- Exception archive / retention policy detail
+- Zapisy do `apps-script/Config.gs` (PROPOSED enumy materializuje implementacni task)
+- Novy canonical CS1 state
+- Mutaci C-04 gate signature / C-05 queue schema / C-06 sender interface / C-07 inbound event schema / CS3 dead-letter schema (pouze EXTENSIONS PROPOSED)
+- `detectException()` helper hooks v A-02/A-03/A-05/A-06/A-07/A-08/B-04/C-04/C-05/C-06/C-07/C-08 (implementacni task)
+- SLA auto-bump cron runtime
+- Compatibility matrix validation logic (runtime enforcement)
+- **Owner:** Claude
+- **Code:** — (—)
+- **Docs:** docs/24-automation-workflows.md, docs/20-current-state.md
+
 ## 2026-04-20
 
 ### [A/A8] Preview queue → BRIEF_READY — DONE
