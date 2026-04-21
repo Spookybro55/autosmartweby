@@ -46,6 +46,51 @@ Task NEDODAVA:
 - **Code:** — (—)
 - **Docs:** docs/24-automation-workflows.md, docs/21-business-process.md, docs/20-current-state.md
 
+### [C/C-05] Outbound queue + send payload kontrakt — SPEC-only vrstva mezi C-04 gatem a budoucim senderem — DONE
+- **Scope:** Formalizuje datovou vrstvu mezi C-04 sendability gate a budoucim senderem. Odděluje čtyři fáze: "lead je sendable" / "queue item čeká" / "sender posílá" / "provider potvrdil". Definuje `_asw_outbound_queue` sheet schema, queue status enum, povolené/zakázané přechody, send payload kontrakt v1.0, immediate vs scheduled pravidla, failure design a cross-ref na CS2/CS3/C-04.
+
+Scope je **SPEC-only** — žádný runtime worker, sender, ESP provider, mailbox sync, cron ani frontend se neimplementuje. Žádné nové sloupce se v tomto tasku nezapisuji do `apps-script/Config.gs` ani do LEADS. Všechny nové sloupce jsou označené PROPOSED FOR C-05 a budou materializovány až implementačním taskem.
+
+Task dodává:
+- `_asw_outbound_queue` schema (32 polí — 15 povinných per zadání + 17 auditability/integrity rozšíření se zdůvodněním)
+- 5 queue statusů (`QUEUED`, `SENDING`, `SENT`, `FAILED`, `CANCELLED`) s matrixem allowed/disallowed transitions a 5 invarianty
+- Deterministický pseudocode pro queue create / worker claim / cancel / fail
+- Send payload kontrakt v1.0 (12 top-level polí, snapshot vs runtime-derived rozlišené)
+- Immediate vs scheduled pravidla (field semantics, worker eligibility, cancel, rescheduling zakázané)
+- Failure design (6 povinných polí pro diagnostiku, vztah k CS3 retry + dead-letter)
+- Cross-ref graph (LEADS ↔ queue ↔ `_asw_logs` ↔ `_asw_dead_letters`)
+- 4 sample rows (QUEUED, SENT, FAILED, CANCELLED)
+- 13 boundary rules / handoff body do C-04 / CS1 / CS2 / CS3 / C-06 / C-07 / C-08 / C-09
+- VERIFIED / INFERRED / PROPOSED labely
+
+**CS1/CS3 kompatibilita:**
+- C-05 queue je **ortogonální** datová vrstva; nezavádí žádný nový canonical lifecycle state. T17 (`OUTREACH_READY → EMAIL_QUEUED`) mapuje na queue row insert; T18 (`EMAIL_QUEUED → EMAIL_SENT`) mapuje na queue.send_status=SENT.
+- Queue status `SENDING`/`FAILED` **není** CS1 canonical state — žije pouze v queue.
+- CS3 S12 `process_email_queue` pravidlo `max_attempts=1` + okamžitý dead-letter je respektováno: retry nad stejnou row je zakázán. Retry = nový queue row s jiným `idempotency_key` (jinak duplicate blocked producer-side).
+- `idempotency_key` reuses CS3 section 4 S12 pattern `send:{lead_id}:{SHA256(email + subject + body)}`.
+
+**C-04 kompatibilita:**
+- Queue row smí vzniknout **pouze** pokud C-04 vrátí `AUTO_SEND_ALLOWED`. Snapshot outcome se freezne v `created_from_sendability_outcome` — audit invariant proti pozdější změně gate semantiky.
+- `MANUAL_REVIEW_REQUIRED` jde do C-09 exception queue (jiná struktura, ne `_asw_outbound_queue`).
+- `SEND_BLOCKED` queue row nevytváří.
+
+Task NEDODÁVÁ:
+- Runtime worker / cron / trigger / polling loop
+- Sender / Gmail call / ESP integraci
+- Mailbox sync změny
+- Follow-up engine (C-07)
+- Rate limiting, quiet hours, daily caps (C-08)
+- Suppression list management (C-09)
+- Frontend queue UI / exception review UI
+- `_asw_outbound_queue` sheet creation v `apps-script/` runtime kódu
+- Změny v `apps-script/Config.gs` `EXTENSION_COLUMNS`
+- Změny v `docs/23-data-model.md` (queue sheet je PROPOSED; materializace až v implementačním tasku)
+- Nové canonical lifecycle states
+- Nové gate outcomes
+- **Owner:** Claude
+- **Code:** — (—)
+- **Docs:** docs/24-automation-workflows.md, docs/20-current-state.md
+
 ## 2026-04-20
 
 ### [A/A8] Preview queue → BRIEF_READY — DONE
