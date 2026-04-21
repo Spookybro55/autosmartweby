@@ -51,8 +51,18 @@ Definovane v EXTENSION_COLUMNS (Config.gs):
 ### lead_stage
 NEW → QUALIFIED / DISQUALIFIED / REVIEW → IN_PIPELINE → PREVIEW_SENT
 
-### preview_stage
-NOT_STARTED → BRIEF_READY → QUEUED → SENT_TO_WEBHOOK → READY / REVIEW_NEEDED / FAILED
+### preview_stage (B-05)
+NOT_STARTED → BRIEF_READY → GENERATING → READY_FOR_REVIEW → APPROVED
+                                       → FAILED (retry eligible)
+
+- **NOT_STARTED** — pipeline muze zacit
+- **BRIEF_READY** — brief JSON hotovy, webhook jeste nevolan
+- **GENERATING** — webhook request in-flight (nahrazuje legacy QUEUED + SENT_TO_WEBHOOK)
+- **READY_FOR_REVIEW** — preview_url zapsana, ceka na operatora (nahrazuje legacy READY + REVIEW_NEEDED; `preview_needs_review` sloupec drzi quality signal)
+- **APPROVED** — operator manualne potvrdil v Google Sheets; terminal
+- **FAILED** — posledni pokus selhal; re-tryable na dalsim timer tiku (zustava v eligibleStages)
+
+Legacy hodnoty `QUEUED, SENT_TO_WEBHOOK, READY, REVIEW_NEEDED` jsou preserved v `PREVIEW_STAGES` enumu pro backward-compat cteni pre-B-05 dat. Novy kod je nezapisuje.
 
 ### outreach_stage
 NOT_CONTACTED → DRAFT_READY → CONTACTED → RESPONDED → WON / LOST

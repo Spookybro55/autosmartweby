@@ -205,7 +205,7 @@ Uzavira prechod QUALIFIED → BRIEF_READY. `processPreviewQueue()` zpracuje kval
 | `composeDraft_(rd)` | Situation-aware email draft (subject + body) |
 | `chooseTemplateType_(rd)` | Template selector (48 variant, B-03 family input) |
 
-**Eligibility:** `qualified_for_preview=TRUE` AND `preview_stage ∈ {'', NOT_STARTED, FAILED, REVIEW_NEEDED, BRIEF_READY}` AND `dedupe_flag !== TRUE`. Idempotence: pokud `preview_stage=BRIEF_READY` a DRY_RUN/no webhook, radek se preskoci (zadny rebuild).
+**Eligibility:** `qualified_for_preview=TRUE` AND `preview_stage ∈ {'', NOT_STARTED, FAILED, REVIEW_NEEDED (legacy), BRIEF_READY}` AND `dedupe_flag !== TRUE`. B-05 `READY_FOR_REVIEW` a `APPROVED` **nejsou** eligible (operator-owned). Idempotence: pokud `preview_stage=BRIEF_READY` a DRY_RUN/no webhook, radek se preskoci (zadny rebuild).
 
 **Zapsana pole per uspesny radek:**
 - `template_type`, `preview_brief_json`, `preview_headline`, `preview_subheadline`, `preview_cta`, `preview_slug`
@@ -221,6 +221,48 @@ Uzavira prechod QUALIFIED → BRIEF_READY. `processPreviewQueue()` zpracuje kval
 2. **Post-qualify hook** (A-08): po uspesne kvalifikaci (`stats.qualified > 0`, ne dry run) vola `runAutoQualify_()` inline `processPreviewQueue()`. Non-fatal: chyba hooku nezneplatni qualify vysledek. Stats: `previewHookInvoked: true` nebo `previewHookError: message`.
 
 **Stav:** LOCAL VERIFIED (6 scenaru, 38 asserti — happy path, send_allowed=FALSE, skip gates, per-row fail isolation, BRIEF_READY idempotence). TEST RUNTIME not verified (vyzaduje clasp push).
+
+## Preview URL return + statusy (B-05)
+
+Uzavira CRM-side smycku mezi A-08 (brief builder) a B-04 endpointem. Apps Script posila webhook dle B-04 contractu (slug v payloadu + auth header), parsuje response do LEADS, a `preview_stage` prechazi do operator-facing lifecycle.
+
+**Soubor:** `apps-script/PreviewPipeline.gs` (webhook call sites), `apps-script/EnvConfig.gs` (secret helper), `apps-script/Config.gs` (enum rozsireni)
+
+**Payload additions (B-04 mandatory):**
+- `preview_slug` — B-04 validuje proti `PREVIEW_SLUG_PATTERN`
+- header `X-Preview-Webhook-Secret` — timing-safe compare proti `PREVIEW_WEBHOOK_SECRET` env na B-04 strane
+
+**Lifecycle (operator-facing):**
+
+```
+NOT_STARTED → BRIEF_READY → GENERATING → READY_FOR_REVIEW → APPROVED (terminal +)
+                                       → FAILED           (retry eligible)
+```
+
+| Stage | Semantics | Writer |
+|-------|-----------|--------|
+| `NOT_STARTED` | inicialni, pipeline muze zacit | GAS (qualify step) |
+| `BRIEF_READY` | brief JSON hotovy, webhook jeste nevolan | GAS (A-08) |
+| `GENERATING` | webhook request in-flight | GAS (B-05) |
+| `READY_FOR_REVIEW` | preview_url zapsana, ceka na operatora | GAS (B-05) |
+| `APPROVED` | operator manualne potvrdil | Operator (Google Sheets manual) |
+| `FAILED` | posledni pokus selhal | GAS (B-05) |
+
+**Response parsing → LEADS write-back (pre-existing, B-05 nezmenil):**
+- 200 + ok:true → `preview_url`, `preview_screenshot_url`, `preview_generated_at`, `preview_version`, `preview_quality_score`, `preview_needs_review`, `preview_stage=READY_FOR_REVIEW`, `preview_error=''`
+- 200 + ok:false → `preview_stage=FAILED`, `preview_error='Webhook ok=false: <body:300>'`
+- HTTP 4xx/5xx | exception → `preview_stage=FAILED`, `preview_error='WEBHOOK_ERROR: <message:300>'`
+
+**Retry rule:** `eligibleStages = ['', 'not_started', 'failed', 'review_needed', 'brief_ready']`. `FAILED` se pri dalsim timer run znovu picnes (natural loop, bez explicit retry counter). `READY_FOR_REVIEW` a `APPROVED` NEJSOU v `eligibleStages` — pipeline je netkne. `GENERATING` take ne (in-flight rowy se neopakuji dokud operator manualne nezresetuje na `NOT_STARTED`).
+
+**Deployment gates (operator-set mimo code):**
+- `PREVIEW_WEBHOOK_SECRET` Script Property (match Next.js env)
+- `WEBHOOK_URL` Config const nebo Script Property
+- `ENABLE_WEBHOOK=true`, `DRY_RUN=false`
+
+**Dva call sites:** `processPreviewQueue()` (timer path) a `runWebhookPilotTest()` (menu path). Identicka logika, symetricke zmeny.
+
+**Stav:** LOCAL VERIFIED (10 scenaru, 42 asserti — S1 success, S2 ok:false, S3-S5 HTTP 400/401/500, S6 network exception, S7 retry eligibility, S8 APPROVED preservation, S9 per-row fail isolation, S10 needs_review flag propagation). TEST RUNTIME not verified (vyzaduje clasp push + Script Properties + B-04 endpoint reachable).
 
 ## Ingest quality report (A-09)
 

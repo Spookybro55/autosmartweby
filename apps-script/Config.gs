@@ -120,14 +120,31 @@ var EXTENSION_COLUMNS = [
 ];
 
 /* ── Preview stage state machine ──────────────────────────── */
+// B-05: operator-facing preview lifecycle.
+//
+//   NOT_STARTED      initial; pipeline may build brief
+//   BRIEF_READY      brief JSON built, webhook not yet called
+//   GENERATING       webhook call in flight (replaces legacy QUEUED + SENT_TO_WEBHOOK)
+//   READY_FOR_REVIEW preview_url present, awaiting operator review
+//                    (replaces legacy READY + REVIEW_NEEDED; needs_review
+//                    signal is carried by the `preview_needs_review` column)
+//   APPROVED         operator manually confirmed preview; terminal positive
+//   FAILED           last webhook attempt failed; eligible for retry on next run
+//
+// Legacy values QUEUED / SENT_TO_WEBHOOK / READY / REVIEW_NEEDED are preserved
+// for backward-compat reads of pre-B-05 rows. Do not write them from new code.
 var PREVIEW_STAGES = {
-  NOT_STARTED:     'NOT_STARTED',
-  BRIEF_READY:     'BRIEF_READY',
-  QUEUED:          'QUEUED',
-  SENT_TO_WEBHOOK: 'SENT_TO_WEBHOOK',
-  READY:           'READY',
-  REVIEW_NEEDED:   'REVIEW_NEEDED',
-  FAILED:          'FAILED'
+  NOT_STARTED:      'NOT_STARTED',
+  BRIEF_READY:      'BRIEF_READY',
+  GENERATING:       'GENERATING',
+  READY_FOR_REVIEW: 'READY_FOR_REVIEW',
+  APPROVED:         'APPROVED',
+  FAILED:           'FAILED',
+  // Legacy (pre-B-05, do not write)
+  QUEUED:           'QUEUED',
+  SENT_TO_WEBHOOK:  'SENT_TO_WEBHOOK',
+  READY:            'READY',
+  REVIEW_NEEDED:    'REVIEW_NEEDED'
 };
 
 /* ── Lead stages ──────────────────────────────────────────── */

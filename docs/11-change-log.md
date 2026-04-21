@@ -6,6 +6,16 @@
 
 ---
 
+## 2026-04-21
+
+### [B/B5] Preview URL return + statusy (caller-side + lifecycle) — DONE
+- **Scope:** Navazuje na B-01 (preview contract), B-02 (preview renderer), B-03 (template family mapping), B-04 (`POST /api/preview/render` endpoint). Uzavira CRM-side smycku: Apps Script caller splnuje B-04 contract (slug v payloadu + X-Preview-Webhook-Secret header), response se parsuje do LEADS a `preview_stage` je narovnany do operator-facing lifecycle `NOT_STARTED → BRIEF_READY → GENERATING → READY_FOR_REVIEW → APPROVED`, s `FAILED` jako retry-eligible.
+
+B-05 NEMENI B-04 endpoint contract, NEMENI B-01 `PreviewBrief`, NEMENI B-03 mapping. Neotevira B-06 (storage/screenshot/CDN), neresi frontend UI pro `APPROVED` (ta je manualni operator akce v Google Sheets), nepridava `preview_attempts` counter.
+- **Owner:** Stream B
+- **Code:** apps-script/Config.gs (modified), apps-script/EnvConfig.gs (modified), apps-script/PreviewPipeline.gs (modified), apps-script/PreviewPipeline.gs (modified), scripts/test-b05-preview-webhook.mjs (new), package.json (modified)
+- **Docs:** docs/20-current-state.md, docs/22-technical-architecture.md, docs/23-data-model.md, docs/24-automation-workflows.md, docs/26-offer-generation.md, docs/30-task-records/B5.md
+
 ## 2026-04-20
 
 ### [A/A8] Preview queue → BRIEF_READY — DONE
