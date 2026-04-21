@@ -4436,3 +4436,1102 @@ idempotency_key = "followup:{lead_id}:{sequence_root_queue_id}:{sequence_stage}"
 - Holiday calendar config (Script Property or external source) — optional, mimo v1.0 SPEC.
 - Script Properties: `FOLLOWUP_OFFSET_1_BUSINESS_DAYS=3`, `FOLLOWUP_OFFSET_2_BUSINESS_DAYS=7`, `FOLLOWUP_QUIET_HOURS_START=09:00`, `FOLLOWUP_QUIET_HOURS_END=17:00`, `FOLLOWUP_TIMEZONE=Europe/Prague`, `FOLLOWUP_MAX_PER_SEQUENCE=2`, `FOLLOWUP_OOO_PAUSE_DAYS=14`, `FOLLOWUP_REVIEW_STALE_ABANDON_DAYS=30`.
 - Payload version `"1.0"` pro follow-up queue rows (same as C-05 initial contract, compatible).
+
+---
+
+## Exception queue & human-in-the-loop — C-09 (review queue + operator resolution)
+
+> **Autoritativni specifikace.** Definuje centralizovanou exception queue a operator resolution kontrakt pro pripady, ktere automat neumi rozhodnout sam.
+>
+> **Dependency narrowing:** Puvodni task brief uvadel dependency `C-03`. V repo source-of-truth **NEEXISTUJE** zadny `C-03.md` task record. `C3.md` je governance hardening (CLAUDE.md + branch protection, done 2026-04-05, semantic completely unrelated). Single task, ktery dava smysl jako reliability prerekvizita exception queue, je **`CS3`** (Reliability & Idempotency — dead-letter, retry matice, LockService, failure_class). Dependency je **narovnana na `CS3`** a explicitne dokumentovana v task recordu `docs/30-task-records/C-09.md`.
+
+### 1. Účel exception queue
+
+Exception queue je **centralizovana perzistentni vrstva** pro problematicke leady, ktere automatika nesmi / neumi rozhodnout sama. Misto "tichych" skipu, sheet error sloupcu roztrousenych po LEADS (`preview_error`, `email_reply_type=UNCLASSIFIED`, `bounce_class=SOFT`) nebo `_asw_dead_letters` (CS3 technicky retry exhaustion) definuje C-09 **jeden human-facing sheet** (`_asw_exceptions`) s jasnym resolution kontraktem.
+
+Architekturni pozice (ASCII mapa):
+
+```
+    ┌─────────────────────────────────────────────────────────────────────┐
+    │                    AUTOMATIC WORKFLOW CHAIN                          │
+    │                                                                      │
+    │   A-02 import → A-03/A-05 normalize+dedupe → A-06 web check         │
+    │   → A-07 qualify → A-08 preview → B-04/B-05 render                  │
+    │   → C-04 sendability gate → C-05 queue → C-06 sender                │
+    │   → SENT → C-07 inbound ingest → C-08 follow-up engine              │
+    │                                                                      │
+    │                        fail / review signal                          │
+    └────────────────────────────────────────┬────────────────────────────┘
+                                             │
+                                             ▼
+                    ┌────────────────────────────────────────┐
+                    │   C-09 Exception queue (_asw_exceptions)│
+                    │                                          │
+                    │   detected_at / exception_type / priority│
+                    │   diagnostic_payload_json / summary      │
+                    │   exception_status = OPEN                │
+                    └────────────────────────────────────────┬┘
+                                                             │
+                                                             ▼
+                             ┌───────────────────────────────────────┐
+                             │     OPERATOR MANUAL REVIEW            │
+                             │  (Google Sheets row or future B6 UI)  │
+                             │                                        │
+                             │   operator_decision ∈                  │
+                             │     {approve, reject, retry,           │
+                             │      edit_and_continue}                │
+                             └───────────────────┬───────────────────┘
+                                                 │
+                           ┌─────────────────────┼─────────────────────┐
+                           ▼                     ▼                     ▼
+                      approve / retry /      reject / stop         edit_and_continue
+                      edit_and_continue      terminal              → engine re-runs
+                      → back into flow       → sequence_stop       with edited fields
+```
+
+**Core purpose:**
+1. **Zabranit "zmizeli" leadu** — kazdy problematicky lead ma viditelny, trackable row.
+2. **Oddelit technicky dead-letter (CS3) od business exception (C-09)** — CS3 loguje "retry exhausted" technical fail; C-09 je operator-facing review queue nad tim.
+3. **Deterministicky resolution contract** — operator ma 4 discrete outcomes (approve / reject / retry / edit_and_continue), kazdy s definovanym flow re-entry.
+4. **Auditability** — kdo rozhodl, kdy, proc, co se stalo dal.
+5. **Priority-ordered queue** — operator vi, co resit prvni (compliance > delivery > content > data-quality).
+
+**Co C-09 zachytava (6 kanonickych exception families + rozsirene):**
+- **preview fail** — preview render selhal / webhook error / preview_needs_review=TRUE
+- **missing email** — lead ma ICO + segment, ale chybi validni email, cannot send
+- **ambiguous duplicate** — dedupe pravidla (A-05) vratila confidence-tie, manual merge decision
+- **broken personalization** — personalization_json missing required keys / template render fail
+- **provider fail po max retries** — CS3 dead-letter pro send job, review pred dalsim pokusem
+- **unclear reply** — C-07 `reply_class=UNCLASSIFIED` + `reply_needs_manual=TRUE`
+
+### 2. Boundary / non-goals
+
+**C-09 resi:**
+- Centralizovanou exception queue datovou vrstvu (schema, statusy, transitions, idempotency).
+- Operator resolution contract (4 outcomes + flow re-entry rules).
+- Taxonomy exception typu + priority model.
+- Auditability (kdo / kdy / proc / co dal).
+- Minimal sheet-row-based review interface (pro operator without frontend UI).
+
+**C-09 NEresi:**
+- **Runtime review worker** (cron / trigger / scheduler) — implementacni task.
+- **Frontend UI** (B6 exception dashboard) — budouci task, NENI blocker.
+- **Scheduler** (kdy engine vybira exception rows) — implementacni task.
+- **Mailbox sync runtime** — C-07 implementacni task.
+- **Provider webhook runtime** — C-07 implementacni task.
+- **Queue worker runtime** — C-05 implementacni task.
+- **Zapisy do `Config.gs`** — implementacni task (PROPOSED FOR C-09 enumy materializuje implementacni task).
+- **Novy canonical CS1 state** — reuse existing `REVIEW_REQUIRED` (CS1 #18 non-terminal review), `DISQUALIFIED` (CS1 #14 terminal), `FAILED` lifecycle sub-states.
+- **Suppression list management** — to je separate task (vztah k C-04 B7/B8 existing).
+- **AI-based auto-triage exceptions** — v1.0 pure operator decision; v2.0 mozna add priority re-sort algoritmy.
+
+**C-09 vztah k B6 (Operator UI):**
+- B6 budouci task **NENI blocker** pro C-09 SPEC.
+- Operator muze v interim resolvovat exceptions **primo v Google Sheets** bunce (`_asw_exceptions` row edit).
+- C-09 SPEC definuje minimal sheet-row-based interface (sekce 7) → postacuje bez UI.
+
+### 3. Exception taxonomy
+
+**10 exception typu (6 kanonickych z user briefu + 4 rozsireni z repo analyzy):**
+
+| # | `exception_type` | Popis | Odkud vzniká | Severity / priority tier | Blocking vs review | Retry-eligible? | Typicky resi |
+|---|------------------|-------|--------------|--------------------------|--------------------|-----------------| -------------|
+| 1 | `preview_render_fail` | Preview generation selhal (webhook HTTP error, template missing, runtime exception). | B-04 render endpoint (HTTP 4xx/5xx), A-08 processPreviewQueue (PROCESSING_ERROR), existing `preview_stage=FAILED` + `preview_error`. | **Priority 3 (content)** | Review (ne auto-blocking — operator rozhodne). | Ano (retry → re-run render po fix). | Content operator. |
+| 2 | `missing_email` | Lead prosel qualification (business_name + ICO) ale chybi validni email (neexistuje / `email='' `/ `@` missing). | A-07 AutoQualifyHook (ma business data ale no email), A-06 web check (no contact page), C-04 gate B2 `NO_RECIPIENT_EMAIL`. | **Priority 4 (data-quality)** | Review. | Ano (retry → po operator dodani emailu). | Data operator. |
+| 3 | `ambiguous_duplicate` | Dedupe (A-05) najde 2+ leady s high similarity ale zadny deterministicky tie-breaker (ICO identical, company_name fuzzy match > 0.8, ale mesto se lisi). | A-05 dedupeByCompanyKey, A-03 normalize. | **Priority 4 (data-quality)** | Review (blocking pro ingest toho leadu). | Ne (resolution = manual merge, ne retry). | Data operator. |
+| 4 | `broken_personalization` | Template render / copy-gen fail kvuli missing personalization keys (`{{company_name}}` expanded z null, required field empty). | A-08 processPreviewQueue build, C-08 follow-up copy-gen, B-04 render. | **Priority 3 (content)** | Review. | Ano (retry po data fix / template fix). | Content operator / data operator. |
+| 5 | `provider_fail_after_max_retries` | CS3 dead-letter pro send job — C-06 sender vratil `failure_class=PERMANENT` nebo TRANSIENT exhausted po max_attempts=1 (S12). | CS3 dead-letter, C-06 `NormalizedSendResponse` fail, C-05 `send_status=FAILED`. | **Priority 2 (delivery)** | Review (operator rozhodne retry with new queue row nebo permanent reject). | Ano (retry = novy queue row per C-05; ne overwrite existing). | Delivery operator. |
+| 6 | `unclear_reply` | C-07 inbound `reply_event` s `reply_class=UNCLASSIFIED` + `reply_needs_manual=TRUE`. Operator musi rozhodnout intent (positive / negative / question / OOO / unsubscribe intent). | C-07 ingest, `_asw_inbound_events` event_type=REPLY/UNKNOWN_INBOUND. | **Priority 2 (delivery)** | Review (pauses C-08 follow-up sequence). | Ne (resolution = classification, ne retry). | Delivery / content operator. |
+| 7 | `sendability_manual_review` | C-04 gate outcome `MANUAL_REVIEW_REQUIRED` (reasons R1–R3: `PREVIEW_NEEDS_REVIEW`, `QUALITY_SCORE_BELOW_THRESHOLD`, `SEND_ALLOWED_UNSET`). | C-04 evaluator, LEADS `sendability_outcome=MANUAL_REVIEW_REQUIRED`. | **Priority 3 (content)** | Review. | Ano (retry po review = re-eval gate). | Content operator. |
+| 8 | `compliance_hard_stop` | C-04 `SEND_BLOCKED` ze supression / unsubscribe / GDPR domeny. Exception se **zaklada jako audit trail**, ale operator **nemuze approve send** (compliance hard-stop). | C-04 gate reasons B7, B8, PROPOSED `ADDRESS_BOUNCED`. | **Priority 1 (compliance)** | **Terminal reject-only** (operator muze pouze `reject` s note). | Ne. | Legal / compliance operator. |
+| 9 | `normalization_error` | A-03 normalize shodil row (required field missing, header mismatch, invalid format). | A-03 / A-02 `normalized_status=ERROR`, `_raw_import` fail. | **Priority 4 (data-quality)** | Review. | Ano (retry po data fix). | Data operator. |
+| 10 | `followup_stale_review` | C-08 review flag nezresolvovan > 30 dni (`followup_stale_review_abandoned` threshold). Engine auto-zaklada exception pro operator cleanup. | C-08 engine auto-detection, `_asw_logs` `followup_stale_review_abandoned`. | **Priority 4 (data-quality)** | Review (typicky reject = sequence stop). | Ne. | Content / data operator. |
+
+**Priority tiers (zvyseny semantic):**
+- **Tier 1 — compliance** (`compliance_hard_stop`) — legal / GDPR / explicit suppression. Vyzaduje immediate attention (blocks automated outreach integrity).
+- **Tier 2 — delivery** (`provider_fail_after_max_retries`, `unclear_reply`) — inbox deliverability + thread continuity. Kazde zdrzeni ohrozuje reply rate.
+- **Tier 3 — content** (`preview_render_fail`, `broken_personalization`, `sendability_manual_review`) — customer-facing output quality. Muze pockat dny.
+- **Tier 4 — data-quality** (`missing_email`, `ambiguous_duplicate`, `normalization_error`, `followup_stale_review`) — long-tail cleanup. Batch-resolvable.
+
+### 4. Priority model
+
+**Exception priority (1–4, nizsi cislo = vyssi priorita):**
+
+| Priority | Tier | Co spada | Urgence | SLA target (PROPOSED) |
+|----------|------|----------|---------|-----------------------|
+| **P1** | Compliance | Legal hard-stop, unsubscribe breach, GDPR anomaly. | Okamzite — nereseni = compliance violation. | Resolve < 24h |
+| **P2** | Delivery | Provider fail, unclear reply (pauzuje C-08 follow-up). | Vysoka — nereseni = promeskane follow-up okno (T+3/T+7 clock bezi). | Resolve < 2 dny business |
+| **P3** | Content | Preview/copy fail, MANUAL_REVIEW_REQUIRED. | Stredni — nereseni = lead sedi, ale nic se nepromarni. | Resolve < 5 dni business |
+| **P4** | Data-quality | Missing email, ambiguous duplicate, normalization error, stale review. | Nizka — batch-resolvable jednou tydne. | Resolve < 10 dni business |
+
+**Trideni v queue (sort order):**
+1. `exception_priority` ASC (P1 → P4)
+2. `detected_at` ASC (nejstarsi first v ramci priority)
+3. `exception_type` alfabeticky (tiebreaker — deterministic)
+
+**Auto-priority-bump pravidla (PROPOSED FOR C-09 implementacni task):**
+- Exception pending > 2 SLA targetu → promote o 1 tier (P3 → P2).
+- P4 pending > 14 dni → auto-downgrade na `CLOSED_STALE` (ne reject — audit-preserving).
+- C-08 sekvence v OOO hold s exception > 7 dni → promote na P2 (delivery-critical).
+
+**Kompliance precedence:**
+- P1 exceptions **nesmi byt merged / approved / retried**. Jedina validni resolution je `reject` + audit note. To je tvrdy invariant v resolution contracte (sekce 8).
+
+### 5. Co jde do manual review
+
+**4-cestny routing po detection:**
+
+| Detection situace | Route to | Duvod |
+|-------------------|----------|-------|
+| Preview render HTTP 5xx (transient) + pokud je to prvni pokus | **Retry (auto)** — ne exception queue | CS3 `TRANSIENT` + retry budget. Exception queue se **nezaklada**, pokud CS3 retry loop stale bezi. |
+| Preview render HTTP 5xx po vycerpani max_attempts | **Exception queue + manual review** | CS3 dead-letter trigger → C-09 prevzame jako `preview_render_fail`. |
+| Preview render HTTP 4xx (permanent) | **Exception queue + manual review** | Hned prvni pokus — permanent fail vyzaduje clovecku intervention. |
+| LEADS `business_name + ICO OK, email missing` | **Exception queue + manual review (`missing_email`)** | Lead ma hodnotu, jen schazi kontakt — zachranuj. |
+| LEADS normalization_status=ERROR, no business data | **Reject (auto — reject v ramci ingest)** — exception queue se nezaklada | Ingest failed bez hodnotneho signalu. Muze se logovat do `_asw_logs`, ale C-09 row se nezaklada. |
+| Dedupe confidence tie (fuzzy match 2+ rows, ICO identical ale mesta lisi) | **Exception queue + manual review (`ambiguous_duplicate`)** | Dedupe algorithm unable to rozhodnout. |
+| Dedupe unique match | **Auto-merge (ne exception)** | Deterministic. |
+| C-04 gate `AUTO_SEND_ALLOWED` | **Proceed to queue** (ne exception) | Gate passed. |
+| C-04 gate `MANUAL_REVIEW_REQUIRED` reason R1-R3 | **Exception queue + manual review (`sendability_manual_review`)** | Gate decided manual. |
+| C-04 gate `SEND_BLOCKED` reason B7/B8/`ADDRESS_BOUNCED` | **Exception queue + reject-only (`compliance_hard_stop`)** | Audit trail, ale operator muze pouze reject + note. |
+| C-04 gate `SEND_BLOCKED` reason B1-B6, B9-B15 (data deficit, terminal state, sent_allowed=false, already sent) | **Silent skip (ne exception)** — logovano do `_asw_logs` | Deterministicky duvod, operator nemusi resit individualne. |
+| C-06 sender `failure_class=TRANSIENT` behem max_attempts=1 scope | **CS3 dead-letter (ne retry — S12 has no retry)** → **Exception queue (`provider_fail_after_max_retries`)** | Single attempt, fail = immediate exception. |
+| C-06 sender `failure_class=PERMANENT` | **CS3 dead-letter** → **Exception queue (`provider_fail_after_max_retries`)** | Permanent fail. |
+| C-07 reply `reply_class ∈ {POSITIVE, NEGATIVE, QUESTION}` | **Proceed CS1 T20 (REPLIED)** — ne exception | Classified. |
+| C-07 reply `reply_class=OOO` | **C-08 pause 14 dni** (ne exception) | Deterministic. |
+| C-07 reply `reply_class=UNCLASSIFIED` + `reply_needs_manual=TRUE` | **Exception queue + manual review (`unclear_reply`)** | Classifier ambiguous. |
+| C-07 `unknown_inbound` event (not reply/bounce/unsubscribe) | **Exception queue (`unclear_reply`)** | Suspicious inbound. |
+| C-08 review flag > 30 dni bez resolve | **Auto-reject v C-08** + **Exception queue (`followup_stale_review`) audit trail** | Stale cleanup. |
+
+**Invariant: kazdy lead s nevyreseny automaticky problem MA exception row.** Pokud problem je silent (auto-skip bez exception), lead nesmi byt "lost" — musi byt reachable pres LEADS status field (`lifecycle_state`, `sendability_outcome`, `preview_stage`, `bounce_class`, atd.).
+
+### 6. Exception queue schema
+
+**PROPOSED FOR C-09 sheet: `_asw_exceptions` (append-only-with-resolution-update).**
+
+| # | Pole | Typ | Required | Nullable | Vyznam | Source | Label |
+|---|------|-----|----------|----------|--------|--------|-------|
+| 1 | `exception_id` | string | ANO | NE | Unikátní ID exception row. Format: `EX-{YYYY-MM-DD}-{NNNNN}`. | Engine při insertu. | PROPOSED FOR C-09 |
+| 2 | `lead_id` | string | ANO | NE | FK na LEADS. Kazda exception ma asociovany lead (ambigous_duplicate ma **primary** lead + pointer na candidate secondary v diagnostic_payload). | Source step. | VERIFIED (LEADS.lead_id existing) |
+| 3 | `outreach_queue_id` | string | NE | ANO | FK na `_asw_outbound_queue` row, pokud exception vznikla v outbound kontextu (C-04/C-05/C-06/C-08). Null pro pre-outbound (preview/qualify/dedupe/normalize). | Source step. | VERIFIED (C-05 schema) |
+| 4 | `source_job_id` | string | NE | ANO | FK na `_raw_import.source_job_id` nebo `FU-RUN-*` nebo `PREVIEW-RUN-*`. Pro dohledatelnost batch kontextu. | Source step. | VERIFIED (A-09 ingest report uses) |
+| 5 | `inbound_event_id` | string | NE | ANO | FK na `_asw_inbound_events.event_id`, pokud exception vznikla z C-07 eventu (`unclear_reply`). | C-07 ingest. | VERIFIED (C-07 schema) |
+| 6 | `exception_type` | enum | ANO | NE | Jeden z 10 typu (sekce 3). | Source step detection. | PROPOSED FOR C-09 |
+| 7 | `exception_priority` | integer | ANO | NE | 1-4 (sekce 4). Default derivovano z `exception_type`, operator muze override. | Engine při insertu (derived) + operator (editable). | PROPOSED FOR C-09 |
+| 8 | `exception_status` | enum | ANO | NE | Status lifecycle (sekce 10). Initial `OPEN`. | Engine insert + operator + resolution step. | PROPOSED FOR C-09 |
+| 9 | `detected_at` | timestamp | ANO | NE | Kdy exception vznikla. Immutable po insertu. | Engine při insertu. | PROPOSED FOR C-09 |
+| 10 | `detected_by_step` | string | ANO | NE | Jaky automaticky step detekoval (napr. `A-08:processPreviewQueue`, `C-04:evaluateSendability`, `C-06:EmailSender`, `C-07:ingestReply`, `C-08:runFollowupEngine`). | Source step. | PROPOSED FOR C-09 |
+| 11 | `summary` | string | ANO | NE | Jedno-vetny human-readable popis problemu. Max 500 chars. Generated by source step. | Source step. | PROPOSED FOR C-09 |
+| 12 | `diagnostic_payload_json` | JSON string | ANO | NE | Structured context pro operator diagnostiku. Schema per `exception_type` (napr. preview_render_fail obsahuje `error_message`, `http_status`, `template_id`, `retry_count`). PII-masked. Max 4KB. | Source step. | PROPOSED FOR C-09 |
+| 13 | `operator_decision` | enum | NE | ANO | Jeden z 4 outcomes: `approve`, `reject`, `retry`, `edit_and_continue`. Null dokud IN_REVIEW → RESOLVED transition. | Operator. | PROPOSED FOR C-09 |
+| 14 | `operator_note` | string | NE | ANO | Free-text zduvodneni rozhodnuti. Max 1000 chars. Povinny pro `reject` a `compliance_hard_stop` types. | Operator. | PROPOSED FOR C-09 |
+| 15 | `operator_edited_fields_json` | JSON string | NE | ANO | Structured diff edited fields pro `edit_and_continue` outcome (napr. `{"email": "new@example.com", "business_name": "Corrected Name"}`). Null pro ostatni outcomes. | Operator. | PROPOSED FOR C-09 |
+| 16 | `resolved_at` | timestamp | NE | ANO | Kdy operator rozhodnul (transition OPEN/IN_REVIEW → RESOLVED). | Resolution step. | PROPOSED FOR C-09 |
+| 17 | `resolved_by` | string | NE | ANO | Operator identifier (email, operator_id). Fallback: `"operator"` interim. | Resolution step. | PROPOSED FOR C-09 |
+| 18 | `resolution_outcome` | enum | NE | ANO | Final outcome po flow re-entry (uspel, selhal, pending). Values: `APPLIED`, `APPLIED_WITH_EDITS`, `REJECTED`, `RETRY_QUEUED`, `RETRY_FAILED_AGAIN`, `PENDING_DOWNSTREAM`. Jedno-smerny — po set nemen. | Engine po resolution flow re-entry. | PROPOSED FOR C-09 |
+| 19 | `retry_reference_queue_id` | string | NE | ANO | Pokud outcome=`retry` + vytvori se novy `_asw_outbound_queue` row, FK na ten row. | Engine resolution step. | PROPOSED FOR C-09 |
+| 20 | `retry_reference_exception_id` | string | NE | ANO | Pokud retry znovu fail → vznikne nova exception → FK na ni pro lookup chainu. | Engine (pri second fail). | PROPOSED FOR C-09 |
+| 21 | `next_action` | enum | NE | ANO | Deterministic popis, co flow dela po resolution: `RETURN_TO_C04_GATE`, `CREATE_NEW_QUEUE_ROW`, `RESUME_C08_SEQUENCE`, `UPDATE_CS1_LIFECYCLE`, `TERMINAL_STOP`, `LEAD_RE_INGEST`. | Derivovano engine z `operator_decision` + `exception_type`. | PROPOSED FOR C-09 |
+| 22 | `cs2_run_id` | string | ANO | NE | Batch run id, ktery exception detekoval. Cross-ref na `_asw_logs`. | Source step. | VERIFIED (CS2 run history) |
+| 23 | `related_dead_letter_id` | string | NE | ANO | FK na `_asw_dead_letters.dead_letter_id`, pokud exception vznikla z CS3 dead-letter. | CS3 integration. | VERIFIED (CS3 existing) + PROPOSED (FK pole) |
+| 24 | `sla_target_at` | timestamp | ANO | NE | Derivovano z `detected_at` + SLA per priority (P1=24h, P2=2d, P3=5d, P4=10d business days). Pro auto-priority-bump. | Engine při insertu. | PROPOSED FOR C-09 |
+
+**Total: 24 poli (PROPOSED, align s C-05 32 poli / C-07 18 poli stylem — rich audit trail without excessive minimalism).**
+
+**Rationale pro pole:**
+- `exception_id` + `exception_type` + `exception_priority` + `exception_status` = core identity.
+- `lead_id` + `outreach_queue_id` + `source_job_id` + `inbound_event_id` + `cs2_run_id` + `related_dead_letter_id` = cross-ref grafu.
+- `detected_at` + `detected_by_step` + `summary` + `diagnostic_payload_json` = detection audit.
+- `operator_decision` + `operator_note` + `operator_edited_fields_json` + `resolved_at` + `resolved_by` = resolution audit.
+- `resolution_outcome` + `retry_reference_queue_id` + `retry_reference_exception_id` + `next_action` = flow re-entry audit.
+- `sla_target_at` = priority management.
+
+### 7. Minimal review interface
+
+**Sheet-row-based operator interface (pro B6-less interim):**
+
+Operator otevre `_asw_exceptions` sheet. Vidí/edituje:
+
+**READ-ONLY (system-set, operator nesmi zmenit):**
+- `exception_id`, `lead_id`, `outreach_queue_id`, `source_job_id`, `inbound_event_id`
+- `exception_type`, `detected_at`, `detected_by_step`, `cs2_run_id`, `related_dead_letter_id`
+- `summary`, `diagnostic_payload_json`
+- `sla_target_at`
+- `retry_reference_queue_id`, `retry_reference_exception_id`
+- `resolution_outcome` (one-way after set)
+
+**EDITABLE (operator):**
+- `exception_priority` — operator muze bumpnout priority (napr. P3 → P2 pokud vidi delivery urgence).
+- `exception_status` — ceka transition z `OPEN` → `IN_REVIEW` (operator claims exception).
+- `operator_decision` — povinny pro resolution (enum dropdown: `approve` / `reject` / `retry` / `edit_and_continue`).
+- `operator_note` — free text.
+- `operator_edited_fields_json` — JSON edits (pouze pro `edit_and_continue`).
+
+**DERIVED (system-written po resolution trigger):**
+- `resolved_at` — auto-set kdyz `exception_status` → `RESOLVED`.
+- `resolved_by` — z session kontextu / email.
+- `next_action` — derivovano z `operator_decision` + `exception_type`.
+
+**Minimum operator musi videt:**
+1. **Exception identity** (exception_id + lead_id + exception_type + priority).
+2. **Context** (summary + diagnostic_payload_json jako human-readable pretty-print).
+3. **Cross-ref links** (click na lead_id → LEADS row, click na outreach_queue_id → queue row, click na inbound_event_id → inbound events row).
+4. **Action widget** (operator_decision dropdown + note textarea + edits JSON field + submit button).
+5. **Status history** (detected_at → IN_REVIEW timestamp → resolved_at + resolution_outcome).
+
+**Minimum stací bez UI:**
+- Sheet row s validations:
+  - `operator_decision` = dropdown z 4 values.
+  - `exception_status` = dropdown z allowed transitions (sekce 10).
+  - `operator_note` required pro `reject` + `compliance_hard_stop`.
+- On-edit trigger (Apps Script `onEdit`) picks up `exception_status=RESOLVED` + populates derived fields + calls resolution flow (sekce 9).
+
+**B6 UI (budouci task) pridava:**
+- Filtered priority-sorted view.
+- Per-lead aggregate context (all exceptions for lead_id).
+- Quick-action buttons (approve / reject / retry / edit forms).
+- SLA countdown badges.
+- Bulk resolution (P4 batch cleanup).
+
+### 8. Resolution outcomes
+
+**4 discrete outcomes (user brief spec, immutable enum):**
+
+#### 8.1 `approve`
+
+**Definice:** Operator potvrzuje, ze current state je spravny / akceptovatelny, a flow pokracuje bez change.
+
+**Kdy se pouziva:**
+- `sendability_manual_review` — operator potvrzuje kvalitu content/preview → allow send.
+- `unclear_reply` — operator rozhodne, ze reply je ok (napr. klasifikuje UNCLASSIFIED → POSITIVE).
+- `broken_personalization` — operator potvrzuje, ze i s missing keys muze flow pokracovat (fallback text OK).
+
+**Kdo muze pouzit:** Kazdy operator s write access na LEADS (v1.0 = jedno role).
+
+**Co se stane:**
+- `exception_status` → `RESOLVED`.
+- `resolution_outcome` → `APPLIED`.
+- `next_action` derivovano (napr. `sendability_manual_review` + `approve` → `RETURN_TO_C04_GATE` s override `MANUAL_REVIEW_OVERRIDE=true`).
+- Exception row je zaznamena v auditu, ale flow pokracuje po **next_action** trase.
+
+**Invariant:** `approve` **nelze** pouzit pro `compliance_hard_stop` exception type. Attempt = validation error, resolution blocked.
+
+**Vytvori novy queue row?** NE — reuse existing outreach_queue_id nebo restart C-04 gate s override flag. Novy row vznikne az kdyz operator `retry` (separatni outcome).
+
+#### 8.2 `reject`
+
+**Definice:** Operator rozhoduje, ze lead/email/reply **nemá pokracovat** v danem contextu. Terminal stop pro tento exception.
+
+**Kdy se pouziva:**
+- `compliance_hard_stop` — legal / suppression / GDPR → reject (jedina validni volba).
+- `missing_email` — operator potvrzuje "lead neni dohledatelny" → sequence stop.
+- `ambiguous_duplicate` — operator rozhodne jeden lead merge + druhy reject (reject = discard candidate lead).
+- `unclear_reply` → operator klasifikuje jako "spam / noise" → ignore.
+- `provider_fail_after_max_retries` → operator rozhodne, ze adresa je dead → permanent suppression.
+- `followup_stale_review` → default cleanup.
+
+**Kdo muze pouzit:** Kazdy operator. Pro P1 `compliance_hard_stop` existing legal approval workflow (mimo SPEC scope).
+
+**Co se stane:**
+- `exception_status` → `RESOLVED`.
+- `resolution_outcome` → `REJECTED`.
+- `operator_note` required.
+- `next_action` per type:
+  - `compliance_hard_stop` → `UPDATE_CS1_LIFECYCLE` (set LEADS `unsubscribed=TRUE` nebo `suppressed=TRUE`) + `TERMINAL_STOP`.
+  - `missing_email` → `UPDATE_CS1_LIFECYCLE` (set `lifecycle_state=DISQUALIFIED` s reason) + `TERMINAL_STOP`.
+  - `ambiguous_duplicate` (reject candidate) → `LEAD_RE_INGEST` pro primary + discard flag pro candidate + `TERMINAL_STOP` pro exception.
+  - `unclear_reply` → `RESUME_C08_SEQUENCE` jakoze reply = noise (ne stop sequence).
+  - `provider_fail_after_max_retries` → `UPDATE_CS1_LIFECYCLE` (set `bounced` flag) + `TERMINAL_STOP` sequence.
+  - `followup_stale_review` → `TERMINAL_STOP` sequence.
+
+**Invariant:** `reject` **vzdy zpusobi**, ze konkretni exception row dosahne `RESOLVED` a `TERMINAL_STOP` pro _tento_ problem. Lead **neni** auto-terminated — pouze tento exception je resolved. Lead muze mit dalsi budouci exceptions (napr. novy outreach v dalsi kampani).
+
+**Vytvori novy queue row?** NE.
+
+#### 8.3 `retry`
+
+**Definice:** Operator rozhoduje, ze problem byl transient / vyreseny externe (napr. template opraveny, email pridany), a flow ma zkusit **stejny krok znovu**.
+
+**Kdy se pouziva:**
+- `preview_render_fail` → operator opravil template → retry render.
+- `broken_personalization` → data doplnena → retry render.
+- `provider_fail_after_max_retries` → operator potvrzuje, ze provider byl down, nyni OK → retry send (novy queue row).
+- `normalization_error` → data fixed → retry import.
+
+**Kdo muze pouzit:** Kazdy operator.
+
+**Co se stane:**
+- `exception_status` → `RESOLVED`.
+- `resolution_outcome` → `RETRY_QUEUED` (pokud engine uspesne vytvori novy retry artifact).
+- `next_action` per type:
+  - `preview_render_fail` → `CREATE_NEW_QUEUE_ROW` (virtualni preview queue row s `retry_of=exception_id`) + `RESUME_C08_SEQUENCE`.
+  - `broken_personalization` → `CREATE_NEW_QUEUE_ROW` (nove preview queue insert).
+  - `provider_fail_after_max_retries` → `CREATE_NEW_QUEUE_ROW` na C-05 queue (novy `outreach_queue_id`, nove send attempt, respects C-05 idempotency pattern — idempotency_key includes retry_of suffix PROPOSED).
+  - `normalization_error` → `LEAD_RE_INGEST` (retry A-02/A-03 normalize pre tento raw row).
+- `retry_reference_queue_id` (nebo `retry_reference_exception_id` pokud second fail) populated.
+
+**Invariant:** Retry **NIKDY neprepise** original queue row / dead-letter row (imutable audit per C-05 + CS3). Retry = **novy artifact** s `retry_of` reference. Original exception row stava `RESOLVED`, nova exception row muze vzniknout pokud retry zase fail.
+
+**Invariant 2:** Retry **nelze** pouzit pro `compliance_hard_stop`, `ambiguous_duplicate`, `unclear_reply`, `followup_stale_review` — tyto neni technicky fail, nejde o ne retryovat. Validation enforced.
+
+**Vytvori novy queue row?** ANO v pripadech kde type = `preview_render_fail` / `broken_personalization` / `provider_fail_after_max_retries` (queue row podle odpovidajici queue); `normalization_error` re-triggeruje A-02 pipeline pre danou raw row bez klasickeho "queue row" konceptu.
+
+#### 8.4 `edit_and_continue`
+
+**Definice:** Operator upravuje data a flow pokracuje s **edited state**.
+
+**Kdy se pouziva:**
+- `missing_email` → operator vepise email manualne → flow pokracuje (C-04 re-eval → queue → send).
+- `broken_personalization` → operator upravi LEADS personalization fields → retry render.
+- `ambiguous_duplicate` → operator rozhodne merge (primary + `company_key` update) → retry dedupe krok.
+- `sendability_manual_review` (s edity) → operator upravi `email_subject_draft` / `email_body_draft` → proceed to queue.
+
+**Kdo muze pouzit:** Kazdy operator.
+
+**Co se stane:**
+- `exception_status` → `RESOLVED`.
+- `resolution_outcome` → `APPLIED_WITH_EDITS`.
+- `operator_edited_fields_json` required s valid JSON diffem.
+- Engine aplikuje edits na LEADS row (nebo konkretni target field per type).
+- `next_action` per type:
+  - `missing_email` → LEADS.email updated → `RETURN_TO_C04_GATE` (new eval cycle).
+  - `broken_personalization` → LEADS personalization updated → `CREATE_NEW_QUEUE_ROW` (retry preview render).
+  - `ambiguous_duplicate` → merge operation → LEADS updated → `LEAD_RE_INGEST`.
+  - `sendability_manual_review` → LEADS email_subject_draft/body_draft updated → `CREATE_NEW_QUEUE_ROW` (insert to C-05 queue).
+- Original data **preservovana** v `operator_edited_fields_json` + `_asw_logs` audit.
+
+**Invariant:** `edit_and_continue` **nelze** pouzit pro `compliance_hard_stop`, `unclear_reply`, `provider_fail_after_max_retries`, `followup_stale_review`, `preview_render_fail` — tyto nemaji editable lead-fields jako root cause. Validation enforced.
+
+**Vytvori novy queue row?** ANO pro `broken_personalization`, `sendability_manual_review`. NE pro `missing_email` (jen LEADS update + gate re-eval).
+
+**Resolution outcome compatibility matrix (exception type × outcome):**
+
+| `exception_type` | `approve` | `reject` | `retry` | `edit_and_continue` |
+|------------------|-----------|----------|---------|---------------------|
+| `preview_render_fail` | — | ✓ | ✓ | — |
+| `missing_email` | — | ✓ | — | ✓ |
+| `ambiguous_duplicate` | — | ✓ | — | ✓ |
+| `broken_personalization` | ✓ | ✓ | ✓ | ✓ |
+| `provider_fail_after_max_retries` | — | ✓ | ✓ | — |
+| `unclear_reply` | ✓ | ✓ | — | — |
+| `sendability_manual_review` | ✓ | ✓ | — | ✓ |
+| `compliance_hard_stop` | — | ✓ | — | — |
+| `normalization_error` | — | ✓ | ✓ | ✓ |
+| `followup_stale_review` | — | ✓ | — | — |
+
+Legenda: ✓ = valid outcome; — = invalid, validation error.
+
+### 9. Resolution flow
+
+**Textovy flow + pseudocode:**
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ 1. DETECTION PHASE                                                   │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│   Source step (A-08 / C-04 / C-06 / C-07 / C-08 / CS3 dead-letter)  │
+│       │                                                              │
+│       ▼                                                              │
+│   detect_exception(lead_id, type, diagnostic) {                      │
+│       // Idempotency check (sekce 15)                               │
+│       existing = find_open_exception(lead_id, type, context_hash)   │
+│       if (existing) {                                                │
+│           // Re-open or append to diagnostic (ne duplicitni row)    │
+│           update_diagnostic(existing, new_diagnostic)               │
+│           return existing                                            │
+│       }                                                              │
+│       row = create_exception_row({                                   │
+│           exception_id: generate_id(),                               │
+│           lead_id, exception_type: type,                             │
+│           exception_priority: derive_priority(type),                 │
+│           exception_status: "OPEN",                                  │
+│           detected_at: now(),                                        │
+│           detected_by_step: current_step(),                          │
+│           summary: build_summary(type, diagnostic),                  │
+│           diagnostic_payload_json: diagnostic,                       │
+│           sla_target_at: now() + sla_for(priority)                   │
+│       })                                                             │
+│       log(_asw_logs, "exception_created", row.exception_id)          │
+│       return row                                                     │
+│   }                                                                  │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ 2. OPERATOR REVIEW PHASE                                             │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│   Operator opens sheet row                                           │
+│       │                                                              │
+│       ▼                                                              │
+│   operator_claim(exception_id) {                                     │
+│       if (row.exception_status !== "OPEN") reject("Already claimed") │
+│       row.exception_status = "IN_REVIEW"                             │
+│       log(_asw_logs, "exception_claimed", exception_id)              │
+│   }                                                                  │
+│                                                                      │
+│   Operator reviews diagnostic + context                              │
+│   Operator sets:                                                     │
+│       - operator_decision (enum)                                     │
+│       - operator_note (string)                                       │
+│       - operator_edited_fields_json (if edit_and_continue)           │
+│       - exception_status = "RESOLVED" (on-edit trigger)              │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ 3. RESOLUTION FLOW DISPATCH                                          │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│   on_exception_resolved(row) {                                       │
+│       // Validation                                                  │
+│       if (!compatibility_matrix[row.exception_type][row.decision]) { │
+│           reject("Invalid outcome for this exception type")          │
+│           revert row.exception_status to IN_REVIEW                   │
+│           return                                                     │
+│       }                                                              │
+│       if (row.decision === "reject" && !row.operator_note) {         │
+│           reject("Note required for reject")                         │
+│           return                                                     │
+│       }                                                              │
+│                                                                      │
+│       row.resolved_at = now()                                        │
+│       row.resolved_by = current_operator()                           │
+│       row.next_action = derive_next_action(                          │
+│           row.exception_type, row.decision)                          │
+│                                                                      │
+│       switch (row.decision) {                                        │
+│           case "approve":                                            │
+│               handle_approve(row)                                    │
+│               break                                                  │
+│           case "reject":                                             │
+│               handle_reject(row)                                     │
+│               break                                                  │
+│           case "retry":                                              │
+│               handle_retry(row)                                      │
+│               break                                                  │
+│           case "edit_and_continue":                                  │
+│               handle_edit_and_continue(row)                          │
+│               break                                                  │
+│       }                                                              │
+│                                                                      │
+│       log(_asw_logs, "exception_resolved", {                         │
+│           exception_id, decision, resolution_outcome,                │
+│           next_action, resolved_by, resolved_at                      │
+│       })                                                             │
+│   }                                                                  │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ 4. BRANCH HANDLERS                                                   │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│   handle_approve(row):                                               │
+│       // Flow resumes with override flag                             │
+│       switch row.exception_type:                                     │
+│           sendability_manual_review → set LEADS                      │
+│                 manual_review_override=TRUE, trigger C-04 re-eval   │
+│           unclear_reply → classify reply per operator_note,         │
+│                 C-08 resumes sequence per reclassification          │
+│           broken_personalization → mark fallback_acceptable,        │
+│                 trigger re-render with fallback copy                │
+│       row.resolution_outcome = "APPLIED"                            │
+│                                                                      │
+│   handle_reject(row):                                                │
+│       switch row.exception_type:                                     │
+│           compliance_hard_stop → LEADS.unsubscribed/suppressed=TRUE, │
+│                 CS1 T22 if unsubscribe, T21 if bounced              │
+│           missing_email → LEADS.lifecycle_state=DISQUALIFIED        │
+│           ambiguous_duplicate → flag candidate as discarded,        │
+│                 primary lead pokracuje                              │
+│           unclear_reply (reject) → klasifikace NOISE, C-08 resume   │
+│           provider_fail (reject) → LEADS.bounced=TRUE, seq stop     │
+│           followup_stale_review → C-08 seq TERMINAL_STOP            │
+│       row.resolution_outcome = "REJECTED"                            │
+│                                                                      │
+│   handle_retry(row):                                                 │
+│       switch row.exception_type:                                     │
+│           preview_render_fail → re-trigger A-08 preview pipeline    │
+│                 for lead_id, preview_stage=QUEUED                   │
+│           broken_personalization → re-trigger preview with LEADS    │
+│                 current personalization snapshot                    │
+│           provider_fail_after_max_retries → create new C-05 row,    │
+│                 idempotency_key includes retry_of=exception_id      │
+│           normalization_error → re-trigger A-02/A-03 for raw row    │
+│       retry_reference_queue_id = new_row.id                         │
+│       row.resolution_outcome = "RETRY_QUEUED"                       │
+│                                                                      │
+│   handle_edit_and_continue(row):                                    │
+│       edits = parse_json(row.operator_edited_fields_json)            │
+│       for each (field, value) in edits:                              │
+│           LEADS[row.lead_id][field] = value                          │
+│           log _asw_logs LEADS_EDIT (audit)                          │
+│       switch row.exception_type:                                     │
+│           missing_email → trigger C-04 gate re-eval                  │
+│           broken_personalization → trigger A-08 re-render            │
+│           ambiguous_duplicate → trigger merge op + A-05 re-dedupe   │
+│           sendability_manual_review → insert C-05 queue row         │
+│           normalization_error → re-trigger A-02 import              │
+│       row.resolution_outcome = "APPLIED_WITH_EDITS"                  │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ 5. POST-RESOLUTION FOLLOW-UP                                         │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│   Downstream step running (e.g., re-eval gate, new queue row send):  │
+│       if downstream succeeds:                                        │
+│           no new exception                                           │
+│       if downstream fails:                                           │
+│           new exception created with                                 │
+│               exception.retry_of_exception_id = original.id          │
+│           original.resolution_outcome =                              │
+│               "RETRY_FAILED_AGAIN" (updated)                         │
+│           new exception.exception_priority might be                  │
+│               auto-bumped (consecutive-fail)                         │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### 10. Exception status model
+
+**5 statusu:**
+
+| Status | Popis | Allowed transitions | Disallowed | Kdo meni |
+|--------|-------|---------------------|------------|----------|
+| `OPEN` | Exception vznikla, ceka na operator claim. | → `IN_REVIEW`, → `CANCELLED` (auto, pokud source step uspeje na retry — rare, jen ve windows behem CS3 retry loop) | → `RESOLVED` (nesmi preskocit review), → `CLOSED` (nesmi preskocit resolution) | Detection step (insert) + operator claim + auto-cancel (CS3 retry win) |
+| `IN_REVIEW` | Operator claimnul, pracuje na decision. | → `RESOLVED`, → `OPEN` (release claim), → `CANCELLED` (operator zjisti, ze problem zmizel / bylo auto-vyreseno) | → `CLOSED` (nesmi preskocit RESOLVED) | Operator claim / release / resolve |
+| `RESOLVED` | Operator rozhodl, flow re-entry triggered, cekame na `resolution_outcome` determination. | → `CLOSED` (outcome determined) | → `OPEN`, → `IN_REVIEW` (audit-immutable po resolve) | Operator resolution + engine downstream |
+| `CLOSED` | `resolution_outcome` set (APPLIED / REJECTED / RETRY_QUEUED / APPLIED_WITH_EDITS / RETRY_FAILED_AGAIN / PENDING_DOWNSTREAM). Terminal. | žádné — terminal | — | Engine po downstream |
+| `CANCELLED` | Exception byla auto-canceled (problem vyresen jinak, source step retry uspel behem open windows). Terminal, bez operator resolution. | žádné — terminal | — | Engine auto / operator manual |
+
+**State diagram:**
+
+```
+                 detection
+                    │
+                    ▼
+              ┌──────────┐
+              │  OPEN    │──────► CANCELLED (auto)
+              └────┬─────┘
+      operator     │
+      claim        ▼
+              ┌──────────┐
+              │IN_REVIEW │──────► OPEN (release)
+              │          │──────► CANCELLED (auto)
+              └────┬─────┘
+      operator     │
+      resolve      ▼
+              ┌──────────┐
+              │ RESOLVED │
+              └────┬─────┘
+   engine          │
+   downstream      ▼
+              ┌──────────┐
+              │  CLOSED  │ (terminal)
+              └──────────┘
+```
+
+**Invariants:**
+- `CLOSED` + `CANCELLED` = terminal, zadny reopen. Pro "reopen scenario" se **zaklada nova exception row** s `retry_reference_exception_id` pointerem na closed/cancelled puvodni.
+- `OPEN` → `RESOLVED` NELZE (musi projit IN_REVIEW).
+- `IN_REVIEW` → `CLOSED` NELZE (musi projit RESOLVED).
+- `RESOLVED` je mezistav — engine muze trvat minuty/hodiny pred CLOSED (napr. retry queue row musi skutecne dokoncit send pro RETRY_QUEUED → APPLIED confirmation).
+
+### 11. Sample 5 exception rows
+
+**Sample 1: preview_render_fail**
+
+```
+exception_id:              EX-2026-04-21-00001
+lead_id:                   L-00042
+outreach_queue_id:         null
+source_job_id:             PREVIEW-RUN-2026-04-21-014
+inbound_event_id:          null
+exception_type:            "preview_render_fail"
+exception_priority:        3
+exception_status:          "OPEN"
+detected_at:               2026-04-21T14:32:00+02:00
+detected_by_step:          "A-08:processPreviewQueue"
+summary:                   "Preview render webhook returned HTTP 500 after 3 retries"
+diagnostic_payload_json:   {
+    "preview_slug": "acme-sro-abc123",
+    "webhook_url": "https://render.internal/preview",
+    "http_status": 500,
+    "error_message": "Internal template render error: missing required key 'segment_display_name'",
+    "retry_count": 3,
+    "last_attempt_at": "2026-04-21T14:31:45+02:00",
+    "template_type": "community-expert",
+    "template_family": "community-expert"
+}
+cs2_run_id:                "RUN-2026-04-21-0832"
+sla_target_at:             2026-04-28T14:32:00+02:00  # P3 = 5 business days
+```
+
+**Sample 2: missing_email**
+
+```
+exception_id:              EX-2026-04-21-00002
+lead_id:                   L-00078
+outreach_queue_id:         null
+source_job_id:             INGEST-JOB-2026-04-19-003
+inbound_event_id:          null
+exception_type:            "missing_email"
+exception_priority:        4
+exception_status:          "OPEN"
+detected_at:               2026-04-21T10:15:00+02:00
+detected_by_step:          "A-07:AutoQualifyHook"
+summary:                   "Lead qualified (ICO + segment OK) but no valid email found"
+diagnostic_payload_json:   {
+    "business_name": "Autoservis Novák s.r.o.",
+    "ico": "12345678",
+    "segment": "services-auto-repair",
+    "lifecycle_state": "QUALIFIED",
+    "website_url": "https://novak-autoservis.cz",
+    "contact_page_checked": true,
+    "email_search_attempts": [
+        {"source": "website_scrape", "result": "no_email_found"},
+        {"source": "orsr_registry", "result": "not_in_registry"}
+    ],
+    "phone": "+420 123 456 789"
+}
+cs2_run_id:                "RUN-2026-04-21-0615"
+sla_target_at:             2026-05-05T10:15:00+02:00  # P4 = 10 business days
+```
+
+**Sample 3: ambiguous_duplicate**
+
+```
+exception_id:              EX-2026-04-21-00003
+lead_id:                   L-00091  # primary candidate
+outreach_queue_id:         null
+source_job_id:             INGEST-JOB-2026-04-19-003
+inbound_event_id:          null
+exception_type:            "ambiguous_duplicate"
+exception_priority:        4
+exception_status:          "OPEN"
+detected_at:               2026-04-21T10:20:00+02:00
+detected_by_step:          "A-05:dedupeByCompanyKey"
+summary:                   "Two leads match ICO 12345678 but have different cities — operator must decide merge"
+diagnostic_payload_json:   {
+    "primary_lead_id": "L-00091",
+    "primary_data": {
+        "business_name": "Autoservis Novák s.r.o.",
+        "ico": "12345678",
+        "city": "Praha",
+        "email": "novak@autoservis.cz"
+    },
+    "candidate_lead_id": "L-00092",
+    "candidate_data": {
+        "business_name": "Autoservis Novák",
+        "ico": "12345678",
+        "city": "Brno",
+        "email": "novak.brno@autoservis.cz"
+    },
+    "dedupe_confidence": 0.87,
+    "dedupe_strategy_matched": ["ICO", "name_fuzzy"],
+    "dedupe_strategy_failed": ["city"],
+    "possible_interpretations": [
+        "pobocky",
+        "rozdilne firmy se shodnym ICO (data error)",
+        "premenovany subjekt"
+    ]
+}
+cs2_run_id:                "RUN-2026-04-21-0615"
+sla_target_at:             2026-05-05T10:20:00+02:00
+```
+
+**Sample 4: provider_fail_after_max_retries**
+
+```
+exception_id:              EX-2026-04-21-00004
+lead_id:                   L-00042
+outreach_queue_id:         Q-2026-04-21-00057
+source_job_id:             null
+inbound_event_id:          null
+exception_type:            "provider_fail_after_max_retries"
+exception_priority:        2
+exception_status:          "OPEN"
+detected_at:               2026-04-21T12:00:05+02:00
+detected_by_step:          "CS3:dead_letter_from_C-06"
+summary:                   "Send FAILED — Gmail API auth error, dead-lettered after max_attempts=1"
+diagnostic_payload_json:   {
+    "queue_id": "Q-2026-04-21-00057",
+    "recipient_email": "novak@autoservis.cz",
+    "provider": "gmail",
+    "send_attempt_at": "2026-04-21T12:00:03+02:00",
+    "normalized_error_class": "AUTH_FAILED",
+    "failure_class": "PERMANENT",
+    "provider_raw_error": "401 Unauthorized: Invalid OAuth token",
+    "retryable_hint": false,
+    "attempts_exhausted": true,
+    "attempts_count": 1,
+    "related_dead_letter_id": "DL-2026-04-21-00003"
+}
+related_dead_letter_id:    "DL-2026-04-21-00003"
+cs2_run_id:                "RUN-2026-04-21-1200"
+sla_target_at:             2026-04-23T12:00:05+02:00  # P2 = 2 business days
+```
+
+**Sample 5: unclear_reply**
+
+```
+exception_id:              EX-2026-04-21-00005
+lead_id:                   L-00113
+outreach_queue_id:         Q-2026-04-18-00033
+source_job_id:             null
+inbound_event_id:          IE-2026-04-21-00007
+exception_type:            "unclear_reply"
+exception_priority:        2
+exception_status:          "OPEN"
+detected_at:               2026-04-21T08:45:00+02:00
+detected_by_step:          "C-07:ingestReply"
+summary:                   "Reply classified as UNCLASSIFIED by rule-based-v1 — operator must decide"
+diagnostic_payload_json:   {
+    "event_id": "IE-2026-04-21-00007",
+    "from_email": "info@kovaciny-horacek.cz",
+    "subject": "Re: Nabídka nového webu pro Kovácí Horáček s.r.o.",
+    "received_at": "2026-04-21T08:42:11+02:00",
+    "reply_class": "UNCLASSIFIED",
+    "reply_classifier_version": "rule-based-v1",
+    "excerpt_plain": "Zdravim, muzete mi poslat nejake ukazky, jak jste resili neco podobneho pro male kovarstvi?",
+    "rule_match_trace": [
+        {"rule": "negative_keyword", "match": false},
+        {"rule": "positive_keyword", "match": false},
+        {"rule": "ooo_pattern", "match": false},
+        {"rule": "unsubscribe_intent", "match": false}
+    ],
+    "reply_needs_manual": true
+}
+cs2_run_id:                "RUN-2026-04-21-0845"
+sla_target_at:             2026-04-23T08:45:00+02:00  # P2 = 2 business days
+```
+
+### 12. Sample resolutions
+
+**Sample 1 resolution (preview_render_fail):**
+- Operator inspektuje `diagnostic_payload_json` → vidi "missing required key 'segment_display_name'".
+- Operator opravi template file + commituje / deploynutie.
+- Operator decision: `retry`, note: "Template fixed — segment_display_name pridan do community-expert template".
+- Engine: `next_action=CREATE_NEW_QUEUE_ROW` (preview queue), `retry_reference_queue_id=PRV-2026-04-21-00032`.
+- Engine downstream: preview render uspesny → `resolution_outcome=APPLIED` (transition RESOLVED→CLOSED). Lead pokracuje do C-04 gate.
+
+**Sample 2 resolution (missing_email):**
+- Operator dohleda email rucne (web scrape, telefon) → ma novy email `jan.novak@novak-autoservis.cz`.
+- Operator decision: `edit_and_continue`, edits: `{"email": "jan.novak@novak-autoservis.cz", "email_source": "manual_phone_lookup"}`, note: "Zjisteno telefonicky".
+- Engine: aplikuje edits na LEADS, `next_action=RETURN_TO_C04_GATE`, `resolution_outcome=APPLIED_WITH_EDITS`.
+- Engine downstream: C-04 gate re-eval → AUTO_SEND_ALLOWED → lead vklada do C-05 queue.
+
+**Sample 3 resolution (ambiguous_duplicate):**
+- Operator overi s klientem → Brno je pobocka, jedna firma, 2 emaily.
+- Operator decision: `edit_and_continue`, edits: `{"merge": true, "primary": "L-00091", "candidate": "L-00092", "secondary_email": "novak.brno@autoservis.cz", "cities": ["Praha", "Brno"]}`, note: "Pobocky — merge do L-00091, Brno jako secondary adresa".
+- Engine: aplikuje merge (L-00092 marked `merged_into=L-00091`), `next_action=LEAD_RE_INGEST`, `resolution_outcome=APPLIED_WITH_EDITS`.
+- Engine downstream: A-05 re-dedupe → single lead L-00091. Lead pokracuje.
+
+**Sample 4 resolution (provider_fail_after_max_retries):**
+- Operator overi Gmail OAuth token → expired. Obnovi pres admin console.
+- Operator decision: `retry`, note: "Gmail OAuth token obnoven, reautentifikace provedena".
+- Engine: `next_action=CREATE_NEW_QUEUE_ROW` na C-05 s novym `outreach_queue_id=Q-2026-04-21-00099`, `idempotency_key` bunduje `retry_of=EX-2026-04-21-00004`, `retry_reference_queue_id=Q-2026-04-21-00099`, `resolution_outcome=RETRY_QUEUED`.
+- Engine downstream: novy send uspesny → CS1 T18 `EMAIL_QUEUED → EMAIL_SENT`, exception status `CLOSED` + `resolution_outcome=APPLIED` (bumped z RETRY_QUEUED po success).
+
+**Sample 5 resolution (unclear_reply):**
+- Operator cte excerpt → "Zdravim, muzete mi poslat nejake ukazky, jak jste resili neco podobneho pro male kovarstvi?" — to je **positive zajemec s otazkou**.
+- Operator decision: `approve` s classification guidance v note, note: "Classify as POSITIVE+QUESTION. Chce ukazky. Vyrizu rucne mimo automatizaci — odpovedel jsem s case studies".
+- Engine: `next_action=RESUME_C08_SEQUENCE` (classification = POSITIVE → C-08 stops follow-up via Tier 1), `resolution_outcome=APPLIED`.
+- Side effect: operator rucne odpovidat v Gmail threadu (mimo engine — manual thread continuation je OK per C-08 sekce 6).
+- CS1 T20 `EMAIL_SENT → REPLIED` triggered. Sekvence stop.
+
+### 13. Flow re-entry / continuation rules
+
+**Komprehensive `next_action` table:**
+
+| `next_action` | Kde flow pokracuje | Kdo to zpracuje | Kdy |
+|---------------|--------------------|------------------|-----|
+| `RETURN_TO_C04_GATE` | C-04 evaluator | C-04 gate step (next CS2 run) | `missing_email` edit_and_continue; `sendability_manual_review` approve. |
+| `CREATE_NEW_QUEUE_ROW` | C-05 `_asw_outbound_queue` insert | C-05 producer / retry engine | `preview_render_fail` retry; `broken_personalization` retry / edit_and_continue; `provider_fail_after_max_retries` retry; `sendability_manual_review` edit_and_continue. |
+| `RESUME_C08_SEQUENCE` | C-08 follow-up engine re-evaluation | C-08 engine next run | `unclear_reply` approve (classification done); `unclear_reply` reject (noise); occasional `broken_personalization` approve (fallback OK). |
+| `UPDATE_CS1_LIFECYCLE` | CS1 lifecycle state transition | LEADS direct write | `compliance_hard_stop` reject (set unsubscribed/suppressed); `missing_email` reject (set DISQUALIFIED); `provider_fail_after_max_retries` reject (set bounced). |
+| `LEAD_RE_INGEST` | A-02/A-03/A-05 pipeline | Ingest engine next run | `ambiguous_duplicate` edit_and_continue (merge); `normalization_error` edit_and_continue/retry. |
+| `TERMINAL_STOP` | Nikam — terminal | — | Kazdy `reject` outcome + `followup_stale_review` reject + `ambiguous_duplicate` reject (candidate lead). |
+
+**Re-entry rules per exception type:**
+
+| `exception_type` | `approve` next_action | `reject` next_action | `retry` next_action | `edit_and_continue` next_action |
+|------------------|------------------------|------------------------|---------------------|---------------------------------|
+| `preview_render_fail` | — | `TERMINAL_STOP` | `CREATE_NEW_QUEUE_ROW` (preview) | — |
+| `missing_email` | — | `UPDATE_CS1_LIFECYCLE` + `TERMINAL_STOP` | — | `RETURN_TO_C04_GATE` |
+| `ambiguous_duplicate` | — | `TERMINAL_STOP` (candidate lead) | — | `LEAD_RE_INGEST` |
+| `broken_personalization` | `RESUME_C08_SEQUENCE` (fallback OK) | `TERMINAL_STOP` | `CREATE_NEW_QUEUE_ROW` (preview) | `CREATE_NEW_QUEUE_ROW` (preview) |
+| `provider_fail_after_max_retries` | — | `UPDATE_CS1_LIFECYCLE` + `TERMINAL_STOP` | `CREATE_NEW_QUEUE_ROW` (C-05) | — |
+| `unclear_reply` | `RESUME_C08_SEQUENCE` (classify) | `RESUME_C08_SEQUENCE` (noise) | — | — |
+| `sendability_manual_review` | `RETURN_TO_C04_GATE` (override) | `UPDATE_CS1_LIFECYCLE` + `TERMINAL_STOP` | — | `CREATE_NEW_QUEUE_ROW` (C-05) |
+| `compliance_hard_stop` | — | `UPDATE_CS1_LIFECYCLE` + `TERMINAL_STOP` | — | — |
+| `normalization_error` | — | `TERMINAL_STOP` | `LEAD_RE_INGEST` | `LEAD_RE_INGEST` |
+| `followup_stale_review` | — | `TERMINAL_STOP` (sequence) | — | — |
+
+**Flow re-entry invariants:**
+
+1. **Immutable audit trail:** `CLOSED` exception NIKDY nepreklopi se do `OPEN`. Pro "re-open" se zaklada nova exception s `retry_reference_exception_id` na puvodni.
+2. **Chain-of-responsibility:** Pokud `CREATE_NEW_QUEUE_ROW` / `LEAD_RE_INGEST` / `RETURN_TO_C04_GATE` downstream fail, vznikne **nova** exception (ne update original). Original zustava `resolution_outcome=RETRY_FAILED_AGAIN` (updated po downstream fail signal).
+3. **Terminal consistency:** `TERMINAL_STOP` musi byt zpravnym propsanim do CS1 / C-08 terminal states (ne orphan). `compliance_hard_stop reject` vzdy vyzaduje `UPDATE_CS1_LIFECYCLE` co-action.
+4. **Override transparency:** `sendability_manual_review approve` triggering `RETURN_TO_C04_GATE` **musí** pridavat override flag (`MANUAL_REVIEW_OVERRIDE=TRUE`) do gate context, aby gate nevratil zase `MANUAL_REVIEW_REQUIRED` v infinite loop.
+5. **Retry idempotency:** `retry` outcome vytvari novy queue row s idempotency_key rozsirenym o `retry_of=exception_id`. C-05 invariant unique idempotency_key prevence dvojite retry.
+
+### 14. Auditability / observability
+
+**Dohledatelne signaly:**
+
+| Otazka operatora | Zdroj odpovedi |
+|------------------|----------------|
+| "Existuje exception pro tento lead?" | `_asw_exceptions WHERE lead_id=X`. Vrati 0..N rows (chronologicky). |
+| "Jaky je aktualni status exceptionu X?" | `_asw_exceptions WHERE exception_id=X` → `exception_status`. |
+| "Kdo exception X rozhodl?" | `_asw_exceptions.resolved_by` + `_asw_logs WHERE event="exception_resolved" AND exception_id=X`. |
+| "Proc tak rozhodl?" | `_asw_exceptions.operator_note` + `operator_edited_fields_json`. |
+| "Co se stalo dal po resolve?" | `_asw_exceptions.next_action` + `resolution_outcome` + `retry_reference_queue_id` / `retry_reference_exception_id`. |
+| "Je to retry chain? Jak daleko?" | Traversal `retry_reference_exception_id` chain → ukaze, kolikrat se stejny problem opakoval. |
+| "Vysi co-exceptions pro lead?" | `_asw_exceptions WHERE lead_id=X AND exception_status IN ('OPEN', 'IN_REVIEW')`. |
+| "Kolik P1 exceptions cekaji?" | `_asw_exceptions WHERE exception_priority=1 AND exception_status IN ('OPEN', 'IN_REVIEW')`. |
+| "Ktere exceptions prosly SLA?" | `_asw_exceptions WHERE sla_target_at < now() AND exception_status IN ('OPEN', 'IN_REVIEW')`. |
+| "Detection lineage: jaky run to vytvoril?" | `_asw_exceptions.cs2_run_id` + `detected_by_step` + `source_job_id`. |
+
+**`_asw_logs` events pro C-09 (PROPOSED event types):**
+
+| Event | Trigger | Key fields |
+|-------|---------|------------|
+| `exception_created` | Detection step insertuje novou row. | `exception_id`, `lead_id`, `exception_type`, `exception_priority`, `detected_by_step`, `cs2_run_id`. |
+| `exception_claimed` | Operator OPEN → IN_REVIEW. | `exception_id`, `operator_id`, `claimed_at`. |
+| `exception_released` | Operator IN_REVIEW → OPEN (zruseni claim). | `exception_id`, `operator_id`, `released_at`, `reason_text` (volitelne). |
+| `exception_resolved` | Operator IN_REVIEW → RESOLVED. | `exception_id`, `operator_id`, `decision`, `operator_note_excerpt`, `resolved_at`, `next_action`. |
+| `exception_flow_reentry` | Engine spousti next_action handler. | `exception_id`, `next_action`, `handler_step`, `started_at`. |
+| `exception_closed` | Downstream determined → CLOSED. | `exception_id`, `resolution_outcome`, `closed_at`, `retry_reference_queue_id` (nullable). |
+| `exception_cancelled` | Auto / manual cancel. | `exception_id`, `reason`, `cancelled_by` (engine_auto / operator_id). |
+| `exception_priority_bumped` | Auto SLA-bump. | `exception_id`, `old_priority`, `new_priority`, `reason`. |
+| `exception_retry_chain_broken` | Retry chain reached max_retry_depth (PROPOSED 3). | `original_exception_id`, `chain_length`, `terminal_reason`. |
+
+**Cross-ref graph:**
+
+```
+LEADS.lead_id ─┬──► _asw_exceptions.lead_id (0..N exceptions, current + historical)
+               │         ├──► outreach_queue_id → _asw_outbound_queue (source context)
+               │         ├──► inbound_event_id → _asw_inbound_events (C-07 source)
+               │         ├──► source_job_id → _raw_import / FU-RUN / PREVIEW-RUN
+               │         ├──► cs2_run_id → _asw_logs (detection run)
+               │         ├──► related_dead_letter_id → _asw_dead_letters (CS3 source)
+               │         ├──► retry_reference_queue_id → _asw_outbound_queue (post-retry)
+               │         └──► retry_reference_exception_id → _asw_exceptions (chain)
+               ├──► _asw_outbound_queue.lead_id
+               ├──► _asw_inbound_events.lead_id
+               ├──► _asw_logs.lead_id (all event types)
+               └──► _asw_dead_letters.lead_id
+```
+
+**Observability bez B6 UI:**
+- `_asw_exceptions` sheet s filter by priority / status / type.
+- LEADS sheet ma **PROPOSED** backref sloupec `open_exceptions_count` (count exceptions IN {OPEN, IN_REVIEW}). Operator vidi per-lead exception density.
+- `_asw_logs` filter by `event LIKE 'exception_%'`.
+- B6 UI (budouci) agreguje vse do priority dashboardu + per-lead timeline.
+
+**Anti-loss invariants (problematicke leady NESMI zmizet):**
+1. Kazdy auto-skip / auto-fail MA exception row **nebo** jasne diagnosticke pole na LEADS (jako `preview_error`). Nikdy oba null pro not-success lead.
+2. `CLOSED_STALE` auto-downgrade pro P4 po 14 dnech zachovava row (ne mazani). Pouze exception_status se meni.
+3. Exception sheet je **append-only na insert + update-only na resolve-fields**. Row se nemaze, neoverovani.
+4. Orphan prevention: pokud lead je smazan z LEADS (vzacne, compliance scenar), associated exceptions se **NEMAZOU** — zustavaji jako audit trail. FK constraint je soft (lead_id muze odkazovat neexistujici lead → historical audit).
+
+### 15. Idempotency / dedupe rules
+
+**Prevence duplicitnich exception rows:**
+
+**Idempotency key pattern (PROPOSED FOR C-09):**
+
+```
+exception_dedup_key = SHA256(lead_id + exception_type + context_hash)
+```
+
+kde `context_hash` je deterministicky hash z `diagnostic_payload_json` core fields per type:
+- `preview_render_fail`: `SHA256(preview_slug + template_type)`
+- `missing_email`: `SHA256(lead_id + "missing_email")` (jen lead identity)
+- `ambiguous_duplicate`: `SHA256(primary_lead_id + candidate_lead_id)` (alphabeticky sort)
+- `broken_personalization`: `SHA256(lead_id + template_type + missing_keys_joined)`
+- `provider_fail_after_max_retries`: `SHA256(outreach_queue_id + failure_class)`
+- `unclear_reply`: `SHA256(inbound_event_id)` (jen event identity)
+- `sendability_manual_review`: `SHA256(lead_id + reason_codes_joined)`
+- `compliance_hard_stop`: `SHA256(lead_id + compliance_code)`
+- `normalization_error`: `SHA256(raw_row_id)` (jen raw identity)
+- `followup_stale_review`: `SHA256(lead_id + sequence_root_queue_id)`
+
+**Dedupe logic (pri detection insert):**
+
+```
+fn detect_exception(lead_id, type, diagnostic):
+    key = compute_dedup_key(lead_id, type, diagnostic)
+    existing = find_by_dedup_key_and_open_status(key)
+
+    if existing:
+        # Same problem, same context — do NOT create duplicate
+        # Update diagnostic_payload_json s append event (audit)
+        existing.diagnostic_payload_json.append_occurrence(now(), new_diagnostic)
+        log(_asw_logs, "exception_re_detected", existing.exception_id)
+        return existing
+
+    if find_by_dedup_key_and_closed_status(key) AND (now - closed.resolved_at) < 7_days:
+        # Recently closed same problem — create NEW exception s retry_reference_exception_id pointer
+        new_row = create_row(...)
+        new_row.retry_reference_exception_id = recent_closed.exception_id
+        log(_asw_logs, "exception_re_created_after_closed")
+        return new_row
+
+    # Truly new
+    return create_row(...)
+```
+
+**Reopen rules:**
+
+- **Reopen existing OPEN/IN_REVIEW:** Same key + still open → append diagnostic, ne nova row.
+- **Create new after CLOSED recently (< 7 dni):** Same key + closed recently → nova row s `retry_reference_exception_id` (chain).
+- **Create new after CLOSED old (> 7 dni):** Same key + closed dlouho → nova row bez chain reference (treat as fresh problem).
+- **Create new after CANCELLED:** Same key + cancelled → nova row (cancelled = problem did not really occur, treat as fresh).
+
+**Retry chain depth limit (PROPOSED):**
+- Max retry chain depth = 3. Po 3. exception s `retry_reference_exception_id` chain → promote na P1 manual review + log `exception_retry_chain_broken`. Prevence nekonecne retry loop pro systemove chyby.
+
+**CS3 alignment:**
+- Exception dedup key je **pre-hash** (core identity fields) per CS3 S1-S12 "deterministic-first-then-hash" pattern (stejne jako C-05 idempotency + C-07 ingest_event_id + C-08 followup key).
+- Exception engine run respektuje CS3 `LockService.getScriptLock()` pattern (stejne jako ingest worker + queue worker + followup engine).
+- Failure_class pro exception engine errors: `EXCEPTION_INSERT_FAIL`→TRANSIENT (retry), `DEDUP_KEY_CONFLICT`→TRANSIENT (race, re-read), `LEAD_NOT_FOUND`→PERMANENT (orphan exception).
+
+### 16. Human-in-the-loop boundaries
+
+**Co smi rozhodnout clovek:**
+
+| Rozhodnuti | Clovek smi | Duvod |
+|------------|-----------|-------|
+| `approve` send po review | ANO | Content quality judgment je operational. |
+| `reject` missing email lead | ANO | Data-quality judgment. |
+| `reject` ambiguous duplicate candidate | ANO | Dedupe rozhodnutí, business judgment. |
+| `approve` unclear reply jako positive | ANO | Reply intent reading je operational. |
+| `edit_and_continue` s data fix | ANO | Data curation je operator core task. |
+| `retry` preview fail | ANO | Operator vidi, jestli problem je vyresany. |
+| `retry` provider fail | ANO | Operator vidi, ze provider je nyni up. |
+| Priority bump (P3 → P2) | ANO | Operator vidi urgence. |
+| Reclassify reply (unclassified → positive/negative/question) | ANO | Subject matter expertise. |
+| Merge duplicate leady | ANO (s data) | Business merge decision. |
+
+**Co clovek NESMI prepsat:**
+
+| Rozhodnuti | Clovek nesmi | Duvod |
+|------------|--------------|-------|
+| `approve` na `compliance_hard_stop` | NE | Compliance hard-stop je legal binding. Operator muze pouze `reject`. Validace. |
+| Overturn `unsubscribed=TRUE` flag bez explicit re-consent event | NE | GDPR / CAN-SPAM binding. Separate re-consent workflow, ne exception queue. |
+| Manual bypass C-04 gate s `SEND_BLOCKED` (B7/B8) | NE | Hard-stop kategorie — exception queue to zaznamena jako `compliance_hard_stop`, ale operator nemuze unblock. |
+| Edit LEADS terminal states (DISQUALIFIED, UNSUBSCRIBED, BOUNCED) primo v LEADS mimo exception queue | Mimo SPEC scope, ale strongly discouraged | Audit trail porusen. Exception queue je sanctioned channel pro state changes. |
+| Edit `_asw_inbound_events` (append-only) | NE | Kompromituje audit. Inbound event je fact. Reclassification je edit na LEADS / exception, ne na event. |
+| `retry` provider send po 3x consecutive fail (chain depth limit) | NE automatic | Dalsi retry vyzaduje P1 review + explicit chain break. Ochrana proti loop. |
+| Edit `resolved_at` / `resolved_by` / `resolution_outcome` po CLOSED | NE | Immutable audit. |
+| Delete exception row | NE | Append-only invariant. |
+
+**Compliance-hard-stop vs operational-judgment kategorie:**
+
+| Kategorie | Exception types | Operator autority |
+|-----------|-----------------|-------------------|
+| **Compliance-hard-stop** (operator = bezmocny reject-only) | `compliance_hard_stop`, C-04 B7/B8 | Pouze `reject` + note. Zadny approve/retry/edit. Validace enforced v resolution flow. |
+| **Technical-judgment** (operator = expert fix) | `preview_render_fail`, `provider_fail_after_max_retries`, `normalization_error` | `reject` / `retry` (technical fix prokazanely). |
+| **Content-judgment** (operator = reviewer) | `sendability_manual_review`, `broken_personalization` | `approve` / `reject` / `retry` / `edit_and_continue` (full range). |
+| **Data-judgment** (operator = curator) | `missing_email`, `ambiguous_duplicate`, `normalization_error` | `reject` / `edit_and_continue` (data fix). |
+| **Intent-judgment** (operator = classifier) | `unclear_reply` | `approve` (classify) / `reject` (noise). |
+| **Cleanup** (operator = maintenance) | `followup_stale_review` | Typicky `reject` (terminal cleanup). |
+
+### 17. Boundary rules / handoff na dalsi tasky
+
+| Task | Jak C-09 konzumuje | Jak C-09 prispiva |
+|------|---------------------|-------------------|
+| **C-04 Sendability gate** | `MANUAL_REVIEW_REQUIRED` outcome → C-09 exception creation (`sendability_manual_review`). `SEND_BLOCKED` B7/B8 → `compliance_hard_stop`. | PROPOSED C-04 `MANUAL_REVIEW_OVERRIDE` context parameter (approve override). |
+| **C-05 Outbound queue** | `FAILED` status + fail fields → CS3 dead-letter → C-09 exception (`provider_fail_after_max_retries`). | Retry outcome → insert novy queue row (C-09 je producer), idempotency_key rozsiren o `retry_of=exception_id`. |
+| **C-06 Provider abstraction** | `NormalizedSendErrorClass` + `failure_class=PERMANENT/TRANSIENT` exhausted → CS3 dead-letter → C-09. | Zadna mutace C-06 interface. |
+| **C-07 Inbound event ingest** | `reply_class=UNCLASSIFIED` + `reply_needs_manual=TRUE` → C-09 exception (`unclear_reply`). `unknown_inbound` event → exception. | Zadna mutace C-07 schema. Operator reclassification z exception resolve aktualizuje LEADS reply classification. |
+| **C-08 Follow-up engine** | `REVIEW_REQUIRED` decision outcome → C-09 exception (`sendability_manual_review` nebo `unclear_reply` dle duvodu). `followup_stale_review_abandoned` → C-09 exception (`followup_stale_review`). | Resolution `approve` / `edit_and_continue` → C-08 engine resumes sequence (next_action=`RESUME_C08_SEQUENCE`). |
+| **CS3 Reliability (narrowing z C-03)** | CS3 `_asw_dead_letters` je **upstream** pro `provider_fail_after_max_retries`. C-09 rozsiruje CS3 audit trail human-facing vrstvou (operator resolution nad dead-letter rows). | `related_dead_letter_id` FK zachovava cross-ref. Zadna mutace CS3 schema. |
+| **CS1 Lead lifecycle** | Exception resolution muze triggerovat CS1 transition (T14 DISQUALIFIED, T21 BOUNCED, T22 UNSUBSCRIBED) pres `UPDATE_CS1_LIFECYCLE` next_action. | Zadny novy canonical CS1 state. |
+| **CS2 Orchestrator** | C-09 detection engine je **novy CS2 step** (reactive, triggered z existujicich steps pri fail). Resolution flow re-entry je orchestrator-driven (next CS2 run pro downstream step). | PROPOSED novy CS2 step: `exception_detector` (hook do existing steps) + `exception_resolution_dispatcher`. |
+| **A-02/A-03/A-05 Ingest pipeline** | Normalization error / dedupe ambiguity → C-09 exception. | Resolution retry / edit_and_continue → LEAD_RE_INGEST triggers A-02 downstream. |
+| **A-07/A-08 Qualify + Preview** | Missing email / preview render fail → C-09 exception. | Resolution retry / edit_and_continue → CREATE_NEW_QUEUE_ROW for preview re-render. |
+| **B6 Operator review UI** (budouci) | Zadna konzumace z SPEC strany. | Definuje read/write contract: `_asw_exceptions` sheet schema + resolution flow state machine. |
+| **Implementacni task C-09 runtime** | Tato SPEC je autoritativni vstup. | Materializuje `_asw_exceptions` sheet creation + `detectException()` helper + `resolveException()` dispatcher + 9 `_asw_logs` event types + PROPOSED enumy do `Config.gs` + SLA auto-bump cron. |
+| **Future C-10 (suppression list aggregation)** | C-09 audit trail pro `compliance_hard_stop` poskytuje source data pro centralizovany suppression list. | Cross-ref: exception closure s `compliance_hard_stop` reject + `unsubscribed=TRUE` triggers suppression list insert. |
+
+### 18. Non-goals (explicit)
+
+- Neimplementuje runtime review worker / cron / scheduler.
+- Neimplementuje frontend UI (B6).
+- Neimplementuje mailbox sync runtime (C-07 runtime task).
+- Neimplementuje provider webhook runtime (C-07 runtime task).
+- Neimplementuje queue runtime (C-05 runtime task).
+- Neimplementuje AI-based auto-triage / priority prediction (v2.0).
+- Nezapisuje PROPOSED enumy / fields do `Config.gs` (implementacni task).
+- Nepridava nove canonical CS1 states.
+- Neresi suppression list centralization (C-10 future task).
+- Neresi per-operator SLA / workload balancing (operations concern).
+- Neresi multi-tenant exception routing (single-tenant v1.0).
+- Neresi notification system (email alerts, Slack integration) — budouci task.
+- Neresi exception archive / retention policy detail — dokumentovano jen principle (append-only, no delete).
+- Neimplementuje C-09 runtime ani `detectException()` hooks v A-*, B-*, C-04/C-05/C-06/C-07/C-08 steps.
+
+### 19. Acceptance checklist
+
+- [x] Exception typy pokryvaji vsechny known fail scenare (sekce 3: 10 typu vc. 6 kanonickych z user briefu + 4 rozsireni grounded v repu).
+- [x] Priorita urcuje poradi reseni (sekce 4: 4 tiers P1-P4 + sort order + SLA targets + auto-bump rules).
+- [x] Je jasne, co jde do manual review (sekce 5: 4-cestny routing table s transient/permanent/classifier-status rozliseni + invariant).
+- [x] Minimalni review rozhrani je jednoznacne (sekce 7: sheet-row-based read-only/editable/derived fields + on-edit trigger).
+- [x] Resolution outcomes jsou jednoznacne (sekce 8: 4 outcomes s kompletnim kontraktem + compatibility matrix).
+- [x] Po rozhodnuti flow pokracuje nebo konci deterministicky (sekce 9 resolution flow pseudocode + sekce 13 flow re-entry table + 5 invariants).
+- [x] Sample rows pokryvaji hlavni exception typy (sekce 11: 5 samplu s realistickym diagnostic_payload).
+- [x] Sample resolutions (sekce 12) ukazuji full operator workflow.
+- [x] Problematicke leady nejsou ztracene (sekce 14 anti-loss invariants + cross-ref graph + observability bez B6).
+- [x] Clovek vi, co ma udelat (sekce 7 minimal interface + sekce 16 human-in-the-loop boundaries + sekce 12 sample resolutions).
+- [x] Dokument jde primo pouzit jako source-of-truth pro budouci implementaci.
+- [x] Exception vs lifecycle state vs queue status vs review row vs operator decision jsou tvrde oddelene (sekce 3 taxonomy + sekce 10 status model + sekce 13 re-entry rules + sekce 6 schema clearly separates `exception_type` / `exception_status` / `operator_decision` / `resolution_outcome`).
+- [x] Idempotency + dedupe (sekce 15 dedup key pattern + reopen rules + CS3 alignment).
+- [x] Auditabilita (sekce 14 9 `_asw_logs` event types + cross-ref graph).
+- [x] Compliance hard-stop vs operational judgment oddelene (sekce 16).
+- [x] Handoff table pokryva C-04/C-05/C-06/C-07/C-08/CS1/CS2/CS3/A-02-A-08/B6/implementacni task/future C-10 (sekce 17, 12 radku).
+- [x] SPEC-only — zadne runtime zmeny, zadne Config.gs zapisy (sekce 18 explicit).
+- [x] B6 NENI blocker (sekce 2 + 7 explicit).
+- [x] Dependency narrowing C-03 → CS3 explicitne dokumentovan (uvod sekce + task record).
+
+### 20. PROPOSED vs INFERRED vs VERIFIED label summary
+
+**VERIFIED IN REPO (reuse existing):**
+- `_asw_dead_letters` CS3 sheet (lineage source pro `provider_fail_after_max_retries`).
+- `_asw_inbound_events` C-07 merged PR #30 (source pro `unclear_reply`).
+- `_asw_outbound_queue` C-05 merged PR #28 (FK cross-ref).
+- `_asw_logs` CS2 run history (event log substrate).
+- CS1 canonical terminals DISQUALIFIED (#14), REPLIED (#15), BOUNCED (#16), UNSUBSCRIBED (#17) + T20/T21/T22 (docs/21).
+- CS1 `REVIEW_REQUIRED` non-terminal state (#18) — reuse pro exception-induced review.
+- C-04 gate outcomes `AUTO_SEND_ALLOWED` / `MANUAL_REVIEW_REQUIRED` / `SEND_BLOCKED` + reason codes B1-B21.
+- C-06 `NormalizedSendErrorClass` + `failure_class` mapping (source pro `provider_fail_after_max_retries`).
+- C-07 `reply_class=UNCLASSIFIED` + `reply_needs_manual=TRUE` (source pro `unclear_reply`).
+- C-08 `followup_review_required` + `followup_stale_review_abandoned` (source pro `followup_stale_review`).
+- CS3 `failure_class` enum + `HUMAN_REVIEW` class + dead-letter pattern.
+- Existing runtime review signals: `preview_needs_review`, `preview_error` (A-08 PreviewPipeline.gs), `email_reply_type=UNCLASSIFIED` (MailboxSync.gs).
+
+**INFERRED FROM EXISTING SYSTEM:**
+- 10-type taxonomy rozsirena z 6 user-brief typu + 4 odvozenych (sendability_manual_review z C-04 spec; compliance_hard_stop z C-04 B7/B8; normalization_error z A-02/A-03 spec; followup_stale_review z C-08 spec).
+- SLA targets P1=24h, P2=2d, P3=5d, P4=10d (business days) — inferred z B2B outreach standards.
+- Priority tiers (compliance > delivery > content > data-quality) — inferred z risk management.
+- Resolution outcome compatibility matrix — inferred z exception type semantics.
+
+**PROPOSED FOR C-09 (new, implementation task will materialize):**
+- `_asw_exceptions` sheet (24 fields — sekce 6).
+- Exception type enum (10 values).
+- `exception_priority` enum (1-4).
+- `exception_status` enum (5 values: OPEN / IN_REVIEW / RESOLVED / CLOSED / CANCELLED).
+- `operator_decision` enum (4 values: approve / reject / retry / edit_and_continue).
+- `resolution_outcome` enum (6 values: APPLIED / APPLIED_WITH_EDITS / REJECTED / RETRY_QUEUED / RETRY_FAILED_AGAIN / PENDING_DOWNSTREAM).
+- `next_action` enum (6 values: RETURN_TO_C04_GATE / CREATE_NEW_QUEUE_ROW / RESUME_C08_SEQUENCE / UPDATE_CS1_LIFECYCLE / LEAD_RE_INGEST / TERMINAL_STOP).
+- Idempotency `exception_dedup_key` pattern per type (sekce 15).
+- `_asw_logs` event types (9): `exception_created`, `exception_claimed`, `exception_released`, `exception_resolved`, `exception_flow_reentry`, `exception_closed`, `exception_cancelled`, `exception_priority_bumped`, `exception_retry_chain_broken`.
+- C-04 `MANUAL_REVIEW_OVERRIDE` context parameter (approve override).
+- C-05 idempotency_key extension s `retry_of=exception_id` suffix (pro retry insert).
+- LEADS backref column `open_exceptions_count` (PROPOSED observability).
+- SLA auto-bump rules + retry chain depth limit=3.
+- Stale abandonment threshold P4 = 14 dni → `CLOSED_STALE` transition.
+- Compatibility matrix validation logic (enforced at resolution time).
+- CS2 new steps: `exception_detector` (hook) + `exception_resolution_dispatcher`.
+- CS3 `failure_class` mapping for engine errors: `EXCEPTION_INSERT_FAIL`→TRANSIENT, `DEDUP_KEY_CONFLICT`→TRANSIENT, `LEAD_NOT_FOUND`→PERMANENT.
+- Script Properties: `EXCEPTION_SLA_P1_HOURS=24`, `EXCEPTION_SLA_P2_BUSINESS_DAYS=2`, `EXCEPTION_SLA_P3_BUSINESS_DAYS=5`, `EXCEPTION_SLA_P4_BUSINESS_DAYS=10`, `EXCEPTION_STALE_ABANDON_DAYS=14`, `EXCEPTION_MAX_RETRY_CHAIN_DEPTH=3`, `EXCEPTION_RECENT_CLOSED_WINDOW_DAYS=7`.
