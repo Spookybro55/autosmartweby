@@ -6573,3 +6573,892 @@ ORDER BY grain_unit_id DESC LIMIT 4;
 - Future dashboard task contract: consumes stable `_asw_perf_reports` schema as read-only data source.
 - Future alerting task contract: consumes `alert_summary_json.triggered[]` and delivers via channel.
 - Future BI export task contract: mirror schema to external data warehouse.
+
+## Config, secrets, limity a budget guardrails — C-11 (configuration planes + execution limits + kill switches + feature flags)
+
+> **Owner:** Claude | **Status:** done (SPEC-only) | **Date:** 2026-04-22 | **Stream:** C
+>
+> **Dependencies:** **CS2** (workflow orchestrator — kill switches a per-stage limity jsou volane na vstupu kazdeho CS2 stepu; `cs2_run_id` je klic pro per-run budget guardrails; `_asw_logs` event stream pro config / budget / kill-switch eventy). **C-06** (provider abstraction — `EMAIL_PROVIDER` Script Property je vzorovy CONFIG entry pro provider selection; `NormalizedSendErrorClass` zdroj transient vs permanent rozhodovani pro budget accounting; provider-level kill switch `KILL_SWITCH_GMAIL` / `KILL_SWITCH_EMAIL_ALL` prestupne pres C-06 sender interface). **C-10** (performance report — budget / kill-switch / limit eventy feed do `_asw_perf_reports` operational block; `data_completeness_flags_json` zaznamena degradace zpusobenou guardraily; 5 C-10 `_asw_logs` event types sdilene observability vrstva s 9 PROPOSED C-11 event types).
+>
+> **Dependency narrowing `C-02, C-06, C-10` → `CS2, C-06, C-10`:** puvodni task brief uvadel `C-02`, ale v repo source-of-truth `C-02.md` NEEXISTUJE (`C2.md` je governance hardening — unrelated; precedent C-10 dependency narrowing). `CS2` je foundational SPEC orchestrator s konceptem "step" + `cs2_run_id` + `_asw_logs` a je jediny logicky predchozi kontext, v ramci ktereho davaji limity / kill switchery smysl. **Dependency narrowing** je dokumentovane v uvodu teto sekce + task record C-11.md.
+>
+> **Scope:** SPEC-only. Neimplementuje runtime `ConfigManager` / `getConfig_()` / `isKillSwitchActive_()` / `checkBudget_()` helper, nevytvari `_asw_budget_ledger` sheet, nezapisuje do `apps-script/Config.gs`, nepridava PROPOSED Script Properties do runtime environment, neimplementuje frontend UI pro kill-switch toggling, neintegruje feature flag SDK. Vsechny nove artefakty jsou oznacene **PROPOSED FOR C-11** a budou materializovany implementacnim taskem.
+
+### 1. Účel C-11 SPEC
+
+Autosmartweby dnes kombinuje config v nekolika vrstvach bez jasne separace role:
+- `apps-script/Config.gs` hardcoded vars (SPREADSHEET_ID legacy fallback, DRY_RUN, ENABLE_WEBHOOK, BATCH_SIZE, SERPER_CONFIG, EMAIL_SYNC_*)
+- Script Properties pres `PropertiesService` (ASW_ENV, ASW_SPREADSHEET_ID, PREVIEW_WEBHOOK_SECRET, SERPER_API_KEY, FRONTEND_API_SECRET)
+- Frontend `.env.local` (Next.js runtime env)
+- Implicitni "magic" chovani (DRY_RUN=true blokuje write-path, ENABLE_WEBHOOK=false blokuje preview webhook)
+
+Absentuji tri vrstvy:
+- **Budget guardrails:** kolik dotazu smim volat na Serper denne nez se zastavim? Kolik mailu smim poslat, nez zapnu safe-stop? Kolik LEADS radku smim mutovat za hodinu, nez system zacne podezrivat bug?
+- **Kill switches:** pokud neco zacne divoce retryovat (C-06 vyprsne provider_timeout opakovane), jak to operator zastavi bez editu kodu / redeploy?
+- **Feature flags:** C-08 follow-up engine po implementaci bude bud "vsichni dostavaji follow-up" nebo "nikdo" — neni gradual rollout, neni per-env opt-in, neni emergency disable bez git revertu.
+
+C-11 SPEC definuje **6 ortogonalnich configuration planes s tvrdou separaci** + canonical config table + secrets inventory + per-stage execution limits + budget guardrail kontrakt + kill switch scope model + feature flag life-cycle kontrakt + sample scenarios + testing + anti-patterns. SPEC navazuje na existujici infra (EnvConfig.gs + envGuard_ + Script Properties + timing-insensitive secret compare v doPost) — **nepisi ji od nuly, rozsiruji ji tak, aby dostala strukturu**.
+
+### 2. Boundary / non-goals
+
+**C-11 nedoda:**
+- Runtime `ConfigManager` / `getConfigValue_(key)` / `getSecret_(key)` / `isKillSwitchActive_(scope)` / `checkBudget_(guardrail_id)` helpery (implementacni task).
+- Creation of `_asw_budget_ledger` sheet.
+- Zapisy do `apps-script/Config.gs` nebo runtime nastaveni Script Properties.
+- Frontend UI pro kill switch toggling / feature flag dashboard (frontend task).
+- Secret rotation automation (90-day reminder, `diagSecretAge()`).
+- Remote config service integration (HashiCorp Vault, AWS Parameter Store, GCP Secret Manager).
+- Frontend feature flag SDK (Split.io, LaunchDarkly, Unleash client).
+- Per-user / per-operator scoped config (multi-tenant out-of-scope).
+- A/B testing framework (feature flag ≠ experimentation framework).
+- Encryption key management beyond Google-managed encryption at rest.
+- Legal compliance automation (GDPR / CCPA — separate compliance task).
+- Circuit breaker library (manual kill switch = basic equivalent; advanced auto-circuit-breaker = future).
+- Config change audit dashboard (ops UI) — C-11 jen dokumentuje `_asw_logs` event types.
+
+**C-11 dodava pouze SPEC:** 6-plane taxonomie, contract templates, entry inventory, invariants, handoff pravidla, sample scenarios.
+
+### 3. Configuration planes (6 ortogonalnich vrstev)
+
+C-11 definuje 6 vrstev tak, aby kazdy config artefakt patril do **prave jedne** role. Tvrda separace invariantem: `CONFIG ≠ SECRET ≠ LIMIT ≠ BUDGET ≠ KILL_SWITCH ≠ FEATURE`.
+
+#### 3.1 Layer 1 — Configuration values (CONFIG)
+
+- **Definice:** tunable behavior knobs, ktere meni runtime chovani, ale nejsou autorizacni material a nejsou emergency stop.
+- **Umisteni:** `apps-script/Config.gs` (static pro stable values, na Git, reviewable) nebo Script Property (tunable bez redeploy).
+- **VERIFIED priklady:** `SERPER_CONFIG.ENDPOINT`, `SERPER_CONFIG.GL='cz'`, `SERPER_CONFIG.HL='cs'`, `EMAIL_SYNC_LOOKBACK_DAYS=30`, `EMAIL_SYNC_REQUIRE_EXACT_MATCH=true`, `EMAIL_MAILBOX_ACCOUNT`, `MAIN_SHEET_NAME='LEADS'`, `WEBHOOK_URL`, `ASW_ENV`, `ASW_SPREADSHEET_ID`.
+- **PROPOSED priklady:** `EMAIL_PROVIDER` (C-06), `PERF_REPORT_*` 6 klicu (C-10).
+- **Read frequency:** per-run (cached v runtime _envConfigCache singleton pattern z EnvConfig.gs).
+- **Rotation:** ops decision, obvykle per-deploy.
+- **NENI:** autorizacni token (= SECRET), emergency stop (= KILL_SWITCH), rollout toggle (= FEATURE), resource cap (= LIMIT), period budget (= BUDGET).
+
+#### 3.2 Layer 2 — Secrets (SECRET)
+
+- **Definice:** autentifikacni / autorizacni material. Vzdy-tajny, nikdy do Git, nikdy do logu, nikdy do frontend bundled code.
+- **Umisteni:** Apps Script `PropertiesService.getScriptProperties()` (server-side only) + frontend `.env.local` / Vercel env (process.env, server-side only).
+- **VERIFIED priklady:** `SERPER_API_KEY` (LegacyWebCheck.gs:24+134), `PREVIEW_WEBHOOK_SECRET` (EnvConfig.gs:104), `FRONTEND_API_SECRET` (WebAppEndpoint.gs doPost handler).
+- **PROPOSED priklady:** `SENDGRID_API_KEY` / `MAILGUN_API_KEY` (pokud `EMAIL_PROVIDER != 'GMAIL'` — C-06).
+- **Read frequency:** per-use, nikdy ne-cachovane do memory dele nez nutne.
+- **Invariants:** nikdy v `_asw_logs` payload, nikdy v error messages visible to operator UI, nikdy v `diagConfigState()` dump (kazdy diagnostic tool musi values rescrub-ovat).
+- **Comparison:** timing-insensitive (existing pattern v doPost: `payload.token !== secret` → return 'Unauthorized').
+- **NENI:** non-sensitive identifier (napr. ASW_SPREADSHEET_ID je TENANT_ID role — CONFIG, ne SECRET), feature toggle (= FEATURE), emergency stop (= KILL_SWITCH).
+
+#### 3.3 Layer 3 — Execution limits (LIMIT)
+
+- **Definice:** per-stage / per-run resource ceilings — batch size, timeout, max concurrency, dead-letter quota per run, rate limit (QPS).
+- **Umisteni:** Script Property s prefix `LIMIT_*`.
+- **VERIFIED priklady (hybrid):** `BATCH_SIZE=100` (dnes Config.gs, formalne LIMIT role), `EMAIL_SYNC_MAX_THREADS=50` (dnes Config.gs, formalne LIMIT_EMAIL_SYNC_MAX_THREADS).
+- **PROPOSED priklady:** `LIMIT_A04_SCRAPE_PAGES_PER_PORTAL`, `LIMIT_A06_WEBCHECK_QPS`, `LIMIT_C05_OUTBOUND_BATCH_SIZE`, `LIMIT_C06_SEND_TIMEOUT_MS`, `LIMIT_C08_FOLLOWUP_BATCH_SIZE`, `LIMIT_B04_PREVIEW_RENDER_TIMEOUT_MS`.
+- **Read frequency:** per-run (cached na run start).
+- **Enforcement:** pri prekroceni abort aktualniho runu + log `limit_exceeded` event. NENI global safe-stop (to je BUDGET nebo KILL_SWITCH role).
+- **Invariants:** hodnota musi spadat do `valid_range` (0 <= batch_size <= 500, 1 <= concurrency <= 5 atd.); hodnota mimo range → use `default_value` + log warning.
+- **NENI:** daily budget (= BUDGET), emergency stop (= KILL_SWITCH), rollout toggle (= FEATURE).
+
+#### 3.4 Layer 4 — Budget guardrails (BUDGET)
+
+- **Definice:** per-period kumulativni caps na operations / cost / state changes, ktere triggeruji **safe-stop** pri prekroceni.
+- **Umisteni:** Script Property s prefix `BUDGET_*` (thresholds) + `_asw_budget_ledger` sheet NEBO aggregated counts z `_asw_logs` (tracking).
+- **PROPOSED priklady:** `BUDGET_DAILY_EMAIL_SEND_MAX=500` / `BUDGET_DAILY_EMAIL_SEND_WARNING=400`, `BUDGET_DAILY_SERPER_CALLS_MAX=1000` / `BUDGET_DAILY_SERPER_CALLS_WARNING=800`, `BUDGET_DAILY_LEADS_MUTATIONS_MAX=2000`, `BUDGET_DAILY_PREVIEW_RENDER_MAX=200`, `BUDGET_PER_RUN_DEAD_LETTER_MAX=20`.
+- **Read frequency:** per-item (runtime check pred kazdou chargeable operation).
+- **Period reset:** daily-midnight Europe/Prague (INFERRED defaultni timezone) NEBO per-run pro run-scoped budgets.
+- **Violation action:** safe-stop stage s budgetem (finish current item, log event, stop processing next). NE hard-stop, NE mid-write abort.
+- **Tracking strategies:**
+  - (a) `_asw_budget_ledger` sheet append-only (scales better, sheet read per check).
+  - (b) Aggregated read z `_asw_logs` filtered by event types (no extra sheet, aggregation read latency).
+  - (c) Counter Script Property updated pri operation (fewest writes, race risk).
+  - C-11 SPEC default: (a) `_asw_budget_ledger` — scale + auditability > write count overhead.
+- **NENI:** per-batch cap (= LIMIT), emergency toggle (= KILL_SWITCH), one-off authorization (= SECRET).
+
+#### 3.5 Layer 5 — Kill switches (KILL_SWITCH)
+
+- **Definice:** admin-controlled on/off toggles, ktere okamzite safe-stopnou automation bez edit kodu / redeploy / commit.
+- **Umisteni:** Script Property s prefix `KILL_SWITCH_*`.
+- **Scope taxonomie (5 urovni):**
+  - `GLOBAL` — `KILL_SWITCH_ALL` → celkove safe-stop vsech automation runu.
+  - `ENV` — `KILL_SWITCH_PROD_ALL`, `KILL_SWITCH_TEST_ALL` → per-environment.
+  - `CATEGORY` — `KILL_SWITCH_INGEST` (A01-A10), `KILL_SWITCH_PREVIEW` (B01-B05), `KILL_SWITCH_OUTREACH` (C04-C08), `KILL_SWITCH_INBOUND` (C07), `KILL_SWITCH_EXCEPTIONS` (C09), `KILL_SWITCH_REPORTING` (C10).
+  - `PROVIDER` — `KILL_SWITCH_SERPER`, `KILL_SWITCH_GMAIL`, `KILL_SWITCH_EMAIL_ALL`.
+  - `API_SURFACE` — `KILL_SWITCH_FRONTEND_WRITE_PATH` (BX1 doPost), `KILL_SWITCH_ALL_WRITES` (migrace z DRY_RUN).
+- **Activation:** ops set Script Property `true` → next evaluation window (per-step check) → safe-stop.
+- **Semantics:** **VZDY safe-stop** (finish current item, log `kill_switch_triggered` event, no new items). NIKDY hard-stop / mid-write abort (risk of data corruption + half-written queue rows).
+- **Reset:** explicit ops action — set `false` nebo delete Script Property. NIKDY auto-reset (ops-owned decision).
+- **Evaluation cadence:** per-step (CS2 step entry check) + per-item pro long-running stages (A-04 scrape page loop, C-05 queue worker).
+- **Test:** diagnostic `diagKillSwitchState()` — read-only dump aktualniho stavu vsech KILL_SWITCH_* Script Properties.
+- **Idempotency:** opakovana kontrola pri aktivnim switchi emituje `kill_switch_triggered` event pouze **prvni hit per (switch_id × cs2_run_id)** — ne per-item spam.
+- **Default:** vzdy `false` (safety position "automation runs"). Kill switch s default `true` je **ANTI-PATTERN** (zapneme a zapomeneme; system stoji).
+- **NENI:** rollout toggle (= FEATURE), resource cap (= LIMIT), daily budget (= BUDGET).
+
+#### 3.6 Layer 6 — Feature flags (FEATURE)
+
+- **Definice:** per-feature rollout / opt-in / code-path switches.
+- **Umisteni:** Script Property s prefix `FEATURE_*`.
+- **PROPOSED priklady:** `FEATURE_C04_SENDABILITY_GATE_RUNTIME`, `FEATURE_C05_OUTBOUND_QUEUE_WORKER`, `FEATURE_C06_PROVIDER_ABSTRACTION`, `FEATURE_C07_INBOUND_INGEST`, `FEATURE_C08_FOLLOWUP_ENGINE`, `FEATURE_C09_EXCEPTION_QUEUE_RUNTIME`, `FEATURE_C10_PERF_REPORT_RUNTIME`, `FEATURE_PHASE_2_SEND`, `FEATURE_EMAIL_SYNC` (migrace z `EMAIL_SYNC_ENABLED`), `FEATURE_PREVIEW_WEBHOOK_V2`.
+- **Read frequency:** per-run (cached na run start).
+- **Default:** vzdy `false` (opt-in).
+- **Scope:** GLOBAL / ENV (ENV-gated = "TEST on, PROD off" pro gradual rollout) / STAGE.
+- **Life cycle:**
+  - Vzdy zacina `false` pri deploy novy feature runtime.
+  - Rollout: `TEST=true` → verify → `PROD=true` (gradual nebo 100%).
+  - Post-rollout: po stabilizacnim obdobi flag **odstraneny z kodu** (cleanup task; flag nesmi zit indefinite).
+- **State safety:** flip mid-run nesmi korumpovat in-flight state (detail sekce 10).
+- **Invariants:** NO business rules uvnitr feature flag (flag = code-path toggle, ne business-outcome rozhodci — napr. `if (FEATURE_C08) { send() } else { skip() }` je OK; `if (FEATURE_C08) { reply_rate_threshold = 5% } else { reply_rate_threshold = 3% }` NENI — to je business config).
+- **NENI:** emergency stop (= KILL_SWITCH; feature flag je planovana rollout kontrola, kill switch je reactive emergency), resource cap (= LIMIT), authorizace (= SECRET).
+
+#### 3.7 Hard-separation invariant (zakazane kolapsy)
+
+Zadny artefakt nesmi kombinovat tyto role. Konkretne zakazane kolapsy:
+
+- **NIKDY** "SERPER_API_KEY jako feature flag" (prisne SECRET).
+- **NIKDY** "KILL_SWITCH_* jako int counter / retry count" (prisne bool; count je LIMIT nebo BUDGET).
+- **NIKDY** "DRY_RUN jako feature flag" (= KILL_SWITCH_ALL_WRITES role; viz reclassification nize).
+- **NIKDY** "BATCH_SIZE jako budget guardrail" (per-run cap = LIMIT; daily cap = BUDGET).
+- **NIKDY** "EMAIL_PROVIDER jako kill switch" (provider selection = CONFIG; emergency provider disable = separate KILL_SWITCH_GMAIL / KILL_SWITCH_SENDGRID).
+- **NIKDY** "FEATURE_C08_FOLLOWUP_ENGINE jako batch size limit" (feature flag je binary toggle; batch size = LIMIT).
+- **NIKDY** "ENABLE_WEBHOOK jako kill switch" (ENABLE_WEBHOOK je routing config; emergency preview stop = separate KILL_SWITCH_PREVIEW).
+- **NIKDY** "PREVIEW_WEBHOOK_SECRET jako config value v diagnostic output" (SECRET nesmi do logu / diag / UI).
+
+#### 3.8 DRY_RUN reclassification
+
+Dnesni `DRY_RUN=true` v Config.gs je **hybrid artifact** — formalne je to CONFIG bool, ale v praxi funguje jako **kill switch pro cely write-path**. C-11 ho reklasifikuje:
+
+- **Cilovy stav:** `KILL_SWITCH_ALL_WRITES` Script Property (prefix KILL_SWITCH_*, default false, ops-editable, manual reset).
+- **Migrace plan (implementacni task C-11):**
+  1. Pridat runtime helper `isKillSwitchActive_('ALL_WRITES')` ktery cte `KILL_SWITCH_ALL_WRITES` Script Property.
+  2. Fallback pattern: pokud `KILL_SWITCH_ALL_WRITES` neni set, pouzij `DRY_RUN` Config.gs hodnotu (backward-compat).
+  3. Ops explicitne nastavi `KILL_SWITCH_ALL_WRITES` v TEST env (napodobit DRY_RUN state).
+  4. Verify behavioral parita.
+  5. Extend na PROD env.
+  6. Cleanup task: odstran `DRY_RUN` z Config.gs, odstran fallback path.
+- **Dokud runtime migrace neproběhne:** `DRY_RUN=true` zustava kanonický kill switch pro write-path; C-11 SPEC dokumentuje **target state**.
+
+#### 3.9 EMAIL_SYNC_ENABLED reclassification
+
+Podobne `EMAIL_SYNC_ENABLED=true` je formalne CONFIG bool, ale role je **feature flag** pro mailbox sync feature. C-11 plan:
+
+- Cil: `FEATURE_EMAIL_SYNC` Script Property.
+- Migrace pattern identicky jako DRY_RUN (runtime helper + fallback + env-by-env cutover + cleanup).
+
+### 4. Canonical config table
+
+Kazdy entry ma 13-field kontrakt:
+
+| Pole | Popis |
+|---|---|
+| `key` | Exact identifier string. |
+| `layer` | CONFIG / SECRET / LIMIT / BUDGET / KILL_SWITCH / FEATURE. |
+| `storage` | `Config.gs` / `Script Property` / `.env.local` / `.env (Vercel)`. |
+| `scope` | GLOBAL / PROD / TEST / STAGE_{NN} / PROVIDER_{XX} / API_{YY} / CATEGORY_{ZZ}. |
+| `type` | string / int / float / bool / json. |
+| `default_value` | Hodnota ktera plati pokud entry neni set. |
+| `valid_range` | Acceptable values (range, enum, regex). |
+| `read_frequency` | startup / per-run / per-step / per-item / per-use. |
+| `mutation_policy` | read-only (Git-only, commit required) / ops-editable (Script Property) / self-updating (runtime counter). |
+| `reset_trigger` | never / on-deploy / daily-midnight / per-run / manual. |
+| `pii_safe` | bool — false = nesmi do logu / diag output / error messages. |
+| `label` | VERIFIED IN REPO / INFERRED FROM EXISTING PATTERN / PROPOSED FOR C-11. |
+| `notes` | Upstream / downstream relationships, migrace, compat. |
+
+#### 4.1 VERIFIED entries (exist v repo)
+
+| key | layer | storage | scope | type | default | range | read | mutation | reset | pii_safe | label | notes |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `ASW_ENV` | CONFIG | Script Property | GLOBAL | string | `TEST` | `PROD`\|`TEST` | startup | ops-editable | on-deploy | true | VERIFIED | EnvConfig.gs:51 |
+| `ASW_SPREADSHEET_ID` | CONFIG | Script Property | ENV | string | EnvConfig fallback | valid sheet ID | startup | ops-editable | on-deploy | true | VERIFIED | EnvConfig.gs:62 |
+| `PREVIEW_WEBHOOK_SECRET` | SECRET | Script Property | GLOBAL | string | `''` (fail-closed) | non-empty | per-use | ops-editable | manual | false | VERIFIED | EnvConfig.gs:104 |
+| `FRONTEND_API_SECRET` | SECRET | Script Property | GLOBAL | string | null | non-empty | per-request | ops-editable | manual | false | VERIFIED | WebAppEndpoint.gs doPost |
+| `SERPER_API_KEY` | SECRET | Script Property | GLOBAL | string | null | non-empty | per-call | ops-editable | manual | false | VERIFIED | LegacyWebCheck.gs:24+134 |
+| `DRY_RUN` | KILL_SWITCH (hybrid CONFIG) | Config.gs | GLOBAL | bool | true | true\|false | startup | read-only | on-deploy | true | VERIFIED | Config.gs:24; migrace na `KILL_SWITCH_ALL_WRITES` |
+| `ENABLE_WEBHOOK` | CONFIG | Config.gs | GLOBAL | bool | false | true\|false | startup | read-only | on-deploy | true | VERIFIED | Config.gs:25 |
+| `WEBHOOK_URL` | CONFIG | Config.gs | GLOBAL | string | `''` | valid URL | startup | read-only | on-deploy | true | VERIFIED | Config.gs:26 |
+| `BATCH_SIZE` | LIMIT (hybrid CONFIG) | Config.gs | GLOBAL | int | 100 | 1..500 | per-run | read-only | on-deploy | true | VERIFIED | Config.gs:27; formalne LIMIT role |
+| `SERPER_CONFIG.ENDPOINT` | CONFIG | Config.gs | GLOBAL | string | `https://google.serper.dev/search` | valid URL | per-call | read-only | on-deploy | true | VERIFIED | Config.gs:31 |
+| `SERPER_CONFIG.GL` | CONFIG | Config.gs | GLOBAL | string | `cz` | ISO-3166 alpha-2 | per-call | read-only | on-deploy | true | VERIFIED | Config.gs:32 |
+| `SERPER_CONFIG.HL` | CONFIG | Config.gs | GLOBAL | string | `cs` | ISO-639 | per-call | read-only | on-deploy | true | VERIFIED | Config.gs:33 |
+| `EMAIL_SYNC_ENABLED` | FEATURE (hybrid CONFIG) | Config.gs | GLOBAL | bool | true | true\|false | per-run | read-only | on-deploy | true | VERIFIED | Config.gs:197; migrace na `FEATURE_EMAIL_SYNC` |
+| `EMAIL_MAILBOX_ACCOUNT` | CONFIG | Config.gs | GLOBAL | string | `''` | valid email | startup | read-only | on-deploy | true | VERIFIED | Config.gs:198 |
+| `EMAIL_SYNC_LOOKBACK_DAYS` | CONFIG | Config.gs | GLOBAL | int | 30 | 1..90 | per-run | read-only | on-deploy | true | VERIFIED | Config.gs:199 |
+| `EMAIL_SYNC_MAX_THREADS` | LIMIT (hybrid CONFIG) | Config.gs | GLOBAL | int | 50 | 1..200 | per-run | read-only | on-deploy | true | VERIFIED | Config.gs:200; formalne LIMIT_EMAIL_SYNC_MAX_THREADS role |
+| `EMAIL_SYNC_REQUIRE_EXACT_MATCH` | CONFIG | Config.gs | GLOBAL | bool | true | true\|false | per-run | read-only | on-deploy | true | VERIFIED | Config.gs:201 |
+
+#### 4.2 PROPOSED entries (materializovane implementacnim taskem)
+
+**CONFIG (4):**
+
+| key | scope | type | default | range | notes |
+|---|---|---|---|---|---|
+| `EMAIL_PROVIDER` | GLOBAL | string | `GMAIL` | `GMAIL`\|`SENDGRID`\|`MAILGUN` | C-06 provider selection |
+| `BUDGET_RESET_TIMEZONE` | GLOBAL | string | `Europe/Prague` | valid IANA tz | Daily budget reset tz |
+| `KILL_SWITCH_CHECK_INTERVAL_MS` | GLOBAL | int | 5000 | 1000..30000 | Per-step cache TTL pro kill switch read |
+| `BUDGET_LEDGER_STRATEGY` | GLOBAL | string | `SHEET` | `SHEET`\|`LOG_AGGREGATION`\|`COUNTER_PROP` | Budget tracking implementation |
+
+**LIMIT (9, per-stage execution limits):**
+
+| key | stage | type | default | range | notes |
+|---|---|---|---|---|---|
+| `LIMIT_A04_SCRAPE_PAGES_PER_PORTAL` | STAGE_A04 | int | 50 | 1..200 | Max stran per run per portal |
+| `LIMIT_A04_SCRAPE_BATCH_TIMEOUT_MS` | STAGE_A04 | int | 300000 | 60000..600000 | 5 min default |
+| `LIMIT_A06_WEBCHECK_QPS` | STAGE_A06 | int | 2 | 1..10 | Serper rate limit |
+| `LIMIT_A06_WEBCHECK_BATCH_SIZE` | STAGE_A06 | int | 100 | 1..500 | Items per run |
+| `LIMIT_B04_PREVIEW_RENDER_TIMEOUT_MS` | STAGE_B04 | int | 60000 | 10000..180000 | Per-preview render |
+| `LIMIT_C05_OUTBOUND_BATCH_SIZE` | STAGE_C05 | int | 50 | 1..200 | Queue worker batch |
+| `LIMIT_C05_OUTBOUND_MAX_CONCURRENCY` | STAGE_C05 | int | 1 | 1..5 | Gmail single-thread defaults |
+| `LIMIT_C06_SEND_TIMEOUT_MS` | STAGE_C06 | int | 30000 | 5000..120000 | Per-send timeout |
+| `LIMIT_C08_FOLLOWUP_BATCH_SIZE` | STAGE_C08 | int | 20 | 1..100 | Follow-up engine batch |
+
+**BUDGET (7, daily / per-run guardrails):**
+
+| key | scope | type | default | range | notes |
+|---|---|---|---|---|---|
+| `BUDGET_DAILY_EMAIL_SEND_MAX` | GLOBAL | int | 500 | 0..2000 | Daily send cap |
+| `BUDGET_DAILY_EMAIL_SEND_WARNING` | GLOBAL | int | 400 | 0..2000 | 80% of MAX default |
+| `BUDGET_DAILY_SERPER_CALLS_MAX` | GLOBAL | int | 1000 | 0..5000 | Daily Serper API cap |
+| `BUDGET_DAILY_SERPER_CALLS_WARNING` | GLOBAL | int | 800 | 0..5000 | 80% of MAX default |
+| `BUDGET_DAILY_LEADS_MUTATIONS_MAX` | GLOBAL | int | 2000 | 0..10000 | Daily LEADS row mutations |
+| `BUDGET_DAILY_PREVIEW_RENDER_MAX` | GLOBAL | int | 200 | 0..1000 | Daily preview renders |
+| `BUDGET_PER_RUN_DEAD_LETTER_MAX` | GLOBAL | int | 20 | 0..100 | Per-CS2-run dead-letter threshold |
+
+**KILL_SWITCH (13):**
+
+| key | scope | type | default | notes |
+|---|---|---|---|---|
+| `KILL_SWITCH_ALL` | GLOBAL | bool | false | Master kill |
+| `KILL_SWITCH_ALL_WRITES` | GLOBAL | bool | inherit(DRY_RUN) | Migrace z DRY_RUN |
+| `KILL_SWITCH_PROD_ALL` | ENV_PROD | bool | false | Per-env |
+| `KILL_SWITCH_TEST_ALL` | ENV_TEST | bool | false | Per-env |
+| `KILL_SWITCH_INGEST` | CAT_INGEST | bool | false | A01-A10 |
+| `KILL_SWITCH_PREVIEW` | CAT_PREVIEW | bool | false | B01-B05 |
+| `KILL_SWITCH_OUTREACH` | CAT_OUTREACH | bool | false | C04-C08 |
+| `KILL_SWITCH_INBOUND` | CAT_INBOUND | bool | false | C07 |
+| `KILL_SWITCH_EXCEPTIONS` | CAT_EXCEPTIONS | bool | false | C09 |
+| `KILL_SWITCH_REPORTING` | CAT_REPORTING | bool | false | C10 |
+| `KILL_SWITCH_SERPER` | PROVIDER_SERPER | bool | false | Serper API emergency off |
+| `KILL_SWITCH_GMAIL` | PROVIDER_GMAIL | bool | false | Gmail API emergency off |
+| `KILL_SWITCH_EMAIL_ALL` | CAT_EMAIL | bool | false | All email providers |
+| `KILL_SWITCH_FRONTEND_WRITE_PATH` | API_BX1 | bool | false | BX1 doPost emergency off |
+
+**FEATURE (10):**
+
+| key | scope | type | default | notes |
+|---|---|---|---|---|
+| `FEATURE_C04_SENDABILITY_GATE_RUNTIME` | GLOBAL | bool | false | C-04 runtime opt-in |
+| `FEATURE_C05_OUTBOUND_QUEUE_WORKER` | GLOBAL | bool | false | C-05 queue worker |
+| `FEATURE_C06_PROVIDER_ABSTRACTION` | GLOBAL | bool | false | C-06 sender interface |
+| `FEATURE_C07_INBOUND_INGEST` | GLOBAL | bool | false | C-07 inbound ingest |
+| `FEATURE_C08_FOLLOWUP_ENGINE` | GLOBAL | bool | false | C-08 follow-up |
+| `FEATURE_C09_EXCEPTION_QUEUE_RUNTIME` | GLOBAL | bool | false | C-09 runtime |
+| `FEATURE_C10_PERF_REPORT_RUNTIME` | GLOBAL | bool | false | C-10 runtime |
+| `FEATURE_PHASE_2_SEND` | GLOBAL | bool | false | ESP-based send gating |
+| `FEATURE_EMAIL_SYNC` | GLOBAL | bool | inherit(EMAIL_SYNC_ENABLED) | Migrace z Config.gs |
+| `FEATURE_PREVIEW_WEBHOOK_V2` | GLOBAL | bool | false | Future webhook v2 opt-in |
+
+**SECRET (2 PROPOSED):**
+
+| key | notes |
+|---|---|
+| `SENDGRID_API_KEY` | Potrebny pokud `EMAIL_PROVIDER='SENDGRID'`; jinak ne-set / ignored |
+| `MAILGUN_API_KEY` | Potrebny pokud `EMAIL_PROVIDER='MAILGUN'`; jinak ne-set / ignored |
+
+**Upstream PROPOSED Script Properties z ostatnich SPECu (C-06, C-08, C-09, C-10):**
+- C-06: `EMAIL_PROVIDER` (duplicate; uz uveden tady)
+- C-08: 8 Script Properties (followup engine config / thresholds — viz C-08 SPEC)
+- C-09: 7 Script Properties (exception queue SLA thresholds — viz C-09 SPEC)
+- C-10: 6 `PERF_REPORT_*` (perf report config — viz C-10 SPEC)
+
+C-11 necakuje ani nepremitava tyto upstream PROPOSED klice — dokumentuje pouze ze **existuji v kontraktu predchozich SPECu** a ze **jejich runtime setup je out-of-scope** C-11 (jejich primary SPEC je zodpovedny).
+
+### 5. Secrets inventory (per-item contract)
+
+Kazdy secret ma 10-field kontrakt:
+
+| Pole | Popis |
+|---|---|
+| `secret_id` | Exact key identifier. |
+| `kind` | API_KEY / SHARED_SECRET / OAUTH_TOKEN / WEBHOOK_SECRET / DB_CREDENTIAL / TENANT_ID (non-secret sensitive). |
+| `storage_location` | `PropertiesService (Apps Script)` / `.env.local (Next.js server-side)` / `Vercel env` / `Google OAuth platform-managed`. |
+| `consumer_code_path` | file:line kde je secret cten. |
+| `consumer_function` | Function name ktera secret konzumuje. |
+| `transport_scope` | same-process / server-to-server / client-to-server. Secrets se NIKDY neposilaji client-to-client. |
+| `rotation_policy` | no-expiry (manual) / 90d-recommended / 30d-recommended / on-incident. |
+| `rotation_last_at` | ISO timestamp posledni rotace (PROPOSED metadata — ne vynucene v v1.0). |
+| `leak_response_runbook` | Co delat po leak: rotate-at-provider → set-new-ScriptProperty → verify-callers → audit-log. |
+| `label` | VERIFIED / INFERRED / PROPOSED. |
+
+#### 5.1 VERIFIED secrets inventory
+
+**S1 — `SERPER_API_KEY`**
+- kind: API_KEY
+- storage: `PropertiesService` (Apps Script)
+- consumer: `apps-script/LegacyWebCheck.gs:134` (`serperSearch_` function)
+- setter: `apps-script/LegacyWebCheck.gs:24` (`setupSerperApiKey()` manual utility)
+- transport: server-to-server (Apps Script → google.serper.dev)
+- rotation: no-expiry / manual (ops rotuje pri leak podezreni)
+- leak_response: (1) generate new key v Serper dashboard, (2) `PropertiesService.setProperty('SERPER_API_KEY', newKey)`, (3) invalidate old key v Serper dashboard, (4) log `secret_rotated` event.
+- label: VERIFIED
+
+**S2 — `PREVIEW_WEBHOOK_SECRET`**
+- kind: SHARED_SECRET
+- storage: `PropertiesService` (Apps Script) + `PREVIEW_WEBHOOK_SECRET` env v Next.js frontend
+- consumer: `apps-script/EnvConfig.gs:104` (`getPreviewWebhookSecret_()`) — Apps Script caller side; Next.js `crm-frontend/.env.local` + B-04 `/api/preview/render` handler — receiver side (timing-safe compare).
+- transport: server-to-server (Apps Script → Next.js)
+- rotation: no-expiry / manual. Rotace vyzaduje **both-ends simultaneous update** (Apps Script Script Property + Vercel env var).
+- leak_response: rotate both ends within same window → deploy Vercel env → set Apps Script property → verify 200 OK from next request → log.
+- label: VERIFIED
+
+**S3 — `FRONTEND_API_SECRET`**
+- kind: SHARED_SECRET
+- storage: `PropertiesService` (Apps Script) + `.env.local` / Vercel env v Next.js frontend
+- consumer: `apps-script/WebAppEndpoint.gs` `doPost(e)` handler — reads property, timing-insensitive compares `payload.token`. Next.js server-side action poses the token v request body.
+- transport: client-initiated server-to-server (Next.js frontend API route → Apps Script doPost)
+- rotation: no-expiry / manual.
+- leak_response: rotate both ends; Vercel env redeploy required.
+- label: VERIFIED
+
+**S4 — `ASW_SPREADSHEET_ID`** (reclassified — TENANT_ID role, ne SECRET formally)
+- kind: TENANT_ID (sensitive identifier, ne autorizacni material)
+- storage: `PropertiesService` (Apps Script) + EnvConfig.gs `ASW_ENVIRONMENTS` lookup
+- consumer: `apps-script/EnvConfig.gs:62` (`getSpreadsheetId_()` + `envGuard_()`)
+- transport: same-process (Apps Script → Google Sheets API via platform)
+- rotation: never (sheet ID je stable per tenant)
+- leak_response: pokud leak → vytvorit novou PROD sheet, migrovat data, update ASW_SPREADSHEET_ID Script Property; OK-to-know identifier vs. API-key role.
+- label: VERIFIED (reclassified from SECRET to CONFIG w/ TENANT_ID role)
+
+**S5 — Apps Script platform identity** (implicit)
+- kind: OAUTH_TOKEN (platform-managed)
+- storage: Google OAuth internal
+- consumer: All SpreadsheetApp / UrlFetchApp / GmailApp calls
+- transport: platform
+- rotation: automatic by Google
+- leak_response: n/a (revoke via Google account)
+- label: VERIFIED (not ops-manageable, informational only)
+
+#### 5.2 PROPOSED secrets inventory
+
+**S6 — `SENDGRID_API_KEY`** (only if `EMAIL_PROVIDER='SENDGRID'`)
+- kind: API_KEY
+- storage: `PropertiesService` (Apps Script)
+- consumer: PROPOSED C-06 `SendGridSender` adapter
+- transport: server-to-server (Apps Script → SendGrid API)
+- rotation: 90d recommended
+- leak_response: rotate at SendGrid dashboard + set new Script Property + verify send + `secret_rotated` event.
+- label: PROPOSED (materialization pending `FEATURE_C06_PROVIDER_ABSTRACTION` + non-Gmail provider activation)
+
+**S7 — `MAILGUN_API_KEY`** (only if `EMAIL_PROVIDER='MAILGUN'`)
+- stejny pattern jako SendGrid.
+- label: PROPOSED
+
+### 6. Per-stage execution limits
+
+9 pipeline stages mají formalni LIMIT kontrakt (per-run caps). Kazdy stage ma:
+- `batch_size` (max items per run)
+- `timeout_ms` (max execution time per item nebo per batch)
+- `max_concurrency` (kolik paralelnich instanci)
+- `dead_letter_quota` (inherited z `BUDGET_PER_RUN_DEAD_LETTER_MAX`)
+- `rate_limit_qps` (kde provider rate-limituje)
+
+| stage | batch_size | timeout_ms | max_concurrency | rate_qps | notes |
+|---|---|---|---|---|---|
+| A-04 scrape (firmy.cz) | 50 pages | 300000 (batch) | 1 | n/a | External portal rate-limit implicit |
+| A-05 dedupe | BATCH_SIZE=100 | per-run 360s (Apps Script max) | 1 | n/a | In-memory matching |
+| A-06 web check (Serper) | LIMIT_A06_WEBCHECK_BATCH_SIZE=100 | 360s per-run | 1 | LIMIT_A06_WEBCHECK_QPS=2 | Serper 1K-calls/month default tier |
+| A-07 auto-qualify | BATCH_SIZE=100 | per-run 360s | 1 | n/a | Pure in-memory |
+| A-08 preview queue builder | BATCH_SIZE=100 | per-run 360s | 1 | n/a | Brief JSON generation |
+| B-04 preview render | 10 per trigger (Vercel) | LIMIT_B04_PREVIEW_RENDER_TIMEOUT_MS=60000 (per item) | 5 (Vercel concurrency) | n/a | Next.js render route |
+| C-05 outbound queue worker | LIMIT_C05_OUTBOUND_BATCH_SIZE=50 | 360s per-run | LIMIT_C05_OUTBOUND_MAX_CONCURRENCY=1 | Gmail 250/day or provider-specific | Single-thread for Gmail safety |
+| C-06 send (per item) | n/a | LIMIT_C06_SEND_TIMEOUT_MS=30000 | n/a | Provider rate-limit | Per-item timeout |
+| C-08 followup engine | LIMIT_C08_FOLLOWUP_BATCH_SIZE=20 | 360s per-run | 1 | n/a | Generates queue rows (C-05 consumes) |
+
+**Enforcement rules:**
+- Limit violation → abort current run + `limit_exceeded` `_asw_logs` event + dead-letter kam spada.
+- Limit violation != budget violation. Limit je per-run cap; budget je per-period aggregate.
+- Limits cache-ed per-run (read at run start); mid-run change applies to next run (prevents mid-run inconsistency).
+
+### 7. Budget guardrails
+
+Kazdy budget guardrail ma 10-field kontrakt:
+
+| Pole | Popis |
+|---|---|
+| `guardrail_id` | Stable ID, e.g. `BG-DAILY-EMAIL-SEND`. |
+| `scope` | GLOBAL / STAGE / PROVIDER / CATEGORY. |
+| `measurement_unit` | count / bytes / ms / CZK / other. |
+| `period` | per-run / per-hour / per-day / per-week / rolling-24h. |
+| `threshold_warning` | Reads from `BUDGET_*_WARNING` Script Property. |
+| `threshold_critical` | Reads from `BUDGET_*_MAX` Script Property. Triggers safe-stop. |
+| `reset_policy` | daily-midnight (tz `BUDGET_RESET_TIMEZONE`) / per-run / manual. |
+| `tracking_source` | `_asw_logs` aggregation / `_asw_budget_ledger` row lookup / counter Script Property. |
+| `violation_action` | LOG_ONLY / ALERT_ONLY / PAUSE_STAGE / PAUSE_PROVIDER / SAFE_STOP_GLOBAL. |
+| `label` | PROPOSED FOR C-11 (all BUDGET entries are new). |
+
+5 categorie guardrails:
+
+#### 7.1 BG-PROV-OPS — Provider operational failures
+
+- Trigger: provider vrati > X 429/5XX errors per hour → pause stage konzumujici provider.
+- Example: Serper > 20 rate-limit hits per hour → `KILL_SWITCH_SERPER=true` auto-set + ops alert.
+- Measurement: count z `_asw_logs` eventu filtered by failure_class=RATE_LIMIT / PROVIDER_UNAVAILABLE.
+- Threshold: PROPOSED per-provider.
+
+#### 7.2 BG-RETRY-EXPLOSION — Retry explosion
+
+- Trigger: CS3 retry_count v jednom CS2 runu prekroci `BUDGET_PER_RUN_DEAD_LETTER_MAX=20`.
+- Measurement: count z `_asw_dead_letters` filtered by `cs2_run_id`.
+- Action: SAFE_STOP celeho CS2 runu; `kill_switch_triggered` event.
+- Idempotency: per (run × guardrail) only one trigger.
+
+#### 7.3 BG-COST-EXPLOSION — Cost explosion
+
+- Trigger: daily kumulativni operations > daily MAX.
+- Examples: `BUDGET_DAILY_EMAIL_SEND_MAX=500`, `BUDGET_DAILY_SERPER_CALLS_MAX=1000`, `BUDGET_DAILY_PREVIEW_RENDER_MAX=200`.
+- Measurement: preferred `_asw_budget_ledger` append-only; alternate `_asw_logs` aggregation.
+- Action: PAUSE_STAGE konzumujici resource; resume next day at midnight.
+- Warning threshold (80% default): ALERT_ONLY event; continue processing.
+
+#### 7.4 BG-RUNAWAY-BATCH — Runaway state mutations
+
+- Trigger: daily LEADS mutations > `BUDGET_DAILY_LEADS_MUTATIONS_MAX=2000`.
+- Rationale: protection proti bug-induced rollup overwrites, infinite loop writes, rogue batch jobs.
+- Measurement: aggregation z `_asw_logs` all events kde touched LEADS row.
+- Action: SAFE_STOP write-path → operator manual investigation.
+- NOTE: read-only stages (A-06 web check) nesmi byt affected.
+
+#### 7.5 BG-SILENT-DEGRADATION — Quality drift
+
+- Trigger: C-10 reports `bounce_rate > X%`, `reply_rate < Y%`, `funnel_yield_to_outreach_ready < Z%`.
+- Rationale: catch silent degradation ktera neni operational fail ale business metric drift.
+- Measurement: direct read z `_asw_perf_reports` daily row.
+- Action: ALERT_ONLY (dashboard flag + ops notification). NE automaticky safe-stop (risk of false positives; ops rozhodne).
+- Threshold: PROPOSED per C-10 alert threshold model (WARNING / CRITICAL × ABS / REL / COMBO).
+
+### 8. Kill switch model
+
+Detailed behavior contract.
+
+#### 8.1 Scope taxonomy (5 urovni)
+
+| Scope level | Example key | Coverage |
+|---|---|---|
+| GLOBAL | `KILL_SWITCH_ALL` | All automation across all envs |
+| ENV | `KILL_SWITCH_PROD_ALL` / `KILL_SWITCH_TEST_ALL` | Per-environment |
+| CATEGORY | `KILL_SWITCH_INGEST`, `KILL_SWITCH_OUTREACH` etc. | Stage category (A / B / C streams) |
+| PROVIDER | `KILL_SWITCH_SERPER`, `KILL_SWITCH_GMAIL` | External provider |
+| API_SURFACE | `KILL_SWITCH_FRONTEND_WRITE_PATH`, `KILL_SWITCH_ALL_WRITES` | Specific API surface |
+
+**Precedence:** nejvyssi-level kill switch wins.
+- `KILL_SWITCH_ALL=true` → vse stopnuto bez ohledu na ENV / CATEGORY.
+- `KILL_SWITCH_PROD_ALL=true` → vse v PROD stopnuto; TEST bezi.
+- `KILL_SWITCH_INGEST=true` → A01-A10 stopnute; B / C bezi.
+- Sibling kills nezavisi na sobe (kazdy scope je ortogonalni).
+
+#### 8.2 Activation
+
+1. Ops volba: set Script Property to `true` (pres Apps Script editor → Properties → `+ ADD SCRIPT PROPERTY`).
+2. Next evaluation window: per-step pri volani `isKillSwitchActive_(scope)` pri vstupu do CS2 step.
+3. Cache TTL: `KILL_SWITCH_CHECK_INTERVAL_MS=5000` (PROPOSED default 5s). Balance: aggressiveness (fast activation) vs. Script Property read pressure.
+4. First affected item: **next item v zpracovani** (not mid-item). Current item finishes normally.
+5. Log: `kill_switch_triggered` event s `scope`, `cs2_run_id`, `last_completed_item_id`, `activated_at_ts`.
+
+#### 8.3 Safe-stop semantics
+
+- **VZDY** safe-stop. NIKDY hard-stop / mid-write abort.
+- "Safe-stop" znamena: dokonci current iteration (current queue row, current page, current step), zaloguj event, zacni pristi iteraci → check detect → abort.
+- NIKDY data corruption, NIKDY half-written rows, NIKDY orphaned queue rows.
+- Exception: ultra-fast emergency (live breach scenario) — operator muze pouzit native Apps Script execution stop pres UI, ale to je "nuclear" option ne standardni kill switch.
+
+#### 8.4 Reset
+
+- Explicit ops action: set Script Property `false` nebo delete.
+- NIKDY auto-reset.
+- Next evaluation window: kill switch check returns `false` → stage resumes.
+- Log: `kill_switch_reset` event s `scope`, `reset_at_ts`, `duration_active_ms`, `items_skipped_count`.
+
+#### 8.5 Testing
+
+- **Unit test pattern:** mock Script Property → call `isKillSwitchActive_('INGEST')` → assert true/false.
+- **Integration test (TEST env):** set `KILL_SWITCH_INGEST=true` → trigger ingest run → assert abort after 1 iteration + event present in `_asw_logs`.
+- **Diagnostic tool:** `diagKillSwitchState()` reads all 14 PROPOSED KILL_SWITCH_* Script Properties + returns readonly dump.
+
+#### 8.6 Idempotency
+
+- Kill switch triggered event emitted **jednou per (cs2_run_id × kill_switch_scope)**.
+- Repeated per-item checks while switch is still true → **ne spam**. Check state: "already logged? skip."
+- Reset → emitting both `kill_switch_reset` + resetting per-run "already logged" flag.
+
+#### 8.7 Escalation
+
+- Kill switch triggered event feeds:
+  - C-10 `_asw_perf_reports` operational metrics (count + scope breakdown).
+  - C-09 exception queue? **NE** — kill switch je routine ops action, ne exception. Exception queue je pro unexpected state (provider fail, unclear reply, data error). Kill switch trigger je expected-and-logged.
+  - Ops notification (future alerting task) — HIGH priority pri GLOBAL / ENV scope; LOWER pri CATEGORY / PROVIDER.
+
+### 9. Feature flags
+
+Detailed per-flag contract.
+
+#### 9.1 Per-flag contract (8 polí)
+
+| Pole | Popis |
+|---|---|
+| `flag_id` | FEATURE_* identifier. |
+| `default` | Always `false` at first deployment (opt-in). |
+| `scope` | GLOBAL / ENV / STAGE. |
+| `gated_behavior` | Co presne se zapina pri `true`. |
+| `rollout_plan` | binary (on/off instant) / env-gated (TEST→PROD) / stage-gated / gradual (% traffic — NE v v1.0). |
+| `cleanup_trigger` | "Remove flag after X rollout period stable" (napr. 60d stable in PROD → remove). |
+| `state_safety_rule` | Co se stane pri mid-run flip (detail sekce 10). |
+| `label` | PROPOSED. |
+
+#### 9.2 Rollout patterns
+
+- **Binary:** `FEATURE_X=true` → functionality aktivni; `false` → inactive. Immediate effect at next per-run cache read.
+- **Env-gated:** `FEATURE_X` je scoped to env — `ASW_ENV=TEST` → reads `FEATURE_X_TEST` Script Property; `ASW_ENV=PROD` → reads `FEATURE_X_PROD`. Pattern: TEST-activated first, validate, then PROD.
+- **Stage-gated:** flag aktivni pouze v specific CS2 step; jine stages ignorujji. Used for partial rollout (napr. `FEATURE_C08_FOLLOWUP_ENGINE` aktivni pouze v `followup_engine_run` step, ne v ingest steps).
+
+#### 9.3 State safety rules
+
+Pri flag flip mid-run:
+- `FEATURE_C08_FOLLOWUP_ENGINE` flips `true → false`: in-flight engine run dokonci current batch; next run neinicializuje follow-up queue rows.
+- `FEATURE_C08_FOLLOWUP_ENGINE` flips `false → true`: current run (runs in-progress before flip) nenacitaji flag mid-run; next run picks up flag = true and initializes normally.
+- **Invariants:** flag flip NIKDY nekorumpuje in-flight state. Queue rows already created sendable; lifecycle states already written persist; no retroactive changes.
+
+#### 9.4 Anti-pattern: flag as business logic
+
+- `if (FEATURE_C08) { send() } else { skip() }` — **OK** (code-path toggle).
+- `if (FEATURE_C08) { reply_rate_threshold = 5% } else { reply_rate_threshold = 3% }` — **NE** (to je business config, ne feature gate; patri do `SERPER_CONFIG`-like plain CONFIG).
+
+### 10. State safety rules
+
+Co se stane pri mid-run config change:
+
+| Change | Mid-run effect | Invariant |
+|---|---|---|
+| KILL_SWITCH `false → true` | Current item finishes, next item check detects, safe-stop | NIKDY mid-write abort; queue rows not corrupted |
+| KILL_SWITCH `true → false` | Current run continues or stays stopped; next run check detects | NO automatic resume mid-run |
+| BUDGET counter hits threshold | Current item finishes; `budget_critical_crossed` event; safe-stop | Partial progress preserved |
+| LIMIT change (up/down) | Current run uses cached value; next run reads fresh | No mid-run limit change |
+| FEATURE flag flip | Current run uses cached value (per-run cache); next run reads fresh | Flag flip nikdy mid-run |
+| CONFIG value change | Current run uses cached value; next run reads fresh | Config is stable per run |
+| SECRET rotation | MUST be orchestrated: (1) rotate at provider, (2) update Script Property, (3) verify | Rotation mid-send = expected failure (retry handles) |
+
+Key invariants:
+- **KILL_SWITCH a BUDGET maji per-step cache TTL** (`KILL_SWITCH_CHECK_INTERVAL_MS=5000`) — smaller than per-run (react within seconds).
+- **LIMIT, CONFIG, FEATURE maji per-run cache** (read at run start) — consistency within a run, latency acceptable for next-run detection.
+- **SECRET je per-use, never cached** — rotation-responsive; no performance concern (each call reads fresh).
+- **Data integrity > rapid response** — never abort mid-write; finish current item.
+
+### 11. Sample scenarios (7 scenarios)
+
+#### Scenario 1 — Accidental PROD email blast stopped mid-batch
+
+1. Ops konfiguruje `BUDGET_DAILY_EMAIL_SEND_MAX=500` in PROD.
+2. Automation triggeruje C-05 queue worker. Batch size 50.
+3. Bug: queue builder vytvoril 1000 QUEUED rows misto 500 (bad segment filter).
+4. Worker zacne sending. At item 400 → `BUDGET_DAILY_EMAIL_SEND_WARNING=400` cross → `budget_warning_crossed` event.
+5. Ops receives alert, sees dashboard.
+6. Ops sets `KILL_SWITCH_OUTREACH=true`.
+7. Worker finishes item 415 (current iteration), detects kill switch, logs `kill_switch_triggered` event, aborts.
+8. Remaining 585 QUEUED rows stay in QUEUED state (no FAILED, no corruption).
+9. Ops investigates root cause (bad segment filter), cleans up queue, resets kill switch.
+10. **Outcome:** 415 sent of 1000 intended; data integrity preserved; no partial-writes.
+
+#### Scenario 2 — Serper rate-limit flood
+
+1. Automation triggeruje A-06 web check. `LIMIT_A06_WEBCHECK_BATCH_SIZE=100`, `LIMIT_A06_WEBCHECK_QPS=2`.
+2. Serper returns 429 rate-limit for multiple calls.
+3. CS3 retry matrix: classify as `RATE_LIMIT` → `TRANSIENT` → retry with backoff.
+4. 15 retries happen rapidly → exceed `BUDGET_PER_RUN_DEAD_LETTER_MAX=20` would be next breach.
+5. But CS3 also detects `BG-PROV-OPS` guardrail — Serper operational failures > threshold → auto-set `KILL_SWITCH_SERPER=true`.
+6. A-06 worker finishes current item, detects kill switch, aborts.
+7. Ops investigates: Serper API quota exceeded (business decision: upgrade plan vs. reduce QPS).
+8. Ops rotates SERPER_API_KEY if leaked suspected; else just resets `KILL_SWITCH_SERPER=false` after quota reset.
+9. **Outcome:** auto-protection; no dead-letter explosion; ops-in-loop.
+
+#### Scenario 3 — Daily email budget reached
+
+1. Automation posílá maily cely den normally.
+2. At item 500: `BUDGET_DAILY_EMAIL_SEND_MAX=500` cross → `budget_critical_crossed` event → auto `KILL_SWITCH_OUTREACH=true` (automatic, part of BG-COST-EXPLOSION contract).
+3. Current item finishes sending.
+4. Remaining QUEUED rows stay in QUEUED.
+5. Midnight (Europe/Prague): daily budget reset in `_asw_budget_ledger`.
+6. BG-COST-EXPLOSION no longer triggered → auto-reset pattern? **NE** — `KILL_SWITCH_OUTREACH` zustava `true` until ops resets explicitly (safety default).
+7. Ops next morning sees state, reviews `_asw_perf_reports`, decides: (a) allow continuing (reset `KILL_SWITCH_OUTREACH=false`) or (b) investigate.
+8. **Outcome:** daily cap enforced; cutover requires ops manual review (not auto).
+
+#### Scenario 4 — Feature flag rollout C-08 follow-up engine
+
+1. Deploy C-08 runtime implementation. `FEATURE_C08_FOLLOWUP_ENGINE=false` by default.
+2. TEST env: ops sets `FEATURE_C08_FOLLOWUP_ENGINE=true` via Apps Script editor → Script Properties.
+3. Trigger test batch of 5 leads, verify 3-stage sequence generates queue rows at T+3, T+7.
+4. Validate: `_asw_logs` shows `followup_engine_run` CS2 step, `_asw_perf_reports` shows `followup_yield_rate`.
+5. PROD env: ops sets `FEATURE_C08_FOLLOWUP_ENGINE=true` in PROD only.
+6. Monitor for 7 days via C-10 reports. Check `reply_rate`, `unsubscribe_rate` deltas.
+7. Stable: plan cleanup task to remove flag from code (post-60d stability).
+8. **Outcome:** gradual rollout; env-gated; cleanup planned.
+
+#### Scenario 5 — DRY_RUN → KILL_SWITCH_ALL_WRITES migration
+
+1. Current state: `DRY_RUN=true` in `Config.gs` (VERIFIED).
+2. Deploy C-11 runtime helper: `isKillSwitchActive_('ALL_WRITES')` with fallback to `DRY_RUN` if `KILL_SWITCH_ALL_WRITES` unset.
+3. Ops in TEST: set `KILL_SWITCH_ALL_WRITES=true` Script Property.
+4. Verify: all writes blocked (identical behavior to DRY_RUN=true).
+5. Ops toggles `KILL_SWITCH_ALL_WRITES=false` → verify writes happen.
+6. Repeat in PROD.
+7. Cleanup task: remove DRY_RUN from Config.gs + fallback code path; `KILL_SWITCH_ALL_WRITES` is sole source.
+8. **Outcome:** formalized kill switch; Config.gs cleanup; runtime behavior identical.
+
+#### Scenario 6 — Provider switch Gmail → SendGrid
+
+1. Current state: `EMAIL_PROVIDER='GMAIL'` (PROPOSED default).
+2. Deploy SendGrid adapter (C-06 runtime).
+3. Ops sets `SENDGRID_API_KEY` Script Property (new SECRET).
+4. Ops sets `EMAIL_PROVIDER='SENDGRID'`.
+5. `KILL_SWITCH_GMAIL` stays `false` (rollback path preserved).
+6. Next CS2 run: sender reads `EMAIL_PROVIDER` → routes to SendGrid adapter → sends.
+7. Monitor via C-10 `send_success_rate`, `bounce_rate`.
+8. If regression: `KILL_SWITCH_GMAIL=false` → set `EMAIL_PROVIDER='GMAIL'` → immediate rollback.
+9. **Outcome:** zero-downtime provider switch with rollback safety.
+
+#### Scenario 7 — Compliance hard-stop (EU-only sends)
+
+1. Legal requirement: EU-only recipients allowed (GDPR conservative interpretation).
+2. Deploy PROPOSED compliance filter (future task).
+3. Ops sets `FEATURE_COMPLIANCE_EU_ONLY=true` (PROPOSED — not in v1.0 table, added here as illustration).
+4. C-04 sendability gate reads flag → non-EU leads get `SEND_BLOCKED` outcome with `COMPLIANCE_EU_ONLY` reason.
+5. C-10 reports show `compliance_hard_stop_rate` spike.
+6. If legal changes mind: set `FEATURE_COMPLIANCE_EU_ONLY=false` → next gate evaluation returns previous outcome.
+7. Audit trail: `_asw_logs` `feature_flag_enabled` event + C-09 exceptions with `compliance_hard_stop` type.
+8. **Outcome:** compliance as reversible feature flag; audit preserved.
+
+### 12. Testing / verification
+
+**Unit tests:**
+- `getConfigValue_(key)` returns cached value per-run; cache invalidated between runs.
+- `getSecret_(key)` returns fresh value per-call; never cached; returns null if unset.
+- `isKillSwitchActive_(scope)` returns true/false; respects precedence (GLOBAL > ENV > CATEGORY > PROVIDER / API_SURFACE).
+- `checkBudget_(guardrail_id)` reads ledger, compares to threshold, returns state (OK / WARNING / CRITICAL).
+- `isFeatureEnabled_(flag_id)` reads per-run cached value.
+
+**Integration tests (TEST env only):**
+- Kill switch activation end-to-end: set → run ingest → verify abort after 1 iteration + log event.
+- Budget threshold crossing: set `BUDGET_PER_RUN_DEAD_LETTER_MAX=2` → force 3 dead-letters → verify safe-stop event.
+- Feature flag rollout: set `FEATURE_C08_FOLLOWUP_ENGINE=true` in TEST → trigger run → verify follow-up queue rows created.
+- Env guard still fires: confirm `envGuard_()` throws if SS ID mismatches env BEFORE any config change applies.
+
+**Diagnostics (ops tools, PROPOSED):**
+- `diagConfigState()` — full layered dump (CONFIG / LIMIT / BUDGET / KILL_SWITCH / FEATURE); **secrets are redacted** (key names present, values replaced by `***`).
+- `diagKillSwitchState()` — dump all 14 KILL_SWITCH_* properties + resolved precedence.
+- `diagBudgetLedger()` — current period counters vs. thresholds.
+- `diagSecretInventory()` — names + storage locations + last-rotated-at; NO VALUES ever.
+
+**Acceptance criteria pri implementaci:**
+- Zadny test leaks secret into Logger / logs / fixtures.
+- Env guard must still trigger before any config write path.
+- Budget tracking survives Script Property reset (stored in `_asw_budget_ledger` preferred).
+
+### 13. Anti-patterns (DO/DONT)
+
+| Anti-pattern | Why wrong | Correct alternative |
+|---|---|---|
+| `KILL_SWITCH_ALL=20` (int) | Kill switch je binarni; 20 je count → LIMIT nebo BUDGET | `KILL_SWITCH_ALL=true/false`; count jde do `BUDGET_PER_RUN_DEAD_LETTER_MAX` |
+| `SERPER_CONFIG = { apiKey: '...', endpoint: '...', gl: 'cz' }` | Secret + config mixed v jedne dict | Split: SECRET `SERPER_API_KEY` (PropertiesService) + CONFIG `SERPER_CONFIG.ENDPOINT`/`GL`/`HL` (Config.gs) |
+| `FEATURE_C08_FOLLOWUP_ENGINE=50` | Feature flag je binarni; 50 je limit | Split: FEATURE `FEATURE_C08_FOLLOWUP_ENGINE=true/false` (rollout toggle) + LIMIT `LIMIT_C08_FOLLOWUP_BATCH_SIZE=50` (per-run cap) |
+| `ENABLE_WEBHOOK=false` jako emergency stop | ENABLE_WEBHOOK je routing CONFIG; emergency = kill switch | Split: CONFIG `ENABLE_WEBHOOK` (routing) + KILL_SWITCH `KILL_SWITCH_PREVIEW` (emergency) |
+| `aswLog_('Sent email with token ' + FRONTEND_API_SECRET)` | Secret v logu | `aswLog_('Sent email; token=***')` — always redact |
+| `BUDGET_DAILY_EMAIL_SEND_MAX` v Config.gs | Budget je runtime-tunable; ops musi editovat bez redeploy | `BUDGET_DAILY_EMAIL_SEND_MAX` Script Property |
+| `KILL_SWITCH_ALL=true` default | Kill switch default true = system stojí pri deploy | Kill switch always `false` default; operator opt-in to stop |
+| `FEATURE_C10_PERF_REPORT_RUNTIME=true` default pri deploy novy feature | Feature flag default true = rollout instant, no safety | Feature flag always `false` default; gradual rollout |
+| `DRY_RUN=true` permanently in PROD Config.gs | DRY_RUN je kill switch, nemel by byt stable config | Migrate to `KILL_SWITCH_ALL_WRITES` Script Property; ops-manageable |
+| `EMAIL_PROVIDER` as kill switch ("switch to 'NONE' to stop") | Provider selection ≠ kill switch | Separate `KILL_SWITCH_EMAIL_ALL` |
+| Reading `PREVIEW_WEBHOOK_SECRET` into `diagConfigState()` output | Secret musi byt redacted | Diag tools redact by key-name pattern (starts with `*_SECRET` / `*_KEY` / `*_TOKEN`) |
+| `getConfigValue_('SERPER_API_KEY')` (same helper as CONFIG) | Secret musí jit pres `getSecret_()` + logging guard | Different helpers per layer; secret helper logs access event |
+
+### 14. Auditability / observability
+
+**PROPOSED `_asw_logs` event types (9):**
+- `config_value_changed` — ops editovat CONFIG Script Property; payload `{ key, old_value, new_value }`; **secret values NIKDY v payload**.
+- `secret_rotated` — secret rotation event; payload `{ secret_id, rotated_by, rotated_at }`; VALUE NIKDY.
+- `limit_exceeded` — per-stage limit hit; payload `{ limit_id, stage, current, max }`.
+- `budget_warning_crossed` — BUDGET threshold_warning crossed; payload `{ guardrail_id, current, threshold }`.
+- `budget_critical_crossed` — BUDGET threshold_critical crossed; payload `{ guardrail_id, current, threshold, safe_stop_triggered: bool }`.
+- `kill_switch_triggered` — kill switch activation detected pri prvni kontrola; payload `{ scope, switch_id, activated_at, last_completed_item_id }`.
+- `kill_switch_reset` — kill switch back to false; payload `{ scope, switch_id, duration_active_ms, items_skipped_count }`.
+- `feature_flag_enabled` / `feature_flag_disabled` — flag flip detected; payload `{ flag_id, previous, current, changed_by }`.
+- `env_guard_violation` — envGuard_ caught mismatch; payload `{ expected_env, actual_ss_id, expected_ss_id }` (already PROPOSED pattern in EnvConfig.gs; formalized here).
+
+**Cross-ref graph:**
+
+```
+Config.gs / Script Properties  (source of truth)
+       │
+       ├──► _asw_logs (9 C-11 event types)
+       │         │
+       │         └──► _asw_perf_reports (C-10 operational block)
+       │                  │
+       │                  └──► data_completeness_flags_json (degradation audit)
+       │
+       ├──► _asw_budget_ledger (C-11 PROPOSED sheet, 12 fields)
+       │         │
+       │         └──► BG-* guardrail checks (runtime)
+       │
+       └──► envGuard_ (VERIFIED pattern) → env mismatch → throw
+```
+
+**`_asw_budget_ledger` PROPOSED schema (12 fields):**
+
+| Field | Type | Notes |
+|---|---|---|
+| `ledger_id` | string | Primary key, format `BL-{YYYY-MM-DD}-{NNNNN}` |
+| `guardrail_id` | string | BG-* |
+| `period_start_at` | iso | Period boundary |
+| `period_end_at` | iso | Period boundary |
+| `measurement_unit` | string | count / bytes / ms / CZK |
+| `counter_value` | number | Running count for period |
+| `warning_threshold` | number | At trigger time |
+| `critical_threshold` | number | At trigger time |
+| `state` | enum | OK / WARNING / CRITICAL |
+| `last_incremented_at` | iso | Last update |
+| `last_incrementing_run_id` | string | cs2_run_id |
+| `notes` | string | Optional |
+
+**Diagnostic tools summary (4):**
+- `diagConfigState()` — all layers, secrets redacted.
+- `diagKillSwitchState()` — kill switches only.
+- `diagBudgetLedger()` — current period ledger state.
+- `diagSecretInventory()` — secret names + metadata, NO VALUES.
+
+### 15. Known limitations
+
+- **Apps Script Script Properties are not audit-logged natively** by Google; ops edits musi byt manually tracked pres `config_value_changed` helper (implementacni task must wrap setters).
+- **Rotation automation is out of scope** (v1.0 manual ops; `diagSecretAge()` advisory future).
+- **No remote config service** (HashiCorp Vault, AWS Parameter Store, GCP Secret Manager) — Script Properties + .env only.
+- **Frontend `.env.local` edits require Vercel redeploy** — Next.js runtime limitation; mitigate by using Vercel dashboard env var settings (no redeploy needed for runtime-read env).
+- **Budget ledger write-amplification** — kazda chargeable operation = 1 ledger row append. For > 5K ops/day consider aggregation helper; `BUDGET_LEDGER_STRATEGY=LOG_AGGREGATION` alternativa.
+- **Multi-tenant scoping out of scope** — GLOBAL / ENV / STAGE / PROVIDER only, ne per-organization.
+- **Secret encryption at rest** — Script Properties encrypted by Google (transparent); no additional layer.
+- **Kill switch detection relies on codebase compliance** — each CS2 step must call `isKillSwitchActive_()` at entry. If a step skips check, kill switch is silent for that step. Implementacni task musi enforce pres linting / review.
+- **Script Property read latency** — ~50-200ms per read; cache TTL patterns mitigate. Fresh-every-call pro SECRET is intentional trade-off.
+- **Config change history** — Git historie slouzi pro `Config.gs`; Script Property edits jsou out-of-band (no Git log). Audit pres `config_value_changed` events je best-effort (vyzaduje helper wrapper).
+- **Budget reset timezone** — `BUDGET_RESET_TIMEZONE=Europe/Prague` default; DST transition edge cases not formally specified (24h definitional "day" may shift by 1h twice a year).
+- **Race conditions at period boundary** — concurrent increments at midnight may double-count or miss. Mitigation: LockService around ledger increment (existing CS3 pattern).
+- **Feature flag cleanup debt** — flags that stay `true` permanently accumulate. No automatic enforcement of cleanup; requires periodic ops review.
+- **Circuit breaker maturity** — manual kill switch je zaklad; advanced auto-circuit-breaker (open/half-open/closed states + automatic reset on recovery) je PROPOSED future.
+- **Legal compliance** — GDPR / CCPA / SOC2 audit trails pro config changes are out-of-scope formal compliance; `_asw_logs` pattern is foundational but not certified.
+
+### 16. Handoff / boundary rules
+
+| Dependency | C-11 handoff contract |
+|---|---|
+| **CS2** (workflow orchestrator) | Kazdy CS2 step MUST call `isKillSwitchActive_(scope)` at step entry. Kill switch active → emit `kill_switch_triggered` (first hit per run × scope) + return early (no step execution). Step MUST call `checkBudget_(guardrail_id)` for chargeable operations. Budget critical → emit `budget_critical_crossed` + safe-stop. |
+| **C-04** (sendability gate) | Gate reads `FEATURE_C04_SENDABILITY_GATE_RUNTIME=true` to activate runtime. Gate evaluator respects `KILL_SWITCH_OUTREACH` (skips evaluation if kill switch active). Future `FEATURE_COMPLIANCE_*` flags may feed additional blocking reasons. |
+| **C-05** (outbound queue) | Queue worker respects `KILL_SWITCH_OUTREACH` + `KILL_SWITCH_ALL_WRITES` + `KILL_SWITCH_EMAIL_ALL`. Batch size from `LIMIT_C05_OUTBOUND_BATCH_SIZE`. Concurrency from `LIMIT_C05_OUTBOUND_MAX_CONCURRENCY`. Send increments `BUDGET_DAILY_EMAIL_SEND_*`. |
+| **C-06** (provider abstraction) | Sender reads `EMAIL_PROVIDER` CONFIG to select adapter. Respects `KILL_SWITCH_GMAIL` / `KILL_SWITCH_SENDGRID` / `KILL_SWITCH_EMAIL_ALL`. Per-send timeout from `LIMIT_C06_SEND_TIMEOUT_MS`. Failed send increments BG-PROV-OPS guardrail. |
+| **C-07** (inbound ingest) | Ingest worker respects `KILL_SWITCH_INBOUND`. Feature flag `FEATURE_C07_INBOUND_INGEST` for activation. |
+| **C-08** (follow-up engine) | Engine respects `KILL_SWITCH_OUTREACH` (inherited) + `FEATURE_C08_FOLLOWUP_ENGINE` (opt-in). Batch size from `LIMIT_C08_FOLLOWUP_BATCH_SIZE`. |
+| **C-09** (exception queue) | Exception detector respects `KILL_SWITCH_EXCEPTIONS`. Kill switch events are NOT exceptions (routine ops, ne unexpected state). |
+| **C-10** (performance report) | Report consumes C-11 events (9 types) → operational metrics block. `data_completeness_flags_json` tracks if C-11 guardrails caused INCOMPLETE status. Alert thresholds from C-10 contract may feed BG-SILENT-DEGRADATION guardrail. |
+| **BX1** (frontend write-path doPost) | doPost respects `KILL_SWITCH_FRONTEND_WRITE_PATH` + `KILL_SWITCH_ALL_WRITES`. FRONTEND_API_SECRET (S3) timing-safe compared (existing pattern). |
+| **A-04** (scrape) | Respects `KILL_SWITCH_INGEST`. Pages-per-portal from `LIMIT_A04_SCRAPE_PAGES_PER_PORTAL`. Timeout from `LIMIT_A04_SCRAPE_BATCH_TIMEOUT_MS`. |
+| **A-06** (web check) | Respects `KILL_SWITCH_INGEST` + `KILL_SWITCH_SERPER`. QPS from `LIMIT_A06_WEBCHECK_QPS`. Calls increment `BUDGET_DAILY_SERPER_CALLS_*`. |
+| **Future ConfigManager (C-11 impl)** | Central helpers: `getConfigValue_(key)`, `getSecret_(key)`, `getLimit_(stage, key)`, `getBudgetState_(guardrail_id)`, `isKillSwitchActive_(scope)`, `isFeatureEnabled_(flag_id)`. Cache rules per layer. |
+| **Future `_asw_budget_ledger` sheet** | 12-field append-only schema (sekce 14). Created by impl task. |
+| **Future config change UI (frontend task)** | Web dashboard for ops to toggle kill switches + view budget state without Apps Script editor. |
+| **Future secret rotation reminder** | Optional v2.0 — `diagSecretAge()` tool + periodic reminder for 90d-recommended secrets. |
+
+### 17. Non-goals (explicitní)
+
+- Neresi runtime `ConfigManager` / `getConfigValue_()` / `isKillSwitchActive_()` / `checkBudget_()` helper implementation.
+- Neresi creation of `_asw_budget_ledger` sheet.
+- Neresi zapisy do `apps-script/Config.gs` / Script Properties nastaveni v runtime.
+- Neresi frontend UI pro kill switch toggling.
+- Neresi secret rotation automation.
+- Neresi remote config service integration.
+- Neresi frontend feature flag SDK client-side.
+- Neresi per-user / per-operator scoped config (multi-tenant).
+- Neresi A/B testing framework.
+- Neresi cost accounting BI (C-10 + external BI task).
+- Neresi SLA monitoring for config changes (ops dashboard).
+- Neresi config versioning / history (Git + `_asw_logs` events = interim).
+- Neresi encryption key management beyond Google-managed encryption at rest.
+- Neresi legal compliance automation (GDPR, CCPA — separate compliance task).
+- Neresi multi-tenant org scoping.
+- Neresi real-time alerting infrastructure pro budget criticals (C-10 alerting integration task).
+- Neresi circuit breaker pattern automation.
+- Neresi Split.io / LaunchDarkly / Unleash integration.
+
+### 18. Acceptance checklist
+
+- [x] Configuration planes hard-separated do 6 ortogonalnich vrstev (CONFIG / SECRET / LIMIT / BUDGET / KILL_SWITCH / FEATURE) — sekce 3.
+- [x] Hard-separation invariant + zakazane kolapsy (sekce 3.7).
+- [x] DRY_RUN reclassification na `KILL_SWITCH_ALL_WRITES` + migrace plan (sekce 3.8).
+- [x] EMAIL_SYNC_ENABLED reclassification na `FEATURE_EMAIL_SYNC` (sekce 3.9).
+- [x] Canonical config table s 13-field kontrakt per entry + VERIFIED + PROPOSED entries (sekce 4).
+- [x] Secrets inventory s 10-field kontrakt + 5 VERIFIED + 2 PROPOSED (sekce 5).
+- [x] Per-stage execution limits pro 9 pipeline stages (sekce 6).
+- [x] Budget guardrail 10-field kontrakt + 5 category patterns (sekce 7).
+- [x] Kill switch model (5-scope taxonomy + activation + safe-stop semantics + reset + testing + idempotency + escalation) — sekce 8.
+- [x] Feature flag per-flag kontrakt + 3 rollout patterns + state safety + anti-pattern (sekce 9).
+- [x] State safety rules pro mid-run config changes (sekce 10).
+- [x] 7 sample scenarios s full walkthrough (sekce 11).
+- [x] Testing section (unit + integration + diagnostics) — sekce 12.
+- [x] Anti-patterns DO/DONT table 12 radku (sekce 13).
+- [x] Auditability / observability: 9 `_asw_logs` event types + cross-ref graph + `_asw_budget_ledger` 12-field schema + 4 diagnostic tools — sekce 14.
+- [x] Known limitations (sekce 15).
+- [x] Handoff per-downstream-task (13 radku: CS2, C-04..C-10, BX1, A-04, A-06, future 4) — sekce 16.
+- [x] Non-goals explicit (sekce 17).
+- [x] Dependency narrowing `C-02, C-06, C-10` → `CS2, C-06, C-10` explicitní (uvod + task record).
+- [x] VERIFIED / INFERRED / PROPOSED label summary (sekce 19).
+- [x] Navazuje na existujici infra (EnvConfig.gs + `envGuard_` + doPost timing-safe compare + Script Properties + `_asw_logs`).
+- [x] Hard-separation respects ostatni C-tasky (queue status ≠ lifecycle per C-05; gate outcome ≠ lifecycle per C-04; funnel ≠ queue ≠ outcome per C-10).
+- [x] Sample scenarios pokrývají operational / financial / rollout / security / compliance axes.
+
+### 19. PROPOSED vs INFERRED vs VERIFIED label summary
+
+**VERIFIED (existuje v repo, runtime-proven):**
+- `ASW_ENV` / `ASW_SPREADSHEET_ID` / `PREVIEW_WEBHOOK_SECRET` Script Properties (EnvConfig.gs:51/62/104).
+- `SERPER_API_KEY` Script Property (LegacyWebCheck.gs:24 + :134).
+- `FRONTEND_API_SECRET` Script Property (WebAppEndpoint.gs doPost handler).
+- `DRY_RUN` / `ENABLE_WEBHOOK` / `WEBHOOK_URL` / `BATCH_SIZE` / `SERPER_CONFIG` / `EMAIL_SYNC_*` / `EMAIL_MAILBOX_ACCOUNT` Config.gs constants (apps-script/Config.gs:14-201).
+- `envGuard_()` pattern (mismatch throws before any write) — EnvConfig.gs:119-140.
+- Timing-insensitive compare pattern pro shared secrets — WebAppEndpoint.gs doPost + getPreviewWebhookSecret_ callers.
+- LockService pattern (CS3) — re-used in doPost handler.
+- `ASW_*` prefix pattern pro env-related Script Properties.
+- `_asw_logs` append-only audit pattern (CS2 / CS3 / A-09).
+- `_envConfigCache` singleton cache pattern (EnvConfig.gs) — reuse pattern for per-run config caching.
+
+**INFERRED (dependent na PROPOSED vrstvach; VERIFIED po implementaci):**
+- `DRY_RUN` hybrid kill-switch role — technicky funguje, formalne neklasifikovano; INFERRED target reclassification.
+- `EMAIL_SYNC_ENABLED` hybrid feature-flag role — technicky funguje, INFERRED target reclassification.
+- Safe-stop semantics na mid-run — per-step check interval zvoleny z risk rationale (kompromise between fast reaction a Script Property read pressure).
+- Script Property read caching — per-run (LIMIT / CONFIG / FEATURE) vs per-step (KILL_SWITCH / BUDGET) vs per-use (SECRET); INFERRED z risk + performance trade-offs.
+- Kill switch detection coverage — zavisi na kazdem CS2 step volajicim `isKillSwitchActive_()`; INFERRED enforcement pres code review / linting.
+- Daily-midnight reset timezone — `Europe/Prague` default INFERRED z ops locale.
+- Rotation cadence 90d-recommended — industry benchmark, ne specificky mandat.
+- Budget period boundaries (per-day / per-run / per-hour) — per-guardrail design decision.
+- Kill switch precedence order (GLOBAL > ENV > CATEGORY > PROVIDER / API_SURFACE) — INFERRED z risk rationale (broadest switch wins).
+- `BUDGET_LEDGER_STRATEGY` default `SHEET` — INFERRED z scale + auditability trade-off.
+- `KILL_SWITCH_CHECK_INTERVAL_MS=5000` default — INFERRED z reaction time vs read pressure balance.
+- Budget auto-trigger of kill switches (BG-PROV-OPS auto-sets KILL_SWITCH_SERPER) — INFERRED policy decision.
+
+**PROPOSED FOR C-11 (nove artefakty materializovane implementacnim taskem):**
+- 6-layer canonical config taxonomy (CONFIG / SECRET / LIMIT / BUDGET / KILL_SWITCH / FEATURE) — sekce 3.
+- Hard-separation invariant a zakazane kolapsy (sekce 3.7).
+- 13-column canonical config table schema (sekce 4).
+- 10-field secret contract template (sekce 5).
+- 10-field budget guardrail contract template (sekce 7).
+- 5 budget guardrail category patterns BG-PROV-OPS / BG-RETRY-EXPLOSION / BG-COST-EXPLOSION / BG-RUNAWAY-BATCH / BG-SILENT-DEGRADATION.
+- 5-level kill switch scope taxonomy (GLOBAL / ENV / CATEGORY / PROVIDER / API_SURFACE) + precedence order.
+- 8-field feature flag contract template + 3 rollout patterns.
+- 4 CONFIG Script Properties (`EMAIL_PROVIDER`, `BUDGET_RESET_TIMEZONE`, `KILL_SWITCH_CHECK_INTERVAL_MS`, `BUDGET_LEDGER_STRATEGY`).
+- 9 LIMIT_* Script Properties.
+- 7 BUDGET_* Script Properties.
+- 14 KILL_SWITCH_* Script Properties.
+- 10 FEATURE_* Script Properties.
+- 2 PROPOSED SECRETs (`SENDGRID_API_KEY`, `MAILGUN_API_KEY`, conditional on `EMAIL_PROVIDER`).
+- `_asw_budget_ledger` 12-field sheet (append-only).
+- 9 PROPOSED `_asw_logs` event types (`config_value_changed`, `secret_rotated`, `limit_exceeded`, `budget_warning_crossed`, `budget_critical_crossed`, `kill_switch_triggered`, `kill_switch_reset`, `feature_flag_enabled`, `feature_flag_disabled`).
+- 4 diagnostic tools (`diagConfigState`, `diagKillSwitchState`, `diagBudgetLedger`, `diagSecretInventory`).
+- Runtime API surface (`getConfigValue_`, `getSecret_`, `getLimit_`, `getBudgetState_`, `isKillSwitchActive_`, `isFeatureEnabled_`).
+- DRY_RUN → KILL_SWITCH_ALL_WRITES migration plan (sekce 3.8).
+- EMAIL_SYNC_ENABLED → FEATURE_EMAIL_SYNC migration plan (sekce 3.9).
+- Per-stage execution limit inventory for 9 stages (sekce 6).
+- 7 sample scenarios (sekce 11).
+- 12-row anti-pattern table (sekce 13).
