@@ -6817,7 +6817,7 @@ Kazdy entry ma 13-field kontrakt:
 | `BUDGET_DAILY_PREVIEW_RENDER_MAX` | GLOBAL | int | 200 | 0..1000 | Daily preview renders |
 | `BUDGET_PER_RUN_DEAD_LETTER_MAX` | GLOBAL | int | 20 | 0..100 | Per-CS2-run dead-letter threshold |
 
-**KILL_SWITCH (13):**
+**KILL_SWITCH (14):**
 
 | key | scope | type | default | notes |
 |---|---|---|---|---|
