@@ -7071,11 +7071,13 @@ Detailed behavior contract.
 - Next evaluation window: kill switch check returns `false` → stage resumes.
 - Log: `kill_switch_reset` event s `scope`, `reset_at_ts`, `duration_active_ms`, `items_skipped_count`.
 
-#### 8.5 Testing
+#### 8.5 Testing — test DESIGN (SPEC-only)
 
-- **Unit test pattern:** mock Script Property → call `isKillSwitchActive_('INGEST')` → assert true/false.
-- **Integration test (TEST env):** set `KILL_SWITCH_INGEST=true` → trigger ingest run → assert abort after 1 iteration + event present in `_asw_logs`.
-- **Diagnostic tool:** `diagKillSwitchState()` reads all 14 PROPOSED KILL_SWITCH_* Script Properties + returns readonly dump.
+**Status:** C-11 je SPEC-only task. Nize uvedene unit / integration test patterns jsou **test DESIGN** (kontrakt pro budouci runtime implementaci), NE runtime-executed test results. Kill switch runtime execution (napr. actual set of `KILL_SWITCH_INGEST=true` + skutecny ingest run) je **PENDING implementacnim taskem** — C-11 sam ConfigManager / `isKillSwitchActive_()` helper neimplementuje.
+
+- **Unit test pattern (DESIGN):** mock Script Property → call `isKillSwitchActive_('INGEST')` → assert true/false.
+- **Integration test pattern (DESIGN, TEST env target):** set `KILL_SWITCH_INGEST=true` → trigger ingest run → assert abort after 1 iteration + event present in `_asw_logs`. **Runtime execution pending.**
+- **Diagnostic tool (DESIGN):** `diagKillSwitchState()` reads all 14 PROPOSED KILL_SWITCH_* Script Properties + returns readonly dump. **Helper neimplementovan v C-11.**
 
 #### 8.6 Idempotency
 
@@ -7228,16 +7230,18 @@ Key invariants:
 7. Audit trail: `_asw_logs` `feature_flag_enabled` event + C-09 exceptions with `compliance_hard_stop` type.
 8. **Outcome:** compliance as reversible feature flag; audit preserved.
 
-### 12. Testing / verification
+### 12. Testing / verification — test DESIGN (SPEC-only)
 
-**Unit tests:**
+**Status:** C-11 je SPEC-only task. Cela sekce popisuje **test contracts** (kontrakt pro budouci runtime tests), NE runtime-executed tests. Unit / integration / diagnostic runtime execution je **PENDING implementacnim taskem** (`apps-script/ConfigManager.gs` + Script Properties setup + `_asw_budget_ledger` sheet). Kdykoli tato sekce rika "test asserts X", cti jako "budouci runtime test bude assertovat X per kontrakt zde".
+
+**Unit tests (DESIGN — runtime execution pending):**
 - `getConfigValue_(key)` returns cached value per-run; cache invalidated between runs.
 - `getSecret_(key)` returns fresh value per-call; never cached; returns null if unset.
 - `isKillSwitchActive_(scope)` returns true/false; respects precedence (GLOBAL > ENV > CATEGORY > PROVIDER / API_SURFACE).
 - `checkBudget_(guardrail_id)` reads ledger, compares to threshold, returns state (OK / WARNING / CRITICAL).
 - `isFeatureEnabled_(flag_id)` reads per-run cached value.
 
-**Integration tests (TEST env only):**
+**Integration tests (DESIGN, TEST env target — runtime execution pending):**
 - Kill switch activation end-to-end: set → run ingest → verify abort after 1 iteration + log event.
 - Budget threshold crossing: set `BUDGET_PER_RUN_DEAD_LETTER_MAX=2` → force 3 dead-letters → verify safe-stop event.
 - Feature flag rollout: set `FEATURE_C08_FOLLOWUP_ENGINE=true` in TEST → trigger run → verify follow-up queue rows created.
@@ -7394,11 +7398,11 @@ Config.gs / Script Properties  (source of truth)
 - [x] Secrets inventory s 10-field kontrakt + 5 VERIFIED + 2 PROPOSED (sekce 5).
 - [x] Per-stage execution limits pro 9 pipeline stages (sekce 6).
 - [x] Budget guardrail 10-field kontrakt + 5 category patterns (sekce 7).
-- [x] Kill switch model (5-scope taxonomy + activation + safe-stop semantics + reset + testing + idempotency + escalation) — sekce 8.
+- [x] Kill switch model (5-scope taxonomy + activation + safe-stop semantics + reset + test DESIGN + idempotency + escalation) — sekce 8. **SPEC-level test design (sekce 8.5) hotovy; runtime test execution PENDING implementacnim taskem — C-11 sam kill switch nerunuje, definuje pouze kontrakt.**
 - [x] Feature flag per-flag kontrakt + 3 rollout patterns + state safety + anti-pattern (sekce 9).
 - [x] State safety rules pro mid-run config changes (sekce 10).
 - [x] 7 sample scenarios s full walkthrough (sekce 11).
-- [x] Testing section (unit + integration + diagnostics) — sekce 12.
+- [x] Testing section — TEST DESIGN (unit + integration + diagnostics kontrakty) — sekce 12. **SPEC-only: test execution v TEST / PROD env je PENDING implementacnim taskem.**
 - [x] Anti-patterns DO/DONT table 12 radku (sekce 13).
 - [x] Auditability / observability: 9 `_asw_logs` event types + cross-ref graph + `_asw_budget_ledger` 12-field schema + 4 diagnostic tools — sekce 14.
 - [x] Known limitations (sekce 15).
