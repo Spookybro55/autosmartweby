@@ -10,6 +10,7 @@
     "docs:new-task": "node scripts/docs/create-task-record.mjs",
     "test:b03": "node --experimental-strip-types --test scripts/tests/template-family.test.ts",
     "test:b04": "node --experimental-strip-types --test scripts/tests/preview-render-endpoint.test.ts",
-    "test:b05": "node scripts/test-b05-preview-webhook.mjs"
+    "test:b05": "node scripts/test-b05-preview-webhook.mjs",
+    "test:b06": "node scripts/test-b06-review-writeback.mjs"
   }
 }

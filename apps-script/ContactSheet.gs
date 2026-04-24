@@ -7,19 +7,22 @@
  *  Source sheet remains the single source of truth.
  *
  *  EDITABLE COLUMNS (write-back to source):
- *    Stav ✎             → outreach_stage
- *    Další krok ✎       → next_action
- *    Poslední kontakt ✎ → last_contact_at
- *    Follow-up ✎        → next_followup_at
- *    Poznámka ✎         → sales_note
+ *    Stav ✎              → outreach_stage
+ *    Další krok ✎        → next_action
+ *    Poslední kontakt ✎  → last_contact_at
+ *    Follow-up ✎         → next_followup_at
+ *    Poznámka ✎          → sales_note
+ *    Rozhodnutí ✎ (B-06) → review_decision + preview_stage + reviewed_at + reviewed_by
+ *    Důvod revize ✎      → review_note
  *
- *  Layout:
- *    Rows 1-4:   KPI dashboard
- *    Row  5:     Table header (frozen)
- *    Row  6+:    Data
- *    Cols 1-6:   Read-only info
- *    Cols 7-11:  Editable workflow (write-back)
- *    Cols 12-19: Hidden detail group
+ *  Layout (post B-06):
+ *    Rows 1-4:    KPI dashboard
+ *    Row  5:      Table header (frozen)
+ *    Row  6+:     Data
+ *    Cols 1-6:    Read-only info
+ *    Cols 7-11:   Editable workflow (outreach write-back)
+ *    Cols 12-13:  Editable review (B-06 review write-back)
+ *    Cols 14-21:  Hidden detail group (Lead ID at col 21)
  * ============================================================
  */
 
@@ -29,15 +32,20 @@ var TABLE_DATA_START_  = 6;
 
 /* ── Editable column positions (1-based) and source field mapping ── */
 var FIRST_EDITABLE_COL_ = 7;
-var LAST_EDITABLE_COL_  = 11;
-var CRM_ROW_COL_        = 19;
+var LAST_EDITABLE_COL_  = 13;  // B-06: extended from 11 (outreach) to 13 (incl review cols)
+var REVIEW_DECISION_COL_ = 12;
+var REVIEW_NOTE_COL_     = 13;
+var CRM_ROW_COL_        = 21;  // B-06: shifted from 19 (+2 for review cols)
 
 var WRITEBACK_MAP_ = {};
-WRITEBACK_MAP_[7]  = { field: 'outreach_stage',  reverseHumanize: true };
-WRITEBACK_MAP_[8]  = { field: 'next_action',     reverseHumanize: false };
-WRITEBACK_MAP_[9]  = { field: 'last_contact_at',  reverseHumanize: false };
-WRITEBACK_MAP_[10] = { field: 'next_followup_at', reverseHumanize: false };
-WRITEBACK_MAP_[11] = { field: 'sales_note',       reverseHumanize: false };
+WRITEBACK_MAP_[7]  = { field: 'outreach_stage',   reverseHumanize: true,  kind: 'plain' };
+WRITEBACK_MAP_[8]  = { field: 'next_action',      reverseHumanize: false, kind: 'plain' };
+WRITEBACK_MAP_[9]  = { field: 'last_contact_at',  reverseHumanize: false, kind: 'plain' };
+WRITEBACK_MAP_[10] = { field: 'next_followup_at', reverseHumanize: false, kind: 'plain' };
+WRITEBACK_MAP_[11] = { field: 'sales_note',       reverseHumanize: false, kind: 'plain' };
+// B-06 review cells — 'review' kind triggers atomic multi-cell handler.
+WRITEBACK_MAP_[12] = { field: 'review_decision',  reverseHumanize: false, kind: 'review_decision' };
+WRITEBACK_MAP_[13] = { field: 'review_note',      reverseHumanize: false, kind: 'review_note' };
 
 /* ── Human-friendly status values ── */
 var HUMAN_STAV_VALUES_ = [
@@ -48,6 +56,16 @@ var HUMAN_STAV_VALUES_ = [
 var NEXT_ACTION_VALUES_ = [
   'Oslovit', 'Zavolat', 'Poslat e-mail', '\u010cekat na odpov\u011b\u010f',
   'Ud\u011blat follow-up', 'Domluvit sch\u016fzku', 'Poslat nab\u00eddku', 'Zkontrolovat pozd\u011bji'
+];
+
+/* ── B-06: Human-friendly review decision dropdown ── */
+// Empty first entry = "no decision" (clears prior decision if any).
+// Accented values are canonical; deaccented aliases accepted on write.
+var HUMAN_REVIEW_VALUES_ = [
+  '',                        // no decision
+  'Schv\u00e1lit',           // APPROVE
+  'Zam\u00edtnout',          // REJECT
+  'Zm\u011bny'               // CHANGES_REQUESTED
 ];
 
 
@@ -155,22 +173,24 @@ var VISIBLE_HEADERS_ = [
   'Preview',                     // 4  RO
   'Telefon',                     // 5  RO
   'E-mail',                      // 6  RO
-  'Stav \u270e',                 // 7  EDIT
-  'Dal\u0161\u00ed krok \u270e', // 8  EDIT
-  'Posledn\u00ed kontakt \u270e',// 9  EDIT
-  'Follow-up \u270e',            // 10 EDIT
-  'Pozn\u00e1mka \u270e'         // 11 EDIT
+  'Stav \u270e',                 // 7  EDIT (outreach_stage)
+  'Dal\u0161\u00ed krok \u270e', // 8  EDIT (next_action)
+  'Posledn\u00ed kontakt \u270e',// 9  EDIT (last_contact_at)
+  'Follow-up \u270e',            // 10 EDIT (next_followup_at)
+  'Pozn\u00e1mka \u270e',        // 11 EDIT (sales_note)
+  'Rozhodnut\u00ed \u270e',      // 12 EDIT (review_decision, B-06)
+  'D\u016fvod revize \u270e'     // 13 EDIT (review_note,     B-06)
 ];
 
 var DETAIL_HEADERS_ = [
-  'Kontaktn\u00ed osoba',         // 12
-  'Typ slu\u017eby',              // 13
-  'Kan\u00e1l',                   // 14
-  'Shrnut\u00ed',                 // 15
-  'P\u0159edm\u011bt e-mailu',    // 16
-  'N\u00e1vrh zpr\u00e1vy',       // 17
-  'Pipeline stav',                 // 18
-  'Lead ID'                        // 19
+  'Kontaktn\u00ed osoba',         // 14
+  'Typ slu\u017eby',              // 15
+  'Kan\u00e1l',                   // 16
+  'Shrnut\u00ed',                 // 17
+  'P\u0159edm\u011bt e-mailu',    // 18
+  'N\u00e1vrh zpr\u00e1vy',       // 19
+  'Pipeline stav',                // 20
+  'Lead ID'                       // 21
 ];
 
 var TOTAL_COLS_ = VISIBLE_HEADERS_.length + DETAIL_HEADERS_.length;
@@ -205,6 +225,38 @@ function reverseHumanizeOutreachStage_(humanStav) {
   };
   var key = trimLower_(humanStav);
   return map[key] || humanStav;
+}
+
+/* ── B-06: Review decision humanize / reverseHumanize ── */
+
+function humanizeReviewDecision_(decision) {
+  var s = String(decision || '').trim().toUpperCase();
+  if (s === 'APPROVE') return 'Schv\u00e1lit';
+  if (s === 'REJECT') return 'Zam\u00edtnout';
+  if (s === 'CHANGES_REQUESTED') return 'Zm\u011bny';
+  return ''; // empty / unknown → blank cell
+}
+
+/**
+ * Map dropdown label (accented or plain) to canonical REVIEW_DECISIONS enum.
+ * Returns null if input doesn't map to a known decision (caller should treat
+ * as "no decision" / clear).
+ */
+function reverseHumanizeReviewDecision_(humanValue) {
+  var raw = String(humanValue == null ? '' : humanValue).trim();
+  if (!raw) return null; // blank = clear / no decision
+  // Accept already-canonical enum values (tests or direct API use)
+  var upper = raw.toUpperCase();
+  if (upper === 'APPROVE' || upper === 'REJECT' || upper === 'CHANGES_REQUESTED') {
+    return upper;
+  }
+  var key = removeDiacritics_(raw.toLowerCase());
+  var map = {
+    'schvalit':  'APPROVE',
+    'zamitnout': 'REJECT',
+    'zmeny':     'CHANGES_REQUESTED'
+  };
+  return map[key] || null;
 }
 
 function deriveNextAction_(outreachStage) {
@@ -268,9 +320,13 @@ function buildContactRowV2_(hr, row) {
   var nextFollowup = hr.get(row, 'next_followup_at') || '';
   var salesNote    = String(hr.get(row, 'sales_note') || '');
 
-  // VISIBLE (1-11)
+  // B-06: carry current review state into visible cells so operator sees prior decision
+  var reviewDecision = String(hr.get(row, 'review_decision') || '').trim();
+  var reviewNote     = String(hr.get(row, 'review_note') || '');
+
+  // VISIBLE (1-13)
   var visible = [
-    String(hr.get(row, 'contact_priority') || ''),   // 1  Priorita
+    String(hr.get(row, 'contact_priority') || ''),     // 1  Priorita
     firma,                                             // 2  Firma
     String(hr.get(row, 'contact_reason') || ''),       // 3  Důvod
     preview.text,                                      // 4  Preview
@@ -280,10 +336,12 @@ function buildContactRowV2_(hr, row) {
     nextAction,                                        // 8  Další krok ✎
     lastContact,                                       // 9  Poslední kontakt ✎
     nextFollowup,                                      // 10 Follow-up ✎
-    salesNote                                          // 11 Poznámka ✎
+    salesNote,                                         // 11 Poznámka ✎
+    humanizeReviewDecision_(reviewDecision),           // 12 Rozhodnutí ✎ (B-06)
+    reviewNote                                         // 13 Důvod revize ✎ (B-06)
   ];
 
-  // DETAIL (12-19)
+  // DETAIL (14-21)
   var detail = [
     String(rd.contact_name || '').trim() || '\u2014',  // 12 Kontaktní osoba
     serviceType || '\u2014',                           // 13 Typ služby
@@ -409,8 +467,9 @@ function refreshContactingSheet() {
     }
     cs.clear();
     cs.clearConditionalFormatRules();
-    // Remove column groups from current AND previous layout versions
-    for (var gc = 9; gc <= 19; gc++) {
+    // Remove column groups from current AND previous layout versions.
+    // Range covers pre-B-06 detail area (9–19) AND post-B-06 detail area (14–21).
+    for (var gc = 9; gc <= 21; gc++) {
       try { cs.getRange(1, gc, 1, 1).shiftColumnGroupDepth(-1); } catch (e) {}
     }
     // Force-show ALL columns (old collapsed groups leave cols hidden)
@@ -477,6 +536,15 @@ function refreshContactingSheet() {
       .build();
     cs.getRange(TABLE_DATA_START_, 9, sorted.length, 1).setDataValidation(dateValidation);
     cs.getRange(TABLE_DATA_START_, 10, sorted.length, 1).setDataValidation(dateValidation);
+
+    // B-06: Review decision dropdown (col 12). Hard-reject unknown values.
+    var reviewValidation = SpreadsheetApp.newDataValidation()
+      .requireValueInList(HUMAN_REVIEW_VALUES_, true)
+      .setAllowInvalid(false)
+      .build();
+    cs.getRange(TABLE_DATA_START_, REVIEW_DECISION_COL_, sorted.length, 1)
+      .setDataValidation(reviewValidation);
+    // Důvod revize (col 13): free text, no validation.
   }
 
   // --- Sheet protection (warning-only for read-only cols) ---
@@ -524,7 +592,7 @@ function writeDashboard_(sheet, kpi) {
     { label: 'High priority',          value: kpi.high,          cols: [3, 4] },
     { label: 'Neosloveno',             value: kpi.uncontacted,   cols: [5, 6] },
     { label: 'Preview',                value: kpi.previewReady,  cols: [7, 8] },
-    { label: 'Aktualizace',            value: '', cols: [9, 11] }
+    { label: 'Aktualizace',            value: '', cols: [9, 13] } // B-06: extended to cover review cols
   ];
 
   for (var k = 0; k < cards.length; k++) {
@@ -730,6 +798,13 @@ function onContactSheetEdit(e) {
     var newValue = e.range.getValue();
     var mapping = WRITEBACK_MAP_[col];
 
+    // B-06: Review decision edit → atomic multi-cell handler (guards + 4 fields).
+    // Dispatch before plain-write path to avoid partial writes.
+    if (mapping.kind === 'review_decision') {
+      handleReviewDecisionEdit_(e, sourceSheet, sourceHr, crmRowNum, leadId, newValue);
+      return;
+    }
+
     // Reverse humanize Stav → outreach_stage
     if (mapping.reverseHumanize) {
       newValue = reverseHumanizeOutreachStage_(newValue);
@@ -760,6 +835,135 @@ function onContactSheetEdit(e) {
   } finally {
     lock.releaseLock();
   }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   B-06: REVIEW DECISION HANDLER — atomic multi-cell write
+   ═══════════════════════════════════════════════════════════════ */
+
+/**
+ * Handle an edit to the "Rozhodnutí" cell (col 12). Guards:
+ *   - preview_stage MUST be READY_FOR_REVIEW
+ *   - lead_id already validated by caller
+ *   - dedupe_flag != TRUE
+ *   - lead_stage not in {DISQUALIFIED, REVIEW}
+ *   - outreach_stage not in {WON, LOST}
+ *   - all 4 target LEADS columns must resolve BEFORE any write
+ *
+ * On pass: atomic write of review_decision + reviewed_at + reviewed_by +
+ * preview_stage. review_note is NOT touched by this handler — it lives on
+ * col 13 and takes its own plain-write path.
+ *
+ * On fail: no write to LEADS; operator-facing note on the edited cell;
+ * WARN/ERROR to _asw_logs.
+ *
+ * Blank / unknown dropdown value is treated as "clear decision" — no write,
+ * no state change. (Cell constraint already rejects invalid values via
+ * dropdown, but belt-and-suspenders: re-validate in code.)
+ */
+function handleReviewDecisionEdit_(e, sourceSheet, sourceHr, crmRowNum, leadId, newValue) {
+  var decision = reverseHumanizeReviewDecision_(newValue);
+
+  // Blank = clear / no decision — no-op (operator cleared dropdown).
+  if (!decision) {
+    aswLog_('INFO', 'handleReviewDecisionEdit_',
+      'Blank / unknown decision at lead_id=' + leadId + ' — no write');
+    return;
+  }
+
+  // Pre-resolve ALL 4 target columns to prevent partial writes.
+  var colReviewDecision = sourceHr.colOrNull('review_decision');
+  var colReviewedAt     = sourceHr.colOrNull('reviewed_at');
+  var colReviewedBy     = sourceHr.colOrNull('reviewed_by');
+  var colPreviewStage   = sourceHr.colOrNull('preview_stage');
+  var missing = [];
+  if (!colReviewDecision) missing.push('review_decision');
+  if (!colReviewedAt)     missing.push('reviewed_at');
+  if (!colReviewedBy)     missing.push('reviewed_by');
+  if (!colPreviewStage)   missing.push('preview_stage');
+  if (missing.length > 0) {
+    aswLog_('ERROR', 'handleReviewDecisionEdit_',
+      'Missing LEADS column(s): ' + missing.join(', ') + ' — write BLOCKED for lead_id=' + leadId);
+    try {
+      e.range.setNote('\u26a0 CRM nema pripravene B-06 sloupce (' + missing.join(', ') +
+        '). Spustte Setup / migraci. Rozhodnuti se NEPROPSALO.');
+    } catch (noteErr) {}
+    return;
+  }
+
+  // Guard: current LEADS state must allow a review decision.
+  var curStage       = String(sourceSheet.getRange(crmRowNum, colPreviewStage).getValue() || '').trim().toUpperCase();
+  var colDedupeFlag  = sourceHr.colOrNull('dedupe_flag');
+  var colLeadStage   = sourceHr.colOrNull('lead_stage');
+  var colOutreach    = sourceHr.colOrNull('outreach_stage');
+  var dedupeFlag     = colDedupeFlag ? String(sourceSheet.getRange(crmRowNum, colDedupeFlag).getValue() || '').trim().toUpperCase() : '';
+  var leadStageVal   = colLeadStage  ? String(sourceSheet.getRange(crmRowNum, colLeadStage).getValue() || '').trim().toUpperCase() : '';
+  var outreachVal    = colOutreach   ? String(sourceSheet.getRange(crmRowNum, colOutreach).getValue() || '').trim().toUpperCase() : '';
+
+  var guardFailures = [];
+  if (curStage !== 'READY_FOR_REVIEW') {
+    guardFailures.push('preview_stage=' + (curStage || '(empty)') + ' (required READY_FOR_REVIEW)');
+  }
+  if (dedupeFlag === 'TRUE') {
+    guardFailures.push('dedupe_flag=TRUE');
+  }
+  if (leadStageVal === 'DISQUALIFIED' || leadStageVal === 'REVIEW') {
+    guardFailures.push('lead_stage=' + leadStageVal);
+  }
+  if (outreachVal === 'WON' || outreachVal === 'LOST') {
+    guardFailures.push('outreach_stage=' + outreachVal);
+  }
+  if (guardFailures.length > 0) {
+    aswLog_('WARN', 'handleReviewDecisionEdit_',
+      'Guard failed for lead_id=' + leadId + ': ' + guardFailures.join('; ') + ' — write BLOCKED');
+    try {
+      e.range.setNote('\u26a0 Rozhodnuti nelze zapsat: ' + guardFailures.join('; ') +
+        '\nRozhodnuti se NEPROPSALO.');
+      // Revert the cell to its previous humanized state (best-effort).
+      var priorHuman = humanizeReviewDecision_(
+        sourceSheet.getRange(crmRowNum, colReviewDecision).getValue());
+      e.range.setValue(priorHuman);
+    } catch (noteErr) {}
+    return;
+  }
+
+  // Derive new preview_stage from decision.
+  var newPreviewStage;
+  if (decision === 'APPROVE') {
+    newPreviewStage = PREVIEW_STAGES.APPROVED;
+  } else if (decision === 'REJECT') {
+    newPreviewStage = PREVIEW_STAGES.REJECTED;
+  } else if (decision === 'CHANGES_REQUESTED') {
+    newPreviewStage = PREVIEW_STAGES.BRIEF_READY;
+  } else {
+    aswLog_('ERROR', 'handleReviewDecisionEdit_',
+      'Unexpected decision "' + decision + '" — should have been rejected earlier. Aborting.');
+    return;
+  }
+
+  // Resolve reviewer identity (best-effort; empty string if not available).
+  var reviewerEmail = '';
+  try { reviewerEmail = Session.getActiveUser().getEmail() || ''; } catch (identErr) { reviewerEmail = ''; }
+  var nowIso = new Date().toISOString();
+
+  // Atomic write — all 4 cells under the single lock held by onContactSheetEdit.
+  // Columns aren't contiguous so 4 setValue calls are required. Pre-resolved
+  // above, so we know every write will succeed barring sheet failure.
+  sourceSheet.getRange(crmRowNum, colReviewDecision).setValue(decision);
+  sourceSheet.getRange(crmRowNum, colReviewedAt).setValue(nowIso);
+  sourceSheet.getRange(crmRowNum, colReviewedBy).setValue(reviewerEmail);
+  sourceSheet.getRange(crmRowNum, colPreviewStage).setValue(newPreviewStage);
+
+  // Clear any prior warning note on the edited cell.
+  try {
+    var existingNote = e.range.getNote();
+    if (existingNote && existingNote.indexOf('\u26a0') === 0) e.range.setNote('');
+  } catch (noteErr) {}
+
+  aswLog_('INFO', 'handleReviewDecisionEdit_',
+    'Review written: lead_id=' + leadId + ' decision=' + decision +
+    ' preview_stage=' + newPreviewStage + ' reviewed_by=' + (reviewerEmail || '(unknown)'));
 }
 
 

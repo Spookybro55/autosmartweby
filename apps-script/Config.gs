@@ -116,7 +116,12 @@ var EXTENSION_COLUMNS = [
   'source_url',
   'source_raw_import_id',
   'source_scraped_at',
-  'source_imported_at'
+  'source_imported_at',
+  // B-06: minimal review layer — operator decision + audit fields
+  'review_decision',
+  'review_note',
+  'reviewed_at',
+  'reviewed_by'
 ];
 
 /* ── Preview stage state machine ──────────────────────────── */
@@ -139,12 +144,26 @@ var PREVIEW_STAGES = {
   GENERATING:       'GENERATING',
   READY_FOR_REVIEW: 'READY_FOR_REVIEW',
   APPROVED:         'APPROVED',
+  REJECTED:         'REJECTED',      // B-06: operator rejected the preview (terminal negative)
   FAILED:           'FAILED',
   // Legacy (pre-B-05, do not write)
   QUEUED:           'QUEUED',
   SENT_TO_WEBHOOK:  'SENT_TO_WEBHOOK',
   READY:            'READY',
   REVIEW_NEEDED:    'REVIEW_NEEDED'
+};
+
+/* ── B-06: Review decision enum ───────────────────────────── */
+// Operator decisions recorded in LEADS.review_decision column.
+//   APPROVE            — preview ready for outreach → preview_stage = APPROVED
+//   REJECT             — preview permanently refused → preview_stage = REJECTED
+//   CHANGES_REQUESTED  — needs regeneration → preview_stage = BRIEF_READY
+//                        (row re-enters processPreviewQueue eligible set and gets
+//                        a fresh brief + webhook cycle on the next timer tick)
+var REVIEW_DECISIONS = {
+  APPROVE:            'APPROVE',
+  REJECT:             'REJECT',
+  CHANGES_REQUESTED:  'CHANGES_REQUESTED'
 };
 
 /* ── Lead stages ──────────────────────────────────────────── */
