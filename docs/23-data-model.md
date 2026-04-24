@@ -43,6 +43,7 @@ Definovane v EXTENSION_COLUMNS (Config.gs):
 - **Identita:** lead_id (format: ASW-{ts}-{rnd4} nebo FIRMYCZ-NNNN)
 - **Email sync:** email_thread_id, email_last_message_id, last_email_sent_at, last_email_received_at, email_sync_status, email_reply_type, email_mailbox_account, email_subject_last, email_last_error
 - **System:** send_allowed, personalization_level, webhook_payload_json, preview_error, last_processed_at
+- **Review (B-06):** review_decision, review_note, reviewed_at, reviewed_by — operator review rozhodnuti (APPROVE/REJECT/CHANGES_REQUESTED) zapsane atomicky z listu "Ke kontaktovani" col 12/13 pres `handleReviewDecisionEdit_`. `send_allowed` NENI approval flag — review_decision je jediny truth.
 
 ## State machines
 
@@ -51,18 +52,30 @@ Definovane v EXTENSION_COLUMNS (Config.gs):
 ### lead_stage
 NEW → QUALIFIED / DISQUALIFIED / REVIEW → IN_PIPELINE → PREVIEW_SENT
 
-### preview_stage (B-05)
-NOT_STARTED → BRIEF_READY → GENERATING → READY_FOR_REVIEW → APPROVED
+### preview_stage (B-05 + B-06)
+NOT_STARTED → BRIEF_READY → GENERATING → READY_FOR_REVIEW → APPROVED  (B-06 APPROVE)
+                                                         → REJECTED  (B-06 REJECT)
+                                                         → BRIEF_READY (B-06 CHANGES_REQUESTED → requeue)
                                        → FAILED (retry eligible)
 
 - **NOT_STARTED** — pipeline muze zacit
-- **BRIEF_READY** — brief JSON hotovy, webhook jeste nevolan
+- **BRIEF_READY** — brief JSON hotovy, webhook jeste nevolan (nebo po B-06 CHANGES_REQUESTED → requeue pro regeneraci)
 - **GENERATING** — webhook request in-flight (nahrazuje legacy QUEUED + SENT_TO_WEBHOOK)
 - **READY_FOR_REVIEW** — preview_url zapsana, ceka na operatora (nahrazuje legacy READY + REVIEW_NEEDED; `preview_needs_review` sloupec drzi quality signal)
-- **APPROVED** — operator manualne potvrdil v Google Sheets; terminal
+- **APPROVED** — operator manualne potvrdil v Google Sheets pres B-06 Rozhodnuti=Schvalit; terminal positive
+- **REJECTED** (B-06) — operator zamitl pres B-06 Rozhodnuti=Zamitnout; terminal negative
 - **FAILED** — posledni pokus selhal; re-tryable na dalsim timer tiku (zustava v eligibleStages)
 
 Legacy hodnoty `QUEUED, SENT_TO_WEBHOOK, READY, REVIEW_NEEDED` jsou preserved v `PREVIEW_STAGES` enumu pro backward-compat cteni pre-B-05 dat. Novy kod je nezapisuje.
+
+### review_decision (B-06)
+
+Enum `REVIEW_DECISIONS` v Config.gs:
+- **APPROVE** — operator schvalil preview → preview_stage=APPROVED
+- **REJECT** — operator zamitl preview → preview_stage=REJECTED
+- **CHANGES_REQUESTED** — operator pozadal o regeneraci → preview_stage=BRIEF_READY (requeue v processPreviewQueue)
+
+Operator vybira z CZ dropdownu `Schvalit / Zamitnout / Zmeny` v listu "Ke kontaktovani" (col 12 Rozhodnuti ✎). Rozhodnuti se zapisuje atomicky vcetne `reviewed_at` (ISO) a `reviewed_by` (Session email).
 
 ### outreach_stage
 NOT_CONTACTED → DRAFT_READY → CONTACTED → RESPONDED → WON / LOST
@@ -70,23 +83,27 @@ NOT_CONTACTED → DRAFT_READY → CONTACTED → RESPONDED → WON / LOST
 ### email_sync_status
 NOT_LINKED → NOT_FOUND / REVIEW / DRAFT_CREATED → SENT → LINKED → REPLIED / ERROR
 
-## Ke kontaktovani — sloupce
+## Ke kontaktovani — sloupce (post B-06 layout)
 
 | Col | Nazev | Typ |
 |-----|-------|-----|
 | 1 | Priorita | Read-only (HIGH/MEDIUM/LOW) |
 | 2 | Firma | Read-only |
 | 3 | Duvod osloveni | Read-only |
-| 4 | Preview | Read-only (stav + hyperlink) |
+| 4 | Preview | Read-only (stav + hyperlink na `preview_url`) |
 | 5 | Telefon | Read-only |
 | 6 | E-mail | Read-only |
-| 7 | Stav | Editable (write-back) |
-| 8 | Dalsi krok | Editable (write-back) |
-| 9 | Posledni kontakt | Editable (write-back) |
-| 10 | Follow-up | Editable (write-back) |
-| 11 | Poznamka | Editable (write-back) |
-| 12–18 | Detail (hidden group) | Read-only |
-| 19 | ID leadu | System (write-back key) |
+| 7 | Stav | Editable (write-back `outreach_stage`) |
+| 8 | Dalsi krok | Editable (write-back `next_action`) |
+| 9 | Posledni kontakt | Editable (write-back `last_contact_at`) |
+| 10 | Follow-up | Editable (write-back `next_followup_at`) |
+| 11 | Poznamka | Editable (write-back `sales_note`) |
+| **12** | **Rozhodnuti (B-06)** | **Editable dropdown — atomic write `review_decision` + `reviewed_at` + `reviewed_by` + `preview_stage`** |
+| **13** | **Duvod revize (B-06)** | **Editable (write-back `review_note`)** |
+| 14–20 | Detail (hidden group) | Read-only |
+| 21 | ID leadu | System (write-back key) |
+
+Pre-B-06 layout (cols 1-19) je automaticky upgradnut pri prvnim Refresh po deploy: range `refreshContactingSheet` cleanup pokryva kolonovy grouping 9-21 aby smazal pre-B-06 collapsed groups.
 
 ## Preview Brief Contract (B-01)
 
