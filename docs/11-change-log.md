@@ -30,6 +30,20 @@ Task NEDODAVA:
 - **Code:** — (—)
 - **Docs:** docs/30-task-records/B-07.md, docs/11-change-log.md, docs/29-task-registry.md
 
+### [B/B-08] Pilot 10 leadu preview — preparation / runbook only (execution deferred) — READY_FOR_EXECUTION
+- **Scope:** B-08 je pilotni overovaci task: pustit preview engine na **10 realnych leadech ve stavu `BRIEF_READY`**, zmerit kolik prosel pres B-05 lifecycle az do `READY_FOR_REVIEW` (pripadne manualne na `APPROVED`), identifikovat pricin selhani, sebrat 3–5 ukazkovych preview URL a napsat souhrn + doporuceni.
+
+**Tento task record je SCOPE `READY_FOR_EXECUTION`, NE `DONE`.** Obsahuje pouze dokumentaci, runbook, safety gates a vysledkovy template. **Skutecny 10-lead pilot v tomto PR nebyl proveden** — proveden bude az v separatnim execution kroku az budou splneny vsechny prerequisites + safety gates nize.
+
+Status `READY_FOR_EXECUTION` byl zvolen pred `PARTIAL`, protoze:
+- runbook je kompletni (pre-flight, lead-selection, execution, verification, pass/fail klasifikace, summary),
+- result template a safety checklist jsou pripravene,
+- dependency tabulka je opravena proti skutecnemu stavu repozitare (B-06 vyrazeno),
+- chybi **pouze** samotne execution + vysledkova data, ne dalsi dokumentacni prace.
+- **Owner:** Stream B
+- **Code:** — (—)
+- **Docs:** docs/30-task-records/B-08.md, docs/11-change-log.md, docs/29-task-registry.md
+
 ## 2026-04-22
 
 ### [C/C-11] Config, secrets, limity a budget guardrails — SPEC-only kontrakt pro 6 ortogonalnich configuration planes (config / secret / limit / budget / kill switch / feature flag) — DONE
