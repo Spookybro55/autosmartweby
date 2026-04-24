@@ -6,6 +6,30 @@
 
 ---
 
+## 2026-04-24
+
+### [B/B-07] Buffer / podpora — pilot support package pro soucasny preview lifecycle (B-05) — DONE
+- **Scope:** B-07 je **support / buffer / pilot-preparation task**. Osoba B nema vlastni runtime feature task ve vlne 7. Task dodava **pouze dokumentaci a pilotni test-data scenare**, ktere pripravuji projekt na pripadny pilot operatorsky provoz nad jiz existujici B-05 preview pipeline.
+
+Task je zalozen na skutecnem stavu repository (k 2026-04-24):
+
+- Existujici B task records: `B1`, `B2`, `B3`, `B4`, `B5`, `BX1`.
+- **Zadny B-06 task record v `docs/30-task-records/` neexistuje.** Vsechny odkazy na "B-06" v repu (`docs/26-offer-generation.md:124`, `docs/30-task-records/B4.md:89-92,102`, `docs/30-task-records/B3.md:98`, `crm-frontend/src/lib/preview/preview-store.ts:11`, `crm-frontend/src/lib/preview/quality-score.ts:16`) jsou **proposed future scope** pro externi persistence / CDN / screenshot pipeline / real versioning / multi-instance store — **NE** review-decision layer.
+- **Zadna formalni review-decision metadata neexistuje** v tomto repu. Fields `review_decision`, `review_note`, `reviewed_at`, `reviewed_by` v kodu ani dokumentaci nejsou definovany. Tri-state enum `APPROVE / REJECT / CHANGES_REQUESTED` neexistuje.
+- Jedina existujici review-like akce je **manualni operator transition** `READY_FOR_REVIEW → APPROVED` pres sloupec `preview_stage` v Google Sheets (viz `apps-script/Config.gs:131-142`, `docs/23-data-model.md:54-63`, `docs/30-task-records/B5.md:18,28`).
+- `preview_needs_review` je **boolean signal** (quality hint z webhook response), **ne** tri-stav rozhodnuti.
+
+Task NEDODAVA:
+- Zadny novy runtime kod (apps-script, crm-frontend, scripts).
+- Zadny B-06 substitute, zadny novy review metadata / review enum.
+- Zadny B-08 pilot runbook (prichazi v B-08).
+- Zadnou novou state machine, zadny outbound sending, zadny novy webhook, zadnou zmenu B-05 lifecycle.
+- Zadny novy preview backend ani zmenu `PreviewBrief` kontraktu.
+- Nemenime `docs/29-task-registry.md` ani `docs/11-change-log.md` rucne — regeneruji se generatorem.
+- **Owner:** Stream B
+- **Code:** — (—)
+- **Docs:** docs/30-task-records/B-07.md, docs/11-change-log.md, docs/29-task-registry.md
+
 ## 2026-04-22
 
 ### [C/C-11] Config, secrets, limity a budget guardrails — SPEC-only kontrakt pro 6 ortogonalnich configuration planes (config / secret / limit / budget / kill switch / feature flag) — DONE
