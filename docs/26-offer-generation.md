@@ -85,6 +85,7 @@ Gate pravidlo: section se renderuje pouze pokud je v `suggested_sections`. Field
 | B-03 | TemplateType (mapovani na render sablony) — **DONE**: `template-family.ts` mapuje na 4 MVP family (`emergency`, `community-expert`, `technical-authority`, `generic-local`) + render hints; drift fix `TemplateBase` (`plumber`/`construction` namisto `instalater`/`mason`) |
 | B-04 | MinimalRenderRequest + MinimalRenderResponse — **DONE**: `POST /api/preview/render` s header auth, runtime validator, in-memory preview store, upsert by `preview_slug`, `preview_url = ${PUBLIC_BASE_URL}/preview/${slug}`. |
 | B-05 | Preview URL return + statusy — **DONE**: Apps Script caller doplnen (slug v payloadu, `X-Preview-Webhook-Secret` header). `preview_stage` enum rozsiren o operator-facing lifecycle `GENERATING → READY_FOR_REVIEW → APPROVED`, `FAILED` retry-eligible. Live run aktivovany operator-set Script Properties + `ENABLE_WEBHOOK=true`. |
+| B-06 | Minimal review layer — **DONE**: operator rozhoduje v listu "Ke kontaktovani" (col 12 Rozhodnuti ✎ dropdown `Schvalit/Zamitnout/Zmeny`, col 13 Duvod revize ✎). `handleReviewDecisionEdit_` provadi atomic write `review_decision` + `reviewed_at` + `reviewed_by` + `preview_stage` pod existujicim onEdit lockem. Stage transitions: `APPROVE → APPROVED`, `REJECT → REJECTED` (novy terminal), `CHANGES_REQUESTED → BRIEF_READY` (requeue). Guards: preview_stage=READY_FOR_REVIEW, lead_id, dedupe_flag, lead_stage, outreach_stage, missing-column check. `send_allowed` NENI approval flag. |
 
 **Doporuceni:** Minimal Compatible first → Target po MVP.
 
@@ -121,9 +122,34 @@ Renderer zatim zustava template-agnostic — family vrstva je pripravena pro fam
 
 **Out of scope (B-05):** slug generace, GAS payload uprava, `PREVIEW_STAGES` transitions, write-back do LEADS, retries.
 
-**Out of scope (B-06):** externi persistence, CDN, screenshot pipeline, realny versioning.
+**Out of B-04 scope:** externi persistence, CDN, screenshot pipeline, realny versioning. (Driv planovane jako "B-06" — realny B-06 je minimal review layer, viz nize. Externi persistence nema task ID a neni schedulovana.)
 
-**Zive GAS propojeni** vyzaduje B-05 — aktualni `PreviewPipeline.gs` webhook payload zatim neobsahuje `preview_slug`, takze produkcni volani endpointu skonci 400.
+**Zive GAS propojeni** bylo dodano v B-05 — `PreviewPipeline.gs` webhook payload ted obsahuje `preview_slug` a `X-Preview-Webhook-Secret` header.
+
+## Minimal Review Layer (B-06)
+
+Operator review smycka nad existujicim derived listem "Ke kontaktovani" (`apps-script/ContactSheet.gs`). LEADS zustava source of truth, "Ke kontaktovani" je working layer.
+
+**Layout po B-06:** visible cols 1-13 (pridane Rozhodnuti ✎ col 12 + Duvod revize ✎ col 13), detail 14-21 (Lead ID shift 19→21).
+
+**Flow:**
+1. Lead dosahne `preview_stage=READY_FOR_REVIEW` (vystup B-05 webhook response handleru).
+2. Operator otevre "Ke kontaktovani" list, ktery zobrazuje `preview_url` hyperlink v col 4.
+3. Operator vybere z col 12 dropdown: **Schvalit / Zamitnout / Zmeny** (nebo prazdno = clear).
+4. `onContactSheetEdit` detekuje edit col 12, dispatchne do `handleReviewDecisionEdit_`.
+5. Handler pre-resolvuje 4 cilove LEADS sloupce (`review_decision`, `reviewed_at`, `reviewed_by`, `preview_stage`). Pri missing → zadny zapis, alert.
+6. Handler overi guardy: preview_stage=READY_FOR_REVIEW, lead_id valid, dedupe_flag!=TRUE, lead_stage not DQ/REVIEW, outreach_stage not WON/LOST. Pri selhani → zadny zapis, revert dropdown, alert.
+7. Atomic write vsech 4 cellek pod existujicim 5s lockem: enum value + ISO timestamp + Session email (nebo '') + derived preview_stage.
+8. `review_note` (col 13) je samostatny plain write-back bez state guards (audit-only field).
+
+**Stage transitions:**
+| Rozhodnuti (enum) | Cesky label | Novy preview_stage |
+|-------------------|-------------|---------------------|
+| `APPROVE` | Schvalit | `APPROVED` (terminal positive) |
+| `REJECT` | Zamitnout | `REJECTED` (terminal negative, novy stage) |
+| `CHANGES_REQUESTED` | Zmeny | `BRIEF_READY` (requeue — lead se vraci do `processPreviewQueue` eligibleStages pri pristim 15-min tiku, GAS vygeneruje novy brief + webhook) |
+
+**B-06 out of scope:** novy frontend review UI, outbound send (B-06 jen oznacuje approval, nesende), Make/webhook redesign, externi persistence (nema task ID).
 
 ## Cilovy model
 

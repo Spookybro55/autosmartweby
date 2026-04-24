@@ -90,6 +90,20 @@ B-05 NEMENI B-04 endpoint contract, NEMENI B-01 `PreviewBrief`, NEMENI B-03 mapp
 - **Code:** apps-script/Config.gs (modified), apps-script/EnvConfig.gs (modified), apps-script/PreviewPipeline.gs (modified), apps-script/PreviewPipeline.gs (modified), scripts/test-b05-preview-webhook.mjs (new), package.json (modified)
 - **Docs:** docs/20-current-state.md, docs/22-technical-architecture.md, docs/23-data-model.md, docs/24-automation-workflows.md, docs/26-offer-generation.md, docs/30-task-records/B5.md
 
+### [B/B6] Minimal preview review layer — DONE
+- **Scope:** Minimalni review vrstva nad existujicim derived listem "Ke kontaktovani". Operator vidi preview URL, zvoli Schvalit / Zamitnout / Zmeny a rozhodnuti se atomicky propise do LEADS vcetne transition `preview_stage`. LEADS zustava source of truth; "Ke kontaktovani" je pure working layer.
+
+**B-06 NEDELA:**
+- zadny novy frontend (next.js review UI)
+- zadny outbound send
+- zadny webhook redesign
+- zadnou zmenu preview rendereru
+- zadne pouziti `send_allowed` jako approval flag
+- zadny PROD deploy
+- **Owner:** Stream B
+- **Code:** apps-script/Config.gs (modified), apps-script/ContactSheet.gs (modified), scripts/test-b06-review-writeback.mjs (new), package.json (modified), docs/30-task-records/B6.md (new), docs/20-current-state.md (modified), docs/22-technical-architecture.md (modified), docs/23-data-model.md (modified), docs/26-offer-generation.md (modified)
+- **Docs:** docs/20-current-state.md, docs/22-technical-architecture.md, docs/23-data-model.md, docs/26-offer-generation.md
+
 ### [C/C-04] Sendability Gate pravidla — autoritativni SPEC gate mezi preview a outreach — DONE
 - **Scope:** Formalizuje rozhodovaci logiku, ktera stoji mezi fazi "preview hotove" a fazi "outreach queued". Definuje jedine autoritativni pravidlo pro kazdy lead, zda smi jit do auto-send, zda potrebuje manualni review, nebo zda je blokovan. Scope je **SPEC-only** — zadny runtime sender, queue, UI, webhook ani observability pipeline se v tomto tasku neimplementuje.
 
