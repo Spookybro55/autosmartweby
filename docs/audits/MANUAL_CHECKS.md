@@ -25,6 +25,10 @@ Každá položka má:
 | MC-IN-D-03 | 5 | Zda je `apps-script-endpoint.gs.example` reference dokument nebo zapomenutý draft. | Git history `git log -- crm-frontend/src/lib/google/apps-script-endpoint.gs.example` | Pokud se nemodifikoval po vzniku reálného `WebAppEndpoint.gs`, je to dead reference (cross-ref IN-001). |
 | MC-IN-D-04 | 5 | Že hook `useLeadUpdate` byl skutečně zamýšlen jako alternativa k drawer fetch (vs dead code). | `git log -- crm-frontend/src/hooks/use-lead-update.ts` + původní task record | Buď byl plánován pro budoucí page, nebo je to remnant z refactoru → owner rozhodne (cross-ref IN-004). |
 | MC-IN-D-05 | 5 | In-memory preview store chování na Vercel serverless: cold start frequency, kolik preview URLs se "ztratí" za týden. | Vercel logs, observed 404 rate na `/preview/<slug>` | Definovat acceptable threshold; pokud > 1% requestů 404, eskalovat (cross-ref IN-014). |
+| MC-DP-D-01 | 6 | Obsah `crm-frontend/.env.example` (audit nemá read access — sandbox-blocked). Cross-check vůči seznamu env vars použitým v kódu (viz Phase 6 audit, sekce D.18). | `crm-frontend/.env.example` (manuálně otevřít) | Měl by obsahovat: `GOOGLE_SPREADSHEET_ID`, `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY`, `APPS_SCRIPT_WEB_APP_URL`, `APPS_SCRIPT_SECRET`, `PREVIEW_WEBHOOK_SECRET`, `PUBLIC_BASE_URL`, `NEXTAUTH_SECRET`, `AUTH_PASSWORD`, `ALLOWED_EMAILS`. Pokud chybí, finding pro Phase 10. |
+| MC-DP-D-02 | 6 | Existuje `vercel.json` v root frontendu na Vercel platformě (nikoli v repu)? Pokud ano, jaké jsou settings? | Vercel Dashboard → Project → Settings → Build & Development | Pokud production branch ≠ `main`, nebo build cmd ≠ `npm run build`, eskalovat. |
+| MC-DP-D-03 | 6 | Žádný `clasp deploy` v `clasp-deploy.sh` — Apps Script Web App vždy servíruje HEAD. Existuje custom rollback skript v týmu, který audit nezná? | Tým interview / interní wiki | Pokud chybí, oprávněně vznikne `docs/ROLLBACK.md` (DP-018). |
+| MC-DP-D-04 | 6 | Aktuální deployed verze Apps Script v PROD vs HEAD `apps-script/` na main. | Apps Script Console → Deploy → Manage deployments → "Latest deployment" timestamp + manifest file IDs | Drift indikuje, že někdo zapomněl `clasp push` po merge. Critical pokud > 7 dní. |
 
 ### Ops checks
 
@@ -36,6 +40,13 @@ Každá položka má:
 | MC-IN-O-04 | 5 | Latency p50/p95 pro FE→GAS `updateLead` round-trip pod běžnou zátěží. | Apps Script Console → Executions; Vercel Analytics; nebo manuální test (5-10 calls) | p50 < 2 s, p95 < 5 s. Pokud p95 > 10 s, cross-ref IN-009 (timeout). |
 | MC-IN-O-05 | 5 | Frequency `Could not acquire lock` chyb v Apps Script logs (lock contention). | Apps Script Console → Executions → filter `Could not acquire lock` | < 1% volání. Pokud výše, je třeba zvýšit `tryLock` timeout nebo decompose write path. |
 | MC-IN-O-06 | 5 | Frequency 502 odpovědí z `/api/leads/[id]/update`. | Vercel Logs / Analytics | < 0.5% per den. Vyšší = systemic backend chyba (`Lead not found`, identity mismatch). |
+| MC-DP-O-01 | 6 | Hosting platforma frontendu (Vercel? jiná?), production branch, environment variables, kdo má deploy access. | Hosting provider Dashboard (předp. Vercel) → Project → Settings | Production branch = `main`, env vars match seznam z DP-016, deploy access omezený na owner + 1-2 ops. |
+| MC-DP-O-02 | 6 | GitHub Actions secrets scope (Environment vs Repository) — pokud existují. | `gh api repos/Spookybro55/autosmartweby/actions/secrets` (jako repo admin) | Aktuálně docs-governance žádné secrets nepoužívá, takže prázdný list = OK. Pokud secrets existují bez Environment-level protection, dokumentovat v Phase 7. |
+| MC-DP-O-03 | 6 | Owner/editor seznamy obou Apps Script projektů (TEST `1Sjd…`, PROD `1fnL…`) — kdo může spustit `clasp push` (= deploynout). | Apps Script Console → Project → Share | TEST: tým + ops. PROD: pouze 1-2 lidi. Žádný "anyone with link can edit" setting. |
+| MC-DP-O-04 | 6 | Existence interní rotation runbooku pro shared secrets (mimo repo per DP-019). | 1Password / Bitwarden / interní wiki | Buď doloženo, nebo vytvořit (cross-ref DP-019). |
+| MC-DP-O-05 | 6 | Last `clasp push` timestamp do PROD — kdy reálně proběhl poslední deploy. | Apps Script Console → Project → Apps Script Editor → File metadata | Pokud > 30 dní od poslední změny `apps-script/*.gs` v main, asi drift. |
+| MC-DP-O-06 | 6 | Existuje Vercel preview deployment per PR? Jsou env vars per-environment (production vs preview)? | Vercel Dashboard → Project → Deployments | Preview = ON; preview env vars = subset bez production secrets. |
+| MC-DP-O-07 | 6 | Pokud někdo nastavil `ASW_ENV=PROD` v TEST Apps Script projektu (špatná konfigurace), `envGuard_()` by měl odhalit drift. Verify Script Properties v obou projektech. | Apps Script Console → Project Settings → Script Properties (pro oba projekty) | TEST: `ASW_ENV=TEST`, `ASW_SPREADSHEET_ID=14U9…`. PROD: `ASW_ENV=PROD`, `ASW_SPREADSHEET_ID=1RBc…`. Manuálně spustit `diagEnvConfig` v každém. |
 
 ### Product / business checks
 
@@ -52,6 +63,9 @@ Každá položka má:
 | MC-IN-S-02 | 5 | Apps Script Web App access level: `Anyone` (nutné pro shared-secret auth bez Google account). Není veřejně exposnutá URL bez secrets v query? | Apps Script Console → Deploy → Manage deployments → Access | Access = "Anyone (with link)". URL je secret + token check ji chrání. Pokud `Anyone with Google account` jen, secret check stále funguje. |
 | MC-IN-S-03 | 5 | Vercel logs neobsahují `payload.token` v plaintextu (např. nelogovat celé request body). | Vercel Logs search pro `token` | Žádné výskyty `APPS_SCRIPT_SECRET` value. Stejně Apps Script `aswLog_` nelogovat full payload. |
 | MC-IN-S-04 | 5 | Existuje rate limiting na Apps Script Web App nebo na FE proxy `/api/leads/[id]/update`? | Apps Script Console (žádné built-in), Vercel (Edge Middleware?) | Žádný rate limit zjištěn z kódu. Je to akceptovatelné riziko? Cross-ref Phase 7. |
+| MC-DP-S-01 | 6 | Sheet IDs `1RBc…` (PROD), `14U9…` (TEST) — public exposure scope v Git history. | `git log -p` (jen indikace, ne celý dump) + threat-model review | Sheet IDs nejsou per se secret, ale + sharing settings = potenciální data exposure. Cross-ref DP-001, DP-002, IN-016 a Phase 7. |
+| MC-DP-S-02 | 6 | Apps Script Web App access level pro PROD (`appsscript.json:13` `"access": "ANYONE_ANONYMOUS"`). | Apps Script Console → Deploy → Manage deployments | `ANYONE_ANONYMOUS` je nutné pro `executeAs: USER_DEPLOYING` + shared-secret model. Verifikovat, že URL je dostatečně dlouhá / unguessable a nikde public exposed. |
+| MC-DP-S-03 | 6 | `enforce_admins: false` na main protection — kdo má admin rights na repu, kdo by mohl bypassovat? | GitHub repo settings → Manage access → Roles | Ideálně 1-2 admins, MFA enforced. Pokud > 3 admins, eskalovat. |
 
 ---
 
