@@ -1,0 +1,18 @@
+{
+  "_comment": "Template for apps-script/.clasp.json. Real .clasp.json is .gitignored (SEC-002). Copy this file to .clasp.json and fill scriptId + parentId from your Apps Script project URL: https://script.google.com/.../projects/<scriptId>/edit. parentId is the bound spreadsheet ID (find via Sheet URL).",
+  "scriptId": "YOUR_APPS_SCRIPT_PROJECT_ID_HERE",
+  "rootDir": "",
+  "parentId": "YOUR_BOUND_SPREADSHEET_ID_HERE",
+  "scriptExtensions": [
+    ".gs",
+    ".js"
+  ],
+  "htmlExtensions": [
+    ".html"
+  ],
+  "jsonExtensions": [
+    ".json"
+  ],
+  "filePushOrder": [],
+  "skipSubdirectories": false
+}
