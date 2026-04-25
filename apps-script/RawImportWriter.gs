@@ -296,3 +296,23 @@ function appendLeadRow_(leadsSheet, leadsRow) {
 }
 
 
+/* ═══════════════════════════════════════════════════════════════
+   KROK 4 (FF-002) — PUBLIC ENTRY POINTS
+   Wrapper functions usable from menu (Menu.gs) and time-based
+   trigger (PreviewPipeline.gs:installProjectTriggers).
+   processRawImportBatch_ defaults to dryRun=true; these wrappers
+   force dryRun=false so menu/trigger calls actually import.
+   ═══════════════════════════════════════════════════════════════ */
+
+function processRawImportBatch() {
+  var stats = processRawImportBatch_({ dryRun: false });
+  aswLog_('INFO', 'processRawImportBatch',
+    'Run finished. Stats: ' + JSON.stringify(stats));
+  safeAlert_(
+    'Import _raw_import → LEADS dokončen.\n\n' +
+    'Stats: ' + JSON.stringify(stats, null, 2)
+  );
+  return stats;
+}
+
+

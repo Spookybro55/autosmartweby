@@ -243,3 +243,26 @@ var EMERGENCY_SEGMENTS = [
   'instalater','plumber','topenar','elektrikar',
   'havarijni','zamecnik','locksmith','nonstop'
 ];
+
+/* ── Pilot assignee identities (KROK 4/5) ─────────────────────
+   Maps lead.assignee_email → display name used for Reply-To header.
+   Used by resolveSenderIdentity_() in OutboundEmail.gs.
+
+   Sender of all outbound mail is the deploying account
+   (sfridrich@unipong.cz under executeAs: USER_DEPLOYING). Reply-To
+   redirects replies to the assigned operator's mailbox.
+
+   When lead has no assignee_email (KROK 4 state, before column is
+   added in KROK 5) or value is unknown, falls back to DEFAULT_REPLY_TO.
+
+   Diacritics: kept exact (Sebastián, Tomáš). All .gs files are saved
+   as UTF-8; clasp + Apps Script editor preserve encoding.            */
+var ASSIGNEE_NAMES = {
+  'sfridrich@unipong.cz':       'Sebastián Fridrich',
+  'sebastian@autosmartweb.cz':  'Sebastián Fridrich',
+  'tomas@autosmartweb.cz':      'Tomáš Maixner',
+  'jan.bezemek@autosmartweb.cz':'Jan Bezemek'
+};
+
+var DEFAULT_REPLY_TO_EMAIL = 'sebastian@autosmartweb.cz';
+var DEFAULT_REPLY_TO_NAME  = 'Sebastián Fridrich';
