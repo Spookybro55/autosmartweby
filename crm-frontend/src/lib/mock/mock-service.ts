@@ -7,7 +7,35 @@ import { isToday, isPast, isThisWeek, parseISO } from 'date-fns';
 let mockState = structuredClone(MOCK_LEADS);
 
 export function isMockMode(): boolean {
-  return !process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY;
+  if (process.env.MOCK_MODE === 'true') return true;
+
+  const hasEmail = !!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const hasKey = !!process.env.GOOGLE_PRIVATE_KEY;
+  const hasSheetId = !!process.env.GOOGLE_SPREADSHEET_ID;
+
+  if (process.env.NODE_ENV === 'production') {
+    if (!hasEmail || !hasKey || !hasSheetId) {
+      const missing = [
+        !hasEmail && 'GOOGLE_SERVICE_ACCOUNT_EMAIL',
+        !hasKey && 'GOOGLE_PRIVATE_KEY',
+        !hasSheetId && 'GOOGLE_SPREADSHEET_ID',
+      ].filter(Boolean).join(', ');
+      throw new Error(
+        `Production deployment missing required GOOGLE_* env vars: ${missing}. ` +
+        `Set them in Vercel env vars, or set MOCK_MODE=true to opt-in to mock data.`,
+      );
+    }
+    return false;
+  }
+
+  if (!hasEmail || !hasKey) {
+    console.warn(
+      '[Mock] GOOGLE_* env vars missing — using mock data (dev only). ' +
+      'Set MOCK_MODE=true to opt-in explicitly.',
+    );
+    return true;
+  }
+  return false;
 }
 
 export function getMockLeads(): Lead[] {
@@ -27,6 +55,7 @@ export function updateMockLead(id: string, fields: Partial<LeadEditableFields>):
   if (fields.lastContactAt !== undefined) lead.lastContactAt = fields.lastContactAt;
   if (fields.nextFollowupAt !== undefined) lead.nextFollowupAt = fields.nextFollowupAt;
   if (fields.salesNote !== undefined) lead.salesNote = fields.salesNote;
+  if (fields.assigneeEmail !== undefined) lead.assigneeEmail = (fields.assigneeEmail ?? '').toLowerCase().trim();
 
   return true;
 }
@@ -49,6 +78,7 @@ export function leadToListItem(lead: Lead): LeadListItem {
     serviceType: lead.serviceType,
     contactName: lead.contactName,
     previewUrl: lead.previewUrl,
+    assigneeEmail: lead.assigneeEmail ?? '',
   };
 }
 

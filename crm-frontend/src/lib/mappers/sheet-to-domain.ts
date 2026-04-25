@@ -96,6 +96,7 @@ export function mapRowToLead(row: SheetRow, headers: HeaderMap, rowNumber: numbe
     lastContactAt: col(row, headers, 'last_contact_at'),
     nextFollowupAt: col(row, headers, 'next_followup_at'),
     salesNote: col(row, headers, 'sales_note'),
+    assigneeEmail: col(row, headers, 'assignee_email').toLowerCase(),
   };
 }
 
@@ -117,6 +118,7 @@ export function leadToListItem(lead: Lead): LeadListItem {
     serviceType: lead.serviceType,
     contactName: lead.contactName,
     previewUrl: lead.previewUrl,
+    assigneeEmail: lead.assigneeEmail,
   };
 }
 

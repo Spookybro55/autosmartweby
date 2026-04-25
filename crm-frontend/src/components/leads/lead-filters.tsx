@@ -45,6 +45,9 @@ export interface FilterState {
   outreachStage: string;
   priority: string;
   hasFollowUp: string;
+  // KROK 5: assignee scope. 'MINE' = jen leady kde assignee_email == současný uživatel.
+  // 'ALL' = všechny vč. nepřidělených. Default = 'MINE' (per leads page logic).
+  assigneeScope: "MINE" | "ALL";
   sortBy: string;
   sortDir: "asc" | "desc";
 }
@@ -59,6 +62,7 @@ const DEFAULT_FILTERS: FilterState = {
   outreachStage: "ALL",
   priority: "ALL",
   hasFollowUp: "ALL",
+  assigneeScope: "MINE",
   sortBy: "rowNumber",
   sortDir: "asc",
 };
@@ -76,10 +80,26 @@ export function LeadFilters({ filterState, onFilterChange }: LeadFiltersProps) {
     filterState.search !== "" ||
     filterState.outreachStage !== "ALL" ||
     filterState.priority !== "ALL" ||
-    filterState.hasFollowUp !== "ALL";
+    filterState.hasFollowUp !== "ALL" ||
+    filterState.assigneeScope !== "MINE";
 
   return (
     <div className="flex flex-wrap items-center gap-3">
+      <Select
+        value={filterState.assigneeScope}
+        onValueChange={(val) =>
+          val != null && update({ assigneeScope: val as FilterState["assigneeScope"] })
+        }
+      >
+        <SelectTrigger className="w-36">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="MINE">Mé leady</SelectItem>
+          <SelectItem value="ALL">Všechny</SelectItem>
+        </SelectContent>
+      </Select>
+
       <InputGroup className="w-64">
         <InputGroupAddon align="inline-start">
           <InputGroupText>

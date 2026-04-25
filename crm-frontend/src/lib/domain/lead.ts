@@ -56,6 +56,7 @@ export interface Lead {
   lastContactAt: string;
   nextFollowupAt: string;
   salesNote: string;
+  assigneeEmail: string;       // KROK 5: '' = unassigned
 }
 
 // Lightweight version for table display
@@ -76,15 +77,17 @@ export interface LeadListItem {
   serviceType: string;
   contactName: string;
   previewUrl: string;
+  assigneeEmail: string;       // KROK 5: '' = unassigned
 }
 
-// Only the 5 fields that can be written back
+// Editable fields (write-back via PATCH /api/leads/[id]/update)
 export interface LeadEditableFields {
   outreachStage: OutreachStageKey;
   nextAction: string;
   lastContactAt: string;
   nextFollowupAt: string;
   salesNote: string;
+  assigneeEmail: string;       // KROK 5: '' = unassigned
 }
 
 // Detail view — extends with full context

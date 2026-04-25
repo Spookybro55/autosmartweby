@@ -51,13 +51,31 @@ function executeCrmOutbound_(mode) {
   var payload = resolveSelectedLeadPayload_(ui);
   if (!payload) return; // guard already showed alert
 
-  // 2. Confirmation dialog
+  // 2. KROK 4 (FF-006): sendability gate — review_decision MUST be APPROVE
+  try {
+    assertSendability_(payload.reviewDecision, 'CRM row ' + payload.crmRowNum);
+  } catch (gateErr) {
+    aswLog_('WARN', 'executeCrmOutbound_',
+      mode + ' blocked by sendability gate: ' + gateErr.message);
+    safeAlert_(
+      'Odeslání zablokováno.\n\n' +
+      'Náhled musí být schválený (APPROVE) v "Ke kontaktování" → sloupec "Rozhodnutí ✎".\n' +
+      'Aktuální stav: ' + (payload.reviewDecision || 'PRÁZDNÉ')
+    );
+    return;
+  }
+
+  // 3. Resolve sender identity for Reply-To (assignee → operator mailbox)
+  payload.sender = resolveSenderIdentity_(payload.assigneeEmail);
+
+  // 4. Confirmation dialog
   var action = mode === 'DRAFT' ? 'Vytvořit draft' : 'ODESLAT e-mail';
   var confirm = ui.alert(
     action + '?',
     'Příjemce: ' + payload.recipientEmail + '\n' +
     'Předmět: ' + payload.subject + '\n' +
-    'Firma: ' + payload.businessName + '\n\n' +
+    'Firma: ' + payload.businessName + '\n' +
+    'Reply-To: ' + payload.sender.name + ' <' + payload.sender.email + '>\n\n' +
     'Pokračovat?',
     ui.ButtonSet.YES_NO
   );
@@ -66,7 +84,7 @@ function executeCrmOutbound_(mode) {
     return;
   }
 
-  // 3. Execute draft or send
+  // 5. Execute draft or send
   var result;
   if (mode === 'DRAFT') {
     result = createGmailDraft_(payload);
@@ -80,16 +98,16 @@ function executeCrmOutbound_(mode) {
     return;
   }
 
-  // 4. Persist metadata to LEADS
+  // 6. Persist metadata to LEADS
   persistOutboundMetadata_(payload, result, mode);
 
-  // 5. Label thread
+  // 7. Label thread
   if (result.thread) {
     labelThread_(result.thread, CRM_LABEL_ROOT);
     aswLog_('INFO', 'executeCrmOutbound_', 'Thread labeled ASW/CRM');
   }
 
-  // 6. Success alert
+  // 8. Success alert
   var successMsg = mode === 'DRAFT'
     ? 'Draft vytvořen pro ' + payload.recipientEmail + '.\nZkontrolujte v Gmailu.'
     : 'E-mail odeslán na ' + payload.recipientEmail + '.';
@@ -205,6 +223,15 @@ function resolveSelectedLeadPayload_(ui) {
     return null;
   }
 
+  // KROK 4: read review_decision (FF-006 sendability gate input)
+  var reviewDecision = String(hr.get(sourceRow, 'review_decision') || '').trim();
+
+  // KROK 4: read assignee_email if column exists (added in KROK 5)
+  var colAssignee = hr.colOrNull('assignee_email');
+  var assigneeEmail = colAssignee
+    ? String(hr.get(sourceRow, 'assignee_email') || '').trim()
+    : '';
+
   return {
     recipientEmail: recipientEmail,
     subject: subject,
@@ -212,6 +239,8 @@ function resolveSelectedLeadPayload_(ui) {
     crmRowNum: crmRowNum,
     businessName: businessName,
     outreachStage: stageLower,
+    reviewDecision: reviewDecision,
+    assigneeEmail: assigneeEmail,
     account: Session.getActiveUser().getEmail(),
     sourceSheet: sourceSheet,
     hr: hr,
@@ -221,19 +250,59 @@ function resolveSelectedLeadPayload_(ui) {
 
 
 /* ═══════════════════════════════════════════════════════════════
+   KROK 4: SENDABILITY GATE (FF-006) + ASSIGNEE IDENTITY (Reply-To)
+   ═══════════════════════════════════════════════════════════════ */
+
+/**
+ * Hard gate: forbid send/draft for any lead whose preview was not
+ * APPROVE-d by an operator (B-06 review). Throws on violation so
+ * programmatic callers cannot bypass; menu wrapper catches and shows
+ * a friendly alert + logs via aswLog_.
+ */
+function assertSendability_(reviewDecision, leadRef) {
+  if (reviewDecision !== REVIEW_DECISIONS.APPROVE) {
+    var got = reviewDecision || 'EMPTY';
+    throw new Error(
+      'Cannot send: review_decision must be APPROVE (got: ' + got + ') ' +
+      'for ' + (leadRef || 'lead') + '. ' +
+      'Operator must mark "Rozhodnutí ✎" as APPROVE in "Ke kontaktování" first.'
+    );
+  }
+}
+
+/**
+ * Resolve sender display identity for the Reply-To header from the
+ * assignee email. Falls back to DEFAULT_REPLY_TO_* (Config.gs) when
+ * assignee is empty (KROK 4 state, before assignee_email column exists)
+ * or unknown (typo / removed user).
+ */
+function resolveSenderIdentity_(assigneeEmail) {
+  var key = String(assigneeEmail || '').trim().toLowerCase();
+  if (key && ASSIGNEE_NAMES[key]) {
+    return { email: key, name: ASSIGNEE_NAMES[key] };
+  }
+  return { email: DEFAULT_REPLY_TO_EMAIL, name: DEFAULT_REPLY_TO_NAME };
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
    GMAIL DRAFT CREATION
    ═══════════════════════════════════════════════════════════════ */
 
 function createGmailDraft_(payload) {
   try {
+    var sender = payload.sender || resolveSenderIdentity_(payload.assigneeEmail);
+
     aswLog_('INFO', 'createGmailDraft_',
-      'Creating draft for ' + payload.recipientEmail + ' [' + payload.subject + ']',
+      'Creating draft for ' + payload.recipientEmail + ' [' + payload.subject + ']' +
+      ' replyTo=' + sender.email,
       { row: payload.crmRowNum });
 
     var draft = GmailApp.createDraft(
       payload.recipientEmail,
       payload.subject,
-      payload.body
+      payload.body,
+      { replyTo: sender.email, name: sender.name }
     );
 
     var draftMsg = draft.getMessage();
@@ -274,14 +343,18 @@ function createGmailDraft_(payload) {
 
 function sendGmailMessage_(payload) {
   try {
+    var sender = payload.sender || resolveSenderIdentity_(payload.assigneeEmail);
+
     aswLog_('INFO', 'sendGmailMessage_',
-      'Sending to ' + payload.recipientEmail + ' [' + payload.subject + ']',
+      'Sending to ' + payload.recipientEmail + ' [' + payload.subject + ']' +
+      ' replyTo=' + sender.email,
       { row: payload.crmRowNum });
 
     GmailApp.sendEmail(
       payload.recipientEmail,
       payload.subject,
-      payload.body
+      payload.body,
+      { replyTo: sender.email, name: sender.name }
     );
 
     // Find the sent thread — search by recipient + subject

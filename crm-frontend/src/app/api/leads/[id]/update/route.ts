@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { isMockMode, updateMockLead, getMockLeadById } from '@/lib/mock/mock-service';
-import { OUTREACH_STAGES, NEXT_ACTIONS } from '@/lib/config';
+import { OUTREACH_STAGES, NEXT_ACTIONS, ALLOWED_USERS } from '@/lib/config';
 import type { OutreachStageKey } from '@/lib/config';
 import type { LeadEditableFields } from '@/lib/domain/lead';
 
@@ -10,10 +10,12 @@ const ALLOWED_FIELDS: ReadonlySet<keyof LeadEditableFields> = new Set([
   'lastContactAt',
   'nextFollowupAt',
   'salesNote',
+  'assigneeEmail',
 ]);
 
 const VALID_STAGES = new Set(Object.keys(OUTREACH_STAGES));
 const VALID_ACTIONS = new Set(NEXT_ACTIONS);
+const VALID_ASSIGNEES = new Set(ALLOWED_USERS.map(e => e.toLowerCase()));
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_NOTE_LENGTH = 5000;
 
@@ -41,6 +43,15 @@ function validateFields(body: Record<string, unknown>): string | null {
   if (body.salesNote !== undefined) {
     if (typeof body.salesNote !== 'string' || body.salesNote.length > MAX_NOTE_LENGTH) {
       return `Poznámka je příliš dlouhá (max ${MAX_NOTE_LENGTH} znaků)`;
+    }
+  }
+  if (body.assigneeEmail !== undefined) {
+    if (typeof body.assigneeEmail !== 'string') {
+      return 'Neplatný formát assigneeEmail (očekáván string)';
+    }
+    const v = body.assigneeEmail.trim().toLowerCase();
+    if (v !== '' && !VALID_ASSIGNEES.has(v)) {
+      return `Neplatný assignee: ${v}. Povolené: ${[...VALID_ASSIGNEES].join(', ')} (nebo prázdné = Nepřiděleno)`;
     }
   }
   return null;

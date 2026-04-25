@@ -53,6 +53,8 @@ function onOpen() {
         .addItem('Report pro vsechny joby', 'generateIngestReportsForAllJobs')
     )
     .addSeparator()
+    .addItem('🔄 Import raw → LEADS', 'processRawImportBatch')
+    .addSeparator()
     .addSubMenu(
       ui.createMenu('Ke kontaktování')
         .addItem('Evaluate contact readiness', 'evaluateContactReadiness')

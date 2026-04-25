@@ -73,3 +73,28 @@ export const NEXT_ACTIONS = [
 
 // Auth
 export const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || '').split(',').map(e => e.trim()).filter(Boolean);
+
+// KROK 5: Assignee map — single source of truth shared with apps-script/Config.gs.
+// Keep keys + display names in sync between this file and apps-script/Config.gs ASSIGNEE_NAMES.
+// Diakritika (Sebastián, Tomáš) zachována — soubor je UTF-8.
+export const ASSIGNEE_NAMES: Record<string, string> = {
+  'sfridrich@unipong.cz':       'Sebastián Fridrich',
+  'sebastian@autosmartweb.cz':  'Sebastián Fridrich',
+  'tomas@autosmartweb.cz':      'Tomáš Maixner',
+  'jan.bezemek@autosmartweb.cz':'Jan Bezemek',
+};
+
+export const ALLOWED_USERS = Object.keys(ASSIGNEE_NAMES);
+
+export const UNASSIGNED_LABEL = 'Nepřiděleno';
+
+// Helper for UI: returns display name for a sheet `assignee_email` value.
+//  - empty string  → "Nepřiděleno"
+//  - known email   → display name from ASSIGNEE_NAMES
+//  - unknown email → "Neznámý: <email>" (preserves orphan assignments)
+export function formatAssignee(email: string | null | undefined): string {
+  const e = (email ?? '').trim().toLowerCase();
+  if (!e) return UNASSIGNED_LABEL;
+  if (ASSIGNEE_NAMES[e]) return ASSIGNEE_NAMES[e];
+  return `Neznámý: ${e}`;
+}
