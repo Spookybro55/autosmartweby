@@ -52,7 +52,11 @@ export async function fetchAllLeads(): Promise<Lead[]> {
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SHEET_CONFIG.SPREADSHEET_ID,
-    range: `${SHEET_CONFIG.LEADS_SHEET}!A2:BZ`,
+    // KROK 9 hotfix: A2:BZ truncated reads at column 78. After KROK 5 added
+    // assignee_email (extension column #56 + ~20 legacy → column 76+), values
+    // beyond BZ were silently lost — header map knew the index, data row
+    // didn't reach it. A2:ZZ (702 cols) is safe headroom for pilot.
+    range: `${SHEET_CONFIG.LEADS_SHEET}!A2:ZZ`,
     valueRenderOption: 'UNFORMATTED_VALUE',
     dateTimeRenderOption: 'FORMATTED_STRING',
   });
