@@ -29,6 +29,11 @@ Každá položka má:
 | MC-DP-D-02 | 6 | Existuje `vercel.json` v root frontendu na Vercel platformě (nikoli v repu)? Pokud ano, jaké jsou settings? | Vercel Dashboard → Project → Settings → Build & Development | Pokud production branch ≠ `main`, nebo build cmd ≠ `npm run build`, eskalovat. |
 | MC-DP-D-03 | 6 | Žádný `clasp deploy` v `clasp-deploy.sh` — Apps Script Web App vždy servíruje HEAD. Existuje custom rollback skript v týmu, který audit nezná? | Tým interview / interní wiki | Pokud chybí, oprávněně vznikne `docs/ROLLBACK.md` (DP-018). |
 | MC-DP-D-04 | 6 | Aktuální deployed verze Apps Script v PROD vs HEAD `apps-script/` na main. | Apps Script Console → Deploy → Manage deployments → "Latest deployment" timestamp + manifest file IDs | Drift indikuje, že někdo zapomněl `clasp push` po merge. Critical pokud > 7 dní. |
+| MC-SEC-D-01 | 7 | Skutečné Vercel env vars set: `NEXTAUTH_SECRET` je nastaven, není prázdný (cross-ref SEC-016). | Vercel Dashboard → Project → Settings → Env Variables | `NEXTAUTH_SECRET` exists, length ≥ 32 chars, not committed value. Pokud chybí v PROD, **CRITICAL** — auth bypass možný. |
+| MC-SEC-D-02 | 7 | `next` package upgrade na 16.2.4 (SEC-012) — verify build a tests projdou. | Local `npm install next@16.2.4 && npm run build && npm run lint` v `crm-frontend/` | Build OK, žádné new TypeScript errors, lint OK. |
+| MC-SEC-D-03 | 7 | Whether `npm audit fix` byl spuštěn lokálně (předpokládáme ne — package-lock unchanged). | `git log --oneline -- crm-frontend/package-lock.json` | Pokud poslední změna package-lock je při add deps, ne npm audit fix. |
+| MC-SEC-D-04 | 7 | Apps Script Web App URL public exposure — bylo URL někde paste (Slack archive, github gist, public Slack, public docs)? | Manual search: PASTE-style services, internal Slack archive, Google `inurl:script.google.com/macros/s/` | Pokud pasted, token rotace je nutná (cross-ref SEC-017). |
+| MC-SEC-D-05 | 7 | Reálný obsah `_asw_logs` Sheet — verify žádné tokens / passwords / plné PII v poslední 1000 řádcích. | Sheets manual review (PROD i TEST) | Pokud detekováno, redact + add log redaction tier (SEC-019). |
 
 ### Ops checks
 
@@ -47,6 +52,14 @@ Každá položka má:
 | MC-DP-O-05 | 6 | Last `clasp push` timestamp do PROD — kdy reálně proběhl poslední deploy. | Apps Script Console → Project → Apps Script Editor → File metadata | Pokud > 30 dní od poslední změny `apps-script/*.gs` v main, asi drift. |
 | MC-DP-O-06 | 6 | Existuje Vercel preview deployment per PR? Jsou env vars per-environment (production vs preview)? | Vercel Dashboard → Project → Deployments | Preview = ON; preview env vars = subset bez production secrets. |
 | MC-DP-O-07 | 6 | Pokud někdo nastavil `ASW_ENV=PROD` v TEST Apps Script projektu (špatná konfigurace), `envGuard_()` by měl odhalit drift. Verify Script Properties v obou projektech. | Apps Script Console → Project Settings → Script Properties (pro oba projekty) | TEST: `ASW_ENV=TEST`, `ASW_SPREADSHEET_ID=14U9…`. PROD: `ASW_ENV=PROD`, `ASW_SPREADSHEET_ID=1RBc…`. Manuálně spustit `diagEnvConfig` v každém. |
+| MC-SEC-O-01 | 7 | Sheet sharing settings — kdo má read/write access na PROD sheet `1RBc…` a TEST sheet `14U9…`. (cross-ref SEC-001) | Google Sheets → Share dialog | PROD: minimum lidí + service account. TEST: tým. Žádný "Anyone with link" setting. |
+| MC-SEC-O-02 | 7 | Apps Script projekt access settings — kdo může editovat / `clasp pull` source code. (cross-ref SEC-002) | Apps Script Console → Project Settings → Share | TEST: tým. PROD: 1-2 lidé. Žádný "Anyone with link". |
+| MC-SEC-O-03 | 7 | `AUTH_PASSWORD` entropy + last rotation date. (cross-ref SEC-005, SEC-007) | Vercel env vars + interní password manager | Min 16 chars, mixed case + digits + symbols. Rotation cadence: 90 dní (po finalizaci SEC-017). |
+| MC-SEC-O-04 | 7 | `NEXTAUTH_SECRET` entropy + last rotation date. (cross-ref SEC-016) | Vercel env vars | Min 32 random bytes (base64). Rotation: každý incident / 12 měsíců. Rotace = invalidate všechny sessions. |
+| MC-SEC-O-05 | 7 | `FRONTEND_API_SECRET` (= Apps Script `payload.token`) sync mezi Vercel a Apps Script Script Properties. | Apps Script Console + Vercel Dashboard | Hodnoty identické. (Cross-ref MC-IN-O-01.) |
+| MC-SEC-O-06 | 7 | Vercel logs neobsahují `payload.token` v plain (cross-ref SEC-021, MC-IN-S-03). | Vercel Logs search past 7 days | Žádné výskyty `APPS_SCRIPT_SECRET` value. Pokud detekováno, immediate token rotation. |
+| MC-SEC-O-07 | 7 | Apps Script `_asw_logs` Sheet retention — explicitní TTL policy nebo aktuální count rotation. | Apps Script logs sheet review | < 5000 řádků aktuálně; nejnovější není starší než N dnů (definovat). |
+| MC-SEC-O-08 | 7 | Branch protection — `enforce_admins`, `required_signatures` actually changed po doporučení? (cross-ref SEC-022) | `gh api repos/.../branches/main/protection` | Po remediaci: `enforce_admins.enabled = true`, případně `required_signatures.enabled = true`. |
 
 ### Product / business checks
 
@@ -66,6 +79,11 @@ Každá položka má:
 | MC-DP-S-01 | 6 | Sheet IDs `1RBc…` (PROD), `14U9…` (TEST) — public exposure scope v Git history. | `git log -p` (jen indikace, ne celý dump) + threat-model review | Sheet IDs nejsou per se secret, ale + sharing settings = potenciální data exposure. Cross-ref DP-001, DP-002, IN-016 a Phase 7. |
 | MC-DP-S-02 | 6 | Apps Script Web App access level pro PROD (`appsscript.json:13` `"access": "ANYONE_ANONYMOUS"`). | Apps Script Console → Deploy → Manage deployments | `ANYONE_ANONYMOUS` je nutné pro `executeAs: USER_DEPLOYING` + shared-secret model. Verifikovat, že URL je dostatečně dlouhá / unguessable a nikde public exposed. |
 | MC-DP-S-03 | 6 | `enforce_admins: false` na main protection — kdo má admin rights na repu, kdo by mohl bypassovat? | GitHub repo settings → Manage access → Roles | Ideálně 1-2 admins, MFA enforced. Pokud > 3 admins, eskalovat. |
+| MC-SEC-S-01 | 7 | GDPR legitimate interest assessment pro scraping firmy.cz lead dat. Existuje právní hodnocení? (cross-ref SEC-014) | Interní docs / právník | Doložený legitimate interest dokument se 3-step test (purpose, necessity, balancing). |
+| MC-SEC-S-02 | 7 | Záznam o zpracování dat (čl. 30 GDPR) — existuje? (cross-ref SEC-014) | Interní docs / DPO | Existuje ROPA (Record of Processing Activities) s purposes, categories, retention, recipients. |
+| MC-SEC-S-03 | 7 | Privacy policy / data subject rights notice na public preview routes. (cross-ref SEC-009, SEC-014) | `/preview/<slug>` page footer | Footer obsahuje link na privacy policy nebo opt-out. Aktuálně chybí. |
+| MC-SEC-S-04 | 7 | Apps Script Web App access level a deploying user identity (cross-ref SEC-003, SEC-004). | Apps Script Console → Deploy → Manage deployments | Verify `executeAs: USER_DEPLOYING` matches současný user. Verify URL délka / unguessability. |
+| MC-SEC-S-05 | 7 | OAuth scope skutečně udělené tokeny (`gmail.modify` atd. byly scope-granted při authorization)? Lze redukovat při příští authorization? | Google Account → Security → Third-party access | Pokud kód nepotřebuje plné `gmail.modify`, downgrade na granular per SEC-004. |
 
 ---
 
