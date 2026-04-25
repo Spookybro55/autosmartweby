@@ -1419,12 +1419,14 @@ function installProjectTriggers() {
   installed.push('Timer: processRawImportBatch (30 min) — FF-002');
 
   // KROK 4 (FF-008): pull reply/bounce metadata from Gmail into LEADS.
-  // 60-min interval is conservative (lower Gmail API cost).
+  // 1-hour interval is conservative (lower Gmail API cost).
+  // Note: ScriptApp.everyMinutes() accepts only {1,5,10,15,30} — for
+  // hourly cadence we must use everyHours().
   ScriptApp.newTrigger('syncMailboxMetadata')
     .timeBased()
-    .everyMinutes(60)
+    .everyHours(1)
     .create();
-  installed.push('Timer: syncMailboxMetadata (60 min) — FF-008');
+  installed.push('Timer: syncMailboxMetadata (1 hour) — FF-008');
 
   if (!hasOnOpen) {
     ScriptApp.newTrigger('onOpen')
