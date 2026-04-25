@@ -121,7 +121,10 @@ var EXTENSION_COLUMNS = [
   'review_decision',
   'review_note',
   'reviewed_at',
-  'reviewed_by'
+  'reviewed_by',
+  // KROK 5: multi-user assignee model — '' = unassigned, jinak email
+  // z ALLOWED_USERS (== Object.keys(ASSIGNEE_NAMES) — single source of truth)
+  'assignee_email'
 ];
 
 /* ── Preview stage state machine ──────────────────────────── */
@@ -266,3 +269,9 @@ var ASSIGNEE_NAMES = {
 
 var DEFAULT_REPLY_TO_EMAIL = 'sebastian@autosmartweb.cz';
 var DEFAULT_REPLY_TO_NAME  = 'Sebastián Fridrich';
+
+/* ── KROK 5: allowlist of pilot users that may own a lead ─────
+   Derived from ASSIGNEE_NAMES so we have a single source of truth
+   across (a) Reply-To resolution, (b) frontend display labels,
+   (c) backend assignee validation in WebAppEndpoint.gs:assignLead. */
+var ALLOWED_USERS = Object.keys(ASSIGNEE_NAMES);

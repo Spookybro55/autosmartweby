@@ -55,6 +55,7 @@ export function updateMockLead(id: string, fields: Partial<LeadEditableFields>):
   if (fields.lastContactAt !== undefined) lead.lastContactAt = fields.lastContactAt;
   if (fields.nextFollowupAt !== undefined) lead.nextFollowupAt = fields.nextFollowupAt;
   if (fields.salesNote !== undefined) lead.salesNote = fields.salesNote;
+  if (fields.assigneeEmail !== undefined) lead.assigneeEmail = (fields.assigneeEmail ?? '').toLowerCase().trim();
 
   return true;
 }
@@ -77,6 +78,7 @@ export function leadToListItem(lead: Lead): LeadListItem {
     serviceType: lead.serviceType,
     contactName: lead.contactName,
     previewUrl: lead.previewUrl,
+    assigneeEmail: lead.assigneeEmail ?? '',
   };
 }
 

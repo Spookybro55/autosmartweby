@@ -16,6 +16,7 @@ import {
 } from "@/components/leads/lead-filters";
 import { LeadsTable } from "@/components/leads/leads-table";
 import { LeadDetailDrawer } from "@/components/leads/lead-detail-drawer";
+import { useCurrentUser } from "@/lib/auth/use-current-user";
 
 interface LeadListItem {
   id: string;
@@ -34,6 +35,7 @@ interface LeadListItem {
   serviceType: string;
   contactName: string;
   previewUrl: string;
+  assigneeEmail: string;
 }
 
 const PRIORITY_ORDER: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
@@ -124,6 +126,7 @@ export default function LeadsPage() {
 
 function LeadsPageInner() {
   const searchParams = useSearchParams();
+  const { email: currentUserEmail } = useCurrentUser();
   const [leads, setLeads] = useState<LeadListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -163,6 +166,17 @@ function LeadsPageInner() {
   const filteredLeads = useMemo(() => {
     let result = leads;
 
+    // KROK 5: assignee scope filter — "Mé leady" = jen leady přidělené
+    // současnému uživateli; "Všechny" = všechny vč. nepřidělených i jiných.
+    // Dokud se /api/auth/me nevrátí, "MINE" filter dočasně neaplikujeme,
+    // jinak by tabulka byla na pár ms prázdná. Po načtení emailu re-render.
+    if (filters.assigneeScope === "MINE" && currentUserEmail) {
+      const me = currentUserEmail.toLowerCase().trim();
+      result = result.filter(
+        (l) => (l.assigneeEmail || "").toLowerCase().trim() === me,
+      );
+    }
+
     if (filters.search) {
       result = result.filter((l) => matchesSearch(l, filters.search));
     }
@@ -185,7 +199,7 @@ function LeadsPageInner() {
     return [...result].sort((a, b) =>
       compareLead(a, b, filters.sortBy, filters.sortDir)
     );
-  }, [leads, filters]);
+  }, [leads, filters, currentUserEmail]);
 
   function handleSort(column: string) {
     setFilters((prev) => ({
