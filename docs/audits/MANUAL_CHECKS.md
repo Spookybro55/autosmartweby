@@ -34,6 +34,11 @@ Každá položka má:
 | MC-SEC-D-03 | 7 | Whether `npm audit fix` byl spuštěn lokálně (předpokládáme ne — package-lock unchanged). | `git log --oneline -- crm-frontend/package-lock.json` | Pokud poslední změna package-lock je při add deps, ne npm audit fix. |
 | MC-SEC-D-04 | 7 | Apps Script Web App URL public exposure — bylo URL někde paste (Slack archive, github gist, public Slack, public docs)? | Manual search: PASTE-style services, internal Slack archive, Google `inurl:script.google.com/macros/s/` | Pokud pasted, token rotace je nutná (cross-ref SEC-017). |
 | MC-SEC-D-05 | 7 | Reálný obsah `_asw_logs` Sheet — verify žádné tokens / passwords / plné PII v poslední 1000 řádcích. | Sheets manual review (PROD i TEST) | Pokud detekováno, redact + add log redaction tier (SEC-019). |
+| MC-FF-D-01 | 8 | Skutečný workflow pro persist scraper output do `_raw_import` (manual paste? interní script? Apps Script editor copy-paste?). Critical pro pochopení FF-001 gap. | Tým interview, observable workflow | Pokud manual paste — dokumentovat v 24-automation-workflows. Pokud existing internal tool — dokumentovat či zhodnotit zda integrovat. |
+| MC-FF-D-02 | 8 | Reálný PROD `processPreviewQueue` execution time per run. | Apps Script Console → Executions → trigger history filter for `processPreviewQueue` | Median < 5 min, p95 < 15 min. Pokud > 15 min → race risk per FF-003 (overlapping ticks confirmed). |
+| MC-FF-D-03 | 8 | Frequency `LockService` failures per Apps Script function (web check, qualify, edit, write-back). | Apps Script Console → Executions → grep for `Could not acquire lock` | < 1% per funkce. Pokud > 5%, indikuje contention; bump timeout nebo decompose work. |
+| MC-FF-D-04 | 8 | Operator UX: kolik leadů reálně prochází CHANGES_REQUESTED → BRIEF_READY cyklem (FF-005 loop manifest). | Apps Script logs grep `decision=CHANGES_REQUESTED` v posledních 30 dnech, count per lead_id | Pokud n>1 per lead → loop confirmed; potřeba implementovat better workflow. |
+| MC-FF-D-05 | 8 | Skutečná frequency `MailboxSync.syncMailboxMetadata` manual runs. | Apps Script Console → Executions → filter syncMailboxMetadata | Daily je acceptable; weekly = stuck inbound risk; nikdy = critical (cross-ref FF-008). |
 
 ### Ops checks
 
@@ -60,6 +65,12 @@ Každá položka má:
 | MC-SEC-O-06 | 7 | Vercel logs neobsahují `payload.token` v plain (cross-ref SEC-021, MC-IN-S-03). | Vercel Logs search past 7 days | Žádné výskyty `APPS_SCRIPT_SECRET` value. Pokud detekováno, immediate token rotation. |
 | MC-SEC-O-07 | 7 | Apps Script `_asw_logs` Sheet retention — explicitní TTL policy nebo aktuální count rotation. | Apps Script logs sheet review | < 5000 řádků aktuálně; nejnovější není starší než N dnů (definovat). |
 | MC-SEC-O-08 | 7 | Branch protection — `enforce_admins`, `required_signatures` actually changed po doporučení? (cross-ref SEC-022) | `gh api repos/.../branches/main/protection` | Po remediaci: `enforce_admins.enabled = true`, případně `required_signatures.enabled = true`. |
+| MC-FF-O-01 | 8 | Vercel cold-start frequency reálně manifestuje jako broken `preview_url` complaints? (cross-ref FF-004) | Vercel logs + customer support tickets last 30 days | Acceptable threshold: < 1 complaint / týden. Vyšší = persistent preview store priority bump. |
+| MC-FF-O-02 | 8 | Reálná frequency double-send promptu při real operator usage (cross-ref FF-007). | `_asw_logs` filter `Double-send blocked by user` last 30 days | Acceptable: 0 occurrences (operator vždy reading prompt). Vyšší = hard block needed. |
+| MC-FF-O-03 | 8 | Existence externího monitoring / alerting setup mimo repo (Datadog, Slack alerts, Google Cloud Monitoring). | Tým interview / interní wiki | Pokud chybí, eskalovat priority FF-017. |
+| MC-FF-O-04 | 8 | Operator UX feedback — preferují "Ke kontaktování" Sheets UI nebo by chtěli frontend review queue? (cross-ref FF-018) | Tým survey 1-2 operátorů | Decision: implementovat `/reviews` route (vyšší investment) vs zlepšit Sheets dashboard rows (lower investment). |
+| MC-FF-O-05 | 8 | Persistent preview store — reálná funkčnost po Vercel deploy. | Manual test: deploy → bez touch / 60 min wait → fetch existing `/preview/<slug>` | Pokud 404, FF-004 confirmed v PROD; persistent storage urgent. |
+| MC-FF-O-06 | 8 | Aktuální stav `_raw_import` sheetu v PROD — kolik rows v `status=raw` čeká na neexistující ingest trigger? | Sheets PROD → `_raw_import` filter `normalized_status=raw` | Pokud > 0, confirms FF-001/FF-002 manual gap. Operator manually triggers? |
 
 ### Product / business checks
 
