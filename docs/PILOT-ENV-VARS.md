@@ -87,7 +87,7 @@ Script Properties → Edit script properties.
 
 | Name | Účel | Default / Generation | Required | Evidence |
 |------|------|----------------------|----------|----------|
-| `ASW_ENV` | Env detekce. Pro pilot = `PROD` (= aktivní prostředí, ne audit-style PROD). | `PROD` (textový string) | ✅ ANO | `apps-script/EnvConfig.gs:51` |
+| `ASW_ENV` | Env detekce. Pro pilot = **`TEST`** — `EnvConfig.gs:25-36` má hardcoded sheet→env mapu (PROD↔`1RBc...`, TEST↔`14U9...`). `envGuard_()` throw při mismatch. Pilot používá `14U9...` ⇒ `TEST`. (Hodnota je o "který sheet", ne "produkční vs dev" intent.) | `TEST` (textový string) | ✅ ANO | `apps-script/EnvConfig.gs:51,119-140` |
 | `ASW_SPREADSHEET_ID` | Sheet ID pro Apps Script přístup. Pro pilot = TEST sheet. | `14U9CC0q5gpFr2p7CD1s4rf3i0lCettIVYIqrO8lsj9c` | ✅ ANO | `apps-script/EnvConfig.gs:62` |
 | `FRONTEND_API_SECRET` | Shared secret pro auth volání z Vercelu. **MUSÍ být stejný jako `APPS_SCRIPT_SECRET` ve Vercelu**. | `openssl rand -base64 32` | ✅ ANO | `apps-script/WebAppEndpoint.gs:14` |
 | `PREVIEW_WEBHOOK_SECRET` | Shared secret pro Apps Script → `/api/preview/render` calls. **MUSÍ být stejný jako `PREVIEW_WEBHOOK_SECRET` ve Vercelu**. | `openssl rand -base64 32` | ✅ ANO | `apps-script/EnvConfig.gs:105` |
