@@ -39,6 +39,13 @@ Každá položka má:
 | MC-FF-D-03 | 8 | Frequency `LockService` failures per Apps Script function (web check, qualify, edit, write-back). | Apps Script Console → Executions → grep for `Could not acquire lock` | < 1% per funkce. Pokud > 5%, indikuje contention; bump timeout nebo decompose work. |
 | MC-FF-D-04 | 8 | Operator UX: kolik leadů reálně prochází CHANGES_REQUESTED → BRIEF_READY cyklem (FF-005 loop manifest). | Apps Script logs grep `decision=CHANGES_REQUESTED` v posledních 30 dnech, count per lead_id | Pokud n>1 per lead → loop confirmed; potřeba implementovat better workflow. |
 | MC-FF-D-05 | 8 | Skutečná frequency `MailboxSync.syncMailboxMetadata` manual runs. | Apps Script Console → Executions → filter syncMailboxMetadata | Daily je acceptable; weekly = stuck inbound risk; nikdy = critical (cross-ref FF-008). |
+| MC-BLD-D-01 | 9 | Verify `npm run dev` chování v fresh clone se skutečnými Google credentials. Mock mode fallback per missing creds. | Local fresh clone + populate `.env.local` + `npm run dev` | Aplikace startuje, dashboard loaduje data ze Sheets, login s `AUTH_PASSWORD` projde. |
+| MC-BLD-D-02 | 9 | Verify `clasp pull` / `clasp push test` workflow s reálným Google account login z fresh clone. | `npm i -g @google/clasp` → `clasp login` → `cd apps-script && clasp pull` v fresh clone | Pull stáhne aktuální TEST source, push přepíše TEST runtime. |
+| MC-BLD-D-03 | 9 | Build v Windows + Czech path + OneDrive (`C:/Users/spook/Nabídka weby`) — verify `npm ci`, `npm run build`, `npm run lint` PASS v této specific cestě. | OneDrive working copy, Phase 9 protokol equivalent commands | Verify rozšiřuje Phase 9 evidence z `/tmp/...` only do reálné dev path. |
+| MC-BLD-D-04 | 9 | Whether tým pravidelně spouští testy lokálně před push (CI je nespouští, BLD-015). | Tým interview / git log analysis (commit messages "test:" prefix) | Pokud "no", risk za zlomený merge je vysoký; doporučit BLD-015 fix prio. |
+| MC-BLD-D-05 | 9 | Whether `@google/clasp@3.3.0` (CLI) je compatible se všemi `apps-script/*.gs` features (V8 runtime, etc.). | `clasp --version` + manual run all menu items v TEST | Pokud features broken (např. `installable triggers`), bump clasp version. |
+| MC-BLD-O-01 | 9 | Reálná frequency Vercel preview build PASS / FAIL po každém push (no `vercel.json` per DP-009). | Vercel Dashboard → Deployments | Acceptable: 0% builds fail. Pokud >5%, build env drift od repo CI. |
+| MC-BLD-O-02 | 9 | `.env.local` skutečně používaný PROD operatorem — může mít další undocumented vars? | Vercel env vars dump (admin) | Cross-check vůči `crm-frontend/.env.example`; každý mismatch = finding pro DOC fáze. |
 
 ### Ops checks
 
