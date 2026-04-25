@@ -1,0 +1,81 @@
+name: Pilot CI
+
+# Minimum CI gate for pilot (KROK 7).
+# Validates frontend (lint + tsc + build + test:b06) and apps-script
+# logic tests (ingest runtime + a08 preview queue) on every PR + main push.
+# Runs in parallel with Docs Governance workflow (separate job names → no collision).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  frontend-checks:
+    name: frontend-checks
+    runs-on: ubuntu-latest
+    env:
+      # KROK 3 fail-fast in lib/auth/session-secret.ts requires NEXTAUTH_SECRET
+      # >=32 chars at module load time during `next build` page-data collection.
+      NEXTAUTH_SECRET: ci-test-secret-not-for-production-32chars
+
+      # KROK 2 fail-fast in lib/mock/mock-service.ts throws in production
+      # when GOOGLE_* are missing. CI build runs with NODE_ENV=production.
+      # MOCK_MODE=true short-circuits to mock-mode (KROK 5 design); fake
+      # GOOGLE_* are defense-in-depth so any code that bypasses isMockMode
+      # still has a value to read (no real network call ever happens because
+      # MOCK_MODE wins the isMockMode early-return).
+      MOCK_MODE: 'true'
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ci-mock@ci-mock.iam.gserviceaccount.com
+      GOOGLE_PRIVATE_KEY: |
+        -----BEGIN PRIVATE KEY-----
+        CI_MOCK_KEY_NOT_REAL
+        -----END PRIVATE KEY-----
+      GOOGLE_SPREADSHEET_ID: ci-mock-sheet-id
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: crm-frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: crm-frontend
+        run: npm ci
+
+      - name: Lint
+        working-directory: crm-frontend
+        run: npm run lint
+
+      - name: Typecheck
+        working-directory: crm-frontend
+        run: npx tsc --noEmit
+
+      - name: Build (production)
+        working-directory: crm-frontend
+        run: npm run build
+
+      - name: B-06 review writeback tests
+        # Runs from repo root because the script is registered there.
+        run: npm run test:b06
+
+  apps-script-checks:
+    name: apps-script-checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Ingest runtime test (A-04 → A-02 → A-03 → A-05 → LEADS)
+        run: node scripts/test-ingest-runtime.mjs
+
+      - name: A-08 preview queue test
+        run: node scripts/test-a08-preview-queue.mjs
