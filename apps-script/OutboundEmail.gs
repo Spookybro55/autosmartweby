@@ -141,13 +141,16 @@ function resolveSelectedLeadPayload_(ui) {
   // Read row data from contact sheet
   var rowData = sheet.getRange(activeRow, 1, 1, TOTAL_COLS_).getValues()[0];
 
-  var recipientEmail = String(rowData[5] || '').trim();  // col 6 = E-mail
-  var subject = String(rowData[15] || '').trim();         // col 16 = Předmět e-mailu
-  var body = String(rowData[16] || '').trim();            // col 17 = Návrh zprávy
-  var crmRowNum = Number(rowData[18]);                    // col 19 = CRM řádek
-  var firmaCell = String(rowData[1] || '').trim();        // col 2 = Firma
-  var businessName = firmaCell.split('\n')[0] || '';
-  var outreachStage = String(rowData[17] || '').trim();   // col 18 = Pipeline stav
+  // KROK 9 hotfix: B-06 inserted review_decision + review_note as cols
+  // 12-13, shifting all later cols by +2. Plus col 21 is now "Lead ID"
+  // string (FIRMYCZ-...), not numeric CRM row. Resolve via lead_id lookup.
+  var recipientEmail = String(rowData[5]  || '').trim();  // col 6  = E-mail
+  var subject        = String(rowData[17] || '').trim();  // col 18 = Predmet
+  var body           = String(rowData[18] || '').trim();  // col 19 = Navrh zpravy
+  var outreachStage  = String(rowData[19] || '').trim();  // col 20 = Pipeline stav
+  var leadId         = String(rowData[20] || '').trim();  // col 21 = Lead ID
+  var firmaCell      = String(rowData[1]  || '').trim();  // col 2  = Firma
+  var businessName   = firmaCell.split('\n')[0] || '';
 
   // Guard: valid email
   if (!recipientEmail || recipientEmail === '\u2014' || recipientEmail.indexOf('@') === -1) {
@@ -167,9 +170,9 @@ function resolveSelectedLeadPayload_(ui) {
     return null;
   }
 
-  // Guard: valid CRM row reference
-  if (!crmRowNum || crmRowNum < DATA_START_ROW) {
-    safeAlert_('Neplatný odkaz na CRM řádek. Spusťte "Refresh Ke kontaktování".');
+  // Guard: lead_id present (col 21 in contact sheet)
+  if (!leadId) {
+    safeAlert_('Vybraný řádek nemá lead_id. Spusťte "Refresh Ke kontaktování" + "Ensure lead IDs".');
     return null;
   }
 
@@ -180,7 +183,8 @@ function resolveSelectedLeadPayload_(ui) {
     return null;
   }
 
-  // Guard: double-send protection
+  // Resolve LEADS row by lead_id (replaces brittle numeric CRM row reference
+  // which broke after B-06 column shift).
   var sourceSheet = ss.getSheetByName(MAIN_SHEET_NAME);
   if (!sourceSheet) {
     safeAlert_('Zdrojový list "' + MAIN_SHEET_NAME + '" nenalezen.');
@@ -188,6 +192,18 @@ function resolveSelectedLeadPayload_(ui) {
   }
 
   var hr = getHeaderResolver_(sourceSheet);
+  var leadIdCol = hr.colOrNull('lead_id');
+  if (!leadIdCol) {
+    safeAlert_('Sloupec "lead_id" nenalezen v LEADS. Spusťte "Setup preview extension".');
+    return null;
+  }
+
+  var crmRowNum = findRowByLeadId_(sourceSheet, leadIdCol, leadId);
+  if (!crmRowNum) {
+    safeAlert_('Lead ' + leadId + ' nenalezen v LEADS. Spusťte "Refresh Ke kontaktování".');
+    return null;
+  }
+
   var sourceRow = sourceSheet.getRange(crmRowNum, 1, 1, sourceSheet.getLastColumn()).getValues()[0];
 
   var lastSentStr = String(hr.get(sourceRow, 'last_email_sent_at') || '').trim();
