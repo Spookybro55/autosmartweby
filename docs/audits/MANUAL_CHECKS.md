@@ -112,6 +112,35 @@ Každá položka má:
 
 ---
 
+### Phase 11 cross-check additions
+
+| # | Fáze | Persona | Co ověřit | Kde | Očekávaný výsledek |
+|---|------|---------|-----------|-----|---------------------|
+| MC-CC-NB-01 | 11a | Newbie | Existuje interní onboarding doc / video / Slack channel mimo repo? | Tým interview / interní wiki | Pokud ano, root README odkaz. Pokud ne, eskalovat DOC-017. |
+| MC-CC-NB-02 | 11a | Newbie | Reálná onboarding doba pro nové dev → first PR. | Recent hires survey | Baseline pro DOC-012. > 5 dní = blocker. |
+| MC-CC-NB-03 | 11a | Newbie | Frequency mock mode silent fallback v reálném setupu. | Survey + logs | Pokud > 30%, eskalovat CC-NB-001. |
+| MC-CC-OPS-01 | 11b | DevOps | Existuje on-call rotace / escalation path mimo repo? | Tým interview | Pokud ne, eskalovat CC-OPS-001. |
+| MC-CC-OPS-02 | 11b | DevOps | SLO / SLI definice (uptime, latency, error rate target). | Tým interview / interní docs | Pokud ne, no measurable "down" definition. |
+| MC-CC-OPS-03 | 11b | DevOps | Last `clasp push prod` timestamp + drift vs main HEAD. | Apps Script Console | Pokud > 7 dní za main, indikuje zapomenutý deploy. |
+| MC-CC-OPS-04 | 11b | DevOps | Vercel current deploy SHA vs `origin/main`. | Vercel Dashboard | Mělo by matchnout. |
+| MC-CC-OPS-05 | 11b | DevOps | Apps Script daily quota usage trend. | Apps Script Console → Quota | < 60% průměr; > 80% scaling risk. |
+| MC-CC-OPS-06 | 11b | DevOps | Existuje incident playbook mimo repo (Notion, etc.). | Tým interview | Pokud ano, integrovat do `docs/INCIDENT-RESPONSE.md`. |
+| MC-CC-OPS-07 | 11b | DevOps | Backup strategy pro Google Sheets (Google-default vs custom export). | Workspace admin | Verify Google-default je sufficient nebo custom job exists. |
+| MC-CC-SEC-01 | 11c | Attacker | Sheet sharing settings na PROD `1RBc…` — `Restricted` nebo `Anyone with link`? Critical pro CC-SEC-004. | Google Sheets → Share dialog | `Restricted` ideálně; "Anyone" = immediate breach. |
+| MC-CC-SEC-02 | 11c | Attacker | Apps Script PROD project owner/editor list — kdo má `clasp pull`. | Apps Script Console → Share | < 5 lidí, žádný "Anyone with link". |
+| MC-CC-SEC-03 | 11c | Attacker | Vercel preview deployment URL pattern — předvídatelné? Indexable? | Vercel deployment list | Random suffix per deployment, robots.txt blocks. |
+| MC-CC-SEC-04 | 11c | Attacker | Existing penetration test report (mimo audit). | Tým interview / wiki | Pokud nikdy → eskalovat full pentest. |
+| MC-CC-SEC-05 | 11c | Attacker | Google Workspace OAuth-app revocation procedure pro ex-employees. | Workspace admin | Documented offboarding checklist (clasp + cookies + Sheets share). |
+| MC-CC-SEC-06 | 11c | Attacker | Whether `crm-session` cookie revocation post-fired employee proběhne. | Manual test v TEST env | Aktuálně NE (SEC-008). Test confirms. |
+| MC-CC-QA-01 | 11d | QA | Existují kompletní E2E test scripts (manual playbook) mimo repo? | Tým QA interview | Pokud ne, eskalovat CC-QA-002. |
+| MC-CC-QA-02 | 11d | QA | Real lead acceptance walkthrough — operator processes 1 lead E2E with timing. | TEST env + 1 operator | Baseline acceptance time + stuck stages identifikace. |
+| MC-CC-QA-03 | 11d | QA | Load test — kolik leads/day systém zvládne před degradací. | Synthetic load test | Define max throughput; document v `docs/28`. |
+| MC-CC-QA-04 | 11d | QA | Vercel deploy → preview_url integrity check (broken count po deploy). | Pre + post deploy slug check | Acceptance: 0%; reality (FF-004) = significant. |
+| MC-CC-QA-05 | 11d | QA | Operator workflow timing: review → approve → send acceptance time. | Real operator session, stopwatch | Baseline pro UX acceptance + bottlenecks. |
+| MC-CC-QA-06 | 11d | QA | Cross-state lifecycle invariants — sample 100 LEADS rows for inconsistencies. | Sheets manual review | < 1% inconsistent; > 1% = FF-015 manifest. |
+
+---
+
 ## Kontexty bez přístupu z auditu (anticipated)
 
 Audit nemá přístup k následujícím systémům a proto sem v průběhu fází přidá relevantní otázky:
