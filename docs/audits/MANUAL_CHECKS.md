@@ -46,6 +46,13 @@ Každá položka má:
 | MC-BLD-D-05 | 9 | Whether `@google/clasp@3.3.0` (CLI) je compatible se všemi `apps-script/*.gs` features (V8 runtime, etc.). | `clasp --version` + manual run all menu items v TEST | Pokud features broken (např. `installable triggers`), bump clasp version. |
 | MC-BLD-O-01 | 9 | Reálná frequency Vercel preview build PASS / FAIL po každém push (no `vercel.json` per DP-009). | Vercel Dashboard → Deployments | Acceptable: 0% builds fail. Pokud >5%, build env drift od repo CI. |
 | MC-BLD-O-02 | 9 | `.env.local` skutečně používaný PROD operatorem — může mít další undocumented vars? | Vercel env vars dump (admin) | Cross-check vůči `crm-frontend/.env.example`; každý mismatch = finding pro DOC fáze. |
+| MC-DOC-D-01 | 10 | Existence interní wiki / Notion / Confluence dokumentace mimo repo. | Tým interview / interní knowledge base | Pokud existuje, dokumentovat v root README jako externí index. Pokud ne, eskalovat DOC-017 prio. |
+| MC-DOC-D-02 | 10 | Operator training materiály mimo repo (videa, screenshots, intern slovník). | Tým interview, fileserver scan | Pokud existují, eskalovat do `docs/OPERATOR-GUIDE.md` per DOC-022. |
+| MC-DOC-D-03 | 10 | Tým interview pro skutečnou onboarding zkušenost (jak dlouho trvá nový dev → first PR? Jak dlouho operator → first review?). | 1-2 recent onboards survey | Baseline pro DOC-012 audience prioritization. |
+| MC-DOC-D-04 | 10 | Whether tým provozně používá `docs/09-project-control-tower.md` jako daily ops doc nebo je dead artifact. | Tým interview / git log on file | Pokud dead, candidate na archive (cross-ref DOC-014). Pokud daily, urgent fix DOC-003/004. |
+| MC-DOC-O-01 | 10 | Skutečný owner pro každý canonical doc (kdo je accountable za update?). | Tým ownership matrix | Vytvořit owner matrix v `docs/10-documentation-governance.md` per DOC-014 doporučení. |
+| MC-DOC-O-02 | 10 | Existence externího threat model / DPIA / GDPR documentation mimo repo. | Právník / DPO interview | Pokud existují, integrovat do `docs/PRIVACY.md` (DOC-018). Pokud ne, eskalovat. |
+| MC-DOC-S-01 | 10 | Privacy compliance review (kdo je DPO, jak je dokumentováno?). | Interní compliance kontakt | Nutné pro DOC-018 implementation. |
 
 ### Ops checks
 
