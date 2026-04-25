@@ -20,16 +20,24 @@ KROKu 8. Tyto jsou důležité — bez nich bude pilot částečně nefunkční.
 
 ### D1. Frontend potřebuje 3 GOOGLE_* env vars pro real-data režim
 KROK 8 nezmiňuje `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY`,
-`GOOGLE_SPREADSHEET_ID`. Bez nich `crm-frontend/src/lib/mock/mock-service.ts:9-11`
-přepne celý čtecí flow do **mock módu** (5 fake leadů z `MOCK_LEADS`),
-takže Sebastian uvidí v UI fake data místo reálné Sheety.
-→ **Fix:** Doplnit do Vercel env vars (viz Section A níže).
+`GOOGLE_SPREADSHEET_ID`. Bez nich frontend by tiše přešel do mock módu
+(5 fake leadů). KROK 2 zavedl **fail-fast pattern** v
+`crm-frontend/src/lib/mock/mock-service.ts:9-31`:
+- `NODE_ENV === 'production'` + chybí `GOOGLE_*` → **throw Error** (žádné silent fallback)
+- `NODE_ENV !== 'production'` + chybí `GOOGLE_*` → mock + `console.warn`
+- `MOCK_MODE === 'true'` → mock (explicit opt-in, bypass všech checků)
+
+→ **Decision (Sebastian, 2026-04-25):** ZACHOVAT současnou architekturu
+(Cesta A pro reads + Cesta B pro writes). Doplnit 3× `GOOGLE_*` do Vercel
+env vars + Service Account setup v GCP (KROK 8 AKCE 0). Refactor reads na
+Apps Script-only odložen jako post-pilot rozhodnutí D-22.
 
 ### D2. Název env var je `APPS_SCRIPT_WEB_APP_URL`, ne `APPS_SCRIPT_URL`
 KROK 8 uvádí `APPS_SCRIPT_URL`, ale `crm-frontend/src/lib/config.ts:7`
 čte `process.env.APPS_SCRIPT_WEB_APP_URL`. Jeden z nich musí ustoupit.
-→ **Doporučení:** Ve Vercel použít přesný název z kódu
-(`APPS_SCRIPT_WEB_APP_URL`), abychom v KROKu 2/3 nemuseli sahat do kódu.
+→ **Decision (Sebastian, 2026-04-25):** Použít přesný název z kódu
+(`APPS_SCRIPT_WEB_APP_URL`). Aktualizovat KROK 8 zadání lokálně. Refactor
+názvu kódu = post-pilot rozhodnutí (ne dnes, regression risk).
 
 ### D3. `.env.example` obsahuje 3 zombie env vars
 `NEXTAUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` jsou v
@@ -53,9 +61,10 @@ Všechny zaškrtnout pro **Production + Preview + Development**.
 | `APPS_SCRIPT_SECRET` | Shared secret pro auth voláním Apps Scriptu. **MUSÍ být stejný jako `FRONTEND_API_SECRET` v Apps Script Properties** (viz Section C). | `openssl rand -base64 32` | ✅ ANO | `src/lib/google/apps-script-writer.ts:56` |
 | `PREVIEW_WEBHOOK_SECRET` | Shared secret pro `/api/preview/render` webhook. **MUSÍ být stejný jako `PREVIEW_WEBHOOK_SECRET` v Apps Script Properties** (viz Section C). | `openssl rand -base64 32` | ✅ ANO | `src/app/api/preview/render/route.ts:62` |
 | `PUBLIC_BASE_URL` | Veřejný base URL pro generované preview URL (např. `https://autosmartweby.vercel.app`). Vyplnit AŽ po prvním deployi (AKCE 5). | `https://<vercel-project>.vercel.app` (bez trailing `/`) | ⚠️ DOPORUČENO | `src/app/api/preview/render/route.ts:56` |
-| `GOOGLE_SERVICE_ACCOUNT_EMAIL` | Service Account email pro read-only přístup do Sheety. **Bez něj frontend přepne do mock módu** (D1). | Z Google Cloud Console → IAM → Service Accounts | ✅ ANO (jinak mock mode) | `src/lib/google/sheets-reader.ts:13`, `src/lib/mock/mock-service.ts:10` |
-| `GOOGLE_PRIVATE_KEY` | Private key Service Accountu (PEM, s `\n` jako literály). | Z JSON klíče Service Accountu, pole `private_key` | ✅ ANO (jinak mock mode) | `src/lib/google/sheets-reader.ts:14`, `src/lib/mock/mock-service.ts:10` |
-| `GOOGLE_SPREADSHEET_ID` | Sheet ID pro frontend reads. Pro pilot = TEST sheet. | `14U9CC0q5gpFr2p7CD1s4rf3i0lCettIVYIqrO8lsj9c` | ✅ ANO | `src/lib/config.ts:2` |
+| `GOOGLE_SERVICE_ACCOUNT_EMAIL` | Service Account email pro read-only přístup do Sheety. V produkci **fail-fast** (throw) pokud chybí (D1). | Z Google Cloud Console → IAM → Service Accounts → JSON key `client_email` | ✅ ANO (jinak prod throw) | `src/lib/google/sheets-reader.ts:13`, `src/lib/mock/mock-service.ts:9-31` |
+| `GOOGLE_PRIVATE_KEY` | Private key Service Accountu (PEM). Vlep CELÝ string z JSON, vč. `\n` escape sekvencí — kód dělá `.replace(/\\n/g, '\n')`. | Z JSON klíče Service Accountu, pole `private_key` | ✅ ANO (jinak prod throw) | `src/lib/google/sheets-reader.ts:14`, `src/lib/mock/mock-service.ts:9-31` |
+| `GOOGLE_SPREADSHEET_ID` | Sheet ID pro frontend reads. Pro pilot = TEST sheet. | `14U9CC0q5gpFr2p7CD1s4rf3i0lCettIVYIqrO8lsj9c` | ✅ ANO (jinak prod throw) | `src/lib/config.ts:2`, `src/lib/mock/mock-service.ts:9-31` |
+| `MOCK_MODE` | (Optional) Explicit opt-in pro mock data (bypass všech `GOOGLE_*` checků). Hodnota: `'true'`. **NEPOUŽÍVAT v Vercel produkci.** | Nenastavovat (default `undefined`) | ❌ NE | `src/lib/mock/mock-service.ts:10` |
 
 **Nepřidávat (zombie / auto-set):**
 - `NEXTAUTH_URL` — není v kódu (v `.env.example` zbytek po starém OAuth flow, BLD-004).
