@@ -17,6 +17,10 @@ var MAIN_SHEET_NAME    = 'LEADS';
 var CONTACT_SHEET_NAME = 'Ke kontaktování';
 var LOG_SHEET_NAME     = '_asw_logs';
 var RAW_IMPORT_SHEET_NAME = '_raw_import';
+// Phase 2 KROK 2: Sheets-backed preview storage (replaces in-memory Map
+// in crm-frontend preview-store.ts). Hidden list, accessed by Apps Script
+// only. Schema: see PreviewStore.gs PREVIEW_SHEET_HEADERS.
+var PREVIEW_SHEET_NAME = '_previews';
 var HEADER_ROW      = 1;
 var DATA_START_ROW  = 2;
 

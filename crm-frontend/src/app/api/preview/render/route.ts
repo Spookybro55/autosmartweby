@@ -17,16 +17,13 @@
  * multi-instance persistence.
  */
 import { timingSafeEqual } from 'node:crypto';
-import {
-  resolveTemplateFamily,
-  resolveTemplateRenderHints,
-} from '../../../../lib/domain/template-family.ts';
+import { resolveTemplateFamily } from '../../../../lib/domain/template-family.ts';
 import type {
   MinimalRenderResponseError,
   MinimalRenderResponseOk,
 } from '../../../../lib/domain/preview-contract.ts';
 import { validateRenderRequest } from '../../../../lib/preview/validate-render-request.ts';
-import { putPreviewRecord } from '../../../../lib/preview/preview-store.ts';
+import { invalidatePreviewRecord } from '../../../../lib/preview/preview-store.ts';
 import { evaluateQuality } from '../../../../lib/preview/quality-score.ts';
 
 const PREVIEW_VERSION = 'b04-mvp-1';
@@ -86,22 +83,21 @@ export async function POST(request: Request): Promise<Response> {
 
   // --- Family routing (B-03) ---
   const family = resolveTemplateFamily(req.template_type);
-  const hints = resolveTemplateRenderHints(req.template_type);
 
   // --- Quality evaluation ---
   const quality = evaluateQuality(req.preview_brief.confidence_level, req.template_type);
 
-  // --- Upsert into runtime store ---
-  const { created } = putPreviewRecord(req.preview_slug, {
-    brief: req.preview_brief,
-    template_type: req.template_type,
-    family,
-    hints,
-    version: PREVIEW_VERSION,
-  });
+  // --- Phase 2 KROK 2: invalidate stale frontend cache.
+  //
+  // Apps Script (`processPreviewQueue` → `upsertPreviewRecord_`) has
+  // already persisted the brief into the `_previews` hidden sheet
+  // BEFORE invoking this webhook. The frontend cache is per-instance
+  // and may hold an older entry; dropping it makes the next /preview
+  // read fetch the fresh record from AS.
+  invalidatePreviewRecord(req.preview_slug);
 
   console.log(
-    `[B-04] preview render ${created ? 'CREATE' : 'UPDATE'} slug=${req.preview_slug} ` +
+    `[B-04] preview render WARM slug=${req.preview_slug} ` +
       `family=${family} unknown_base=${quality.unknown_template_base}`,
   );
 
