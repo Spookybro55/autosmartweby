@@ -193,6 +193,9 @@ function findPreviewRowBySlug_(sheet, slugCol, slug) {
    - INSERT: status='active', generated_at=now, last_accessed_at=now
    - UPDATE: rewrite brief_json/template_type/family/lead_id/preview_url,
              update last_accessed_at=now, preserve generated_at + status.
+   - previewUrl: if falsy, defaults to 'https://autosmartweb.cz/preview/' + slug
+                 (autosmartweb.cz marketing web hosts the preview templates;
+                  callers may pass an explicit URL to override, e.g. staging).
    Locks on script-level lock for 5s to avoid concurrent cron+manual
    races on the same slug. Returns:
      { created: boolean, row: number, slug: string }
@@ -202,6 +205,11 @@ function findPreviewRowBySlug_(sheet, slugCol, slug) {
 function upsertPreviewRecord_(slug, briefJson, templateType, family, leadId, previewUrl) {
   var s = String(slug || '').trim();
   if (!s) throw new Error('upsertPreviewRecord_: empty slug');
+
+  // Default URL derived from slug — backlog: lift to Config.gs constant if env-aware.
+  if (!previewUrl) {
+    previewUrl = 'https://autosmartweb.cz/preview/' + s;
+  }
 
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(5000)) {
