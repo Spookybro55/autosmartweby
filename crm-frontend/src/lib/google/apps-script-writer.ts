@@ -86,3 +86,63 @@ export function humanizeOutreachStage(stage: OutreachStageKey): string {
 export function parseOutreachStage(label: string): OutreachStageKey {
   return OUTREACH_STAGE_REVERSE[label] ?? 'NOT_CONTACTED';
 }
+
+
+// Phase 2 KROK 4: manual "Generate preview" trigger.
+// Calls Apps Script doPost action 'generatePreview' which writes the
+// brief into _previews + LEADS and returns the preview URL hosted on
+// autosmartweb.cz. The frontend never renders /preview/<slug> itself —
+// it just opens the URL in a new tab.
+export interface GeneratePreviewResult {
+  success: boolean;
+  /** Set on success — the lead-derived slug used in the URL. */
+  slug?: string;
+  /** Set on success — `https://autosmartweb.cz/preview/<slug>` (or staging override). */
+  previewUrl?: string;
+  /** Apps Script preview_stage after the write — typically `READY_FOR_REVIEW`. */
+  stage?: string;
+  /** Set on failure — known codes: `not_qualified`, `dedupe_blocked`, `lead_not_found`. */
+  error?: string;
+}
+
+export async function generatePreview(leadId: string): Promise<GeneratePreviewResult> {
+  const url = SHEET_CONFIG.APPS_SCRIPT_URL;
+  if (!url) {
+    return { success: false, error: 'Apps Script URL not configured' };
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'generatePreview',
+        leadId,
+        token: process.env.APPS_SCRIPT_SECRET,
+      }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      return { success: false, error: `HTTP ${res.status}: ${text}` };
+    }
+
+    const data = await res.json();
+    // Apps Script handleGeneratePreview_ returns the same { ok, ... } shape
+    // on both success and error paths. Map to the frontend's success flag.
+    if (data.ok === true) {
+      return {
+        success: true,
+        slug: data.slug,
+        previewUrl: data.previewUrl,
+        stage: data.stage,
+      };
+    }
+    return { success: false, error: data.error ?? 'Apps Script returned ok=false' };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error',
+    };
+  }
+}

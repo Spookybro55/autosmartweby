@@ -31,6 +31,14 @@ function doPost(e) {
       return handleGetPreview_(payload);
     }
 
+    // Phase 2 KROK 4: manual "Generate preview" trigger from CRM lead
+    // detail. Skips the cron + webhook flow and writes a single lead's
+    // brief into _previews + LEADS, lifting preview_stage straight to
+    // READY_FOR_REVIEW because autosmartweb.cz hosts the static template.
+    if (payload.action === 'generatePreview') {
+      return handleGeneratePreview_(payload);
+    }
+
     return jsonResponse_({ success: false, error: 'Unknown action: ' + payload.action });
 
   } catch (err) {
@@ -204,6 +212,35 @@ function handleGetPreview_(payload) {
   } catch (err) {
     aswLog_('ERROR', 'handleGetPreview_',
       'slug=' + slug + ' err=' + err.message);
+    return jsonResponse_({ ok: false, error: err.message });
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   Phase 2 KROK 4 — generatePreview action
+   ═══════════════════════════════════════════════════════════════
+   Input:  { action:'generatePreview', leadId, token }
+   Output (success): { ok:true, slug, previewUrl, leadId, stage }
+   Output (error):   { ok:false, error: 'not_qualified' | 'dedupe_blocked' |
+                                          'lead_not_found' | <msg> }
+
+   processPreviewForLead_ throws on validation/IO failures so we wrap
+   it in try/catch and surface a uniform { ok:false, error } shape.
+   The frontend (lead-detail-drawer) maps known error strings to
+   user-friendly Czech messages.
+   ═══════════════════════════════════════════════════════════════ */
+function handleGeneratePreview_(payload) {
+  var leadId = String(payload.leadId || '').trim();
+  if (!leadId || leadId.length < 3) {
+    return jsonResponse_({ ok: false, error: 'Invalid or missing leadId' });
+  }
+  try {
+    var result = processPreviewForLead_(leadId);
+    return jsonResponse_(result); // already shaped { ok:true, ... }
+  } catch (err) {
+    aswLog_('ERROR', 'handleGeneratePreview_',
+      'leadId=' + leadId + ' err=' + err.message);
     return jsonResponse_({ ok: false, error: err.message });
   }
 }

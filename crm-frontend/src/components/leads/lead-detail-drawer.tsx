@@ -5,11 +5,15 @@ import { format, parseISO } from "date-fns";
 import { cs } from "date-fns/locale";
 import { toast } from "sonner";
 import {
+  AlertTriangle,
+  CheckCircle2,
   ExternalLink,
   Globe,
   Mail,
   Phone,
+  RefreshCw,
   Save,
+  Sparkles,
   User,
   Building2,
   Loader2,
@@ -35,6 +39,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { PriorityBadge } from "@/components/leads/priority-badge";
 import { StatusBadge } from "@/components/leads/status-badge";
 import { ASSIGNEE_NAMES, ALLOWED_USERS, UNASSIGNED_LABEL } from "@/lib/config";
@@ -83,6 +92,8 @@ interface Lead {
   contactReady: boolean;
   contactReason: string;
   contactPriority: "HIGH" | "MEDIUM" | "LOW";
+  qualifiedForPreview: boolean;
+  previewStage: string;
   previewUrl: string;
   previewScreenshotUrl: string;
   previewHeadline: string;
@@ -197,6 +208,12 @@ export function LeadDetailDrawer({
   const [lead, setLead] = useState<Lead | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Phase 2 KROK 4: state machine for the "Vygenerovat preview" button.
+  // idle → generating (button disabled, spinner) → success | error.
+  const [previewState, setPreviewState] = useState<
+    "idle" | "generating" | "success" | "error"
+  >("idle");
+  const [previewError, setPreviewError] = useState<string>("");
   const [form, setForm] = useState<LeadEditableFields>({
     outreachStage: "",
     nextAction: "",
@@ -247,6 +264,11 @@ export function LeadDetailDrawer({
     if (!open) {
       setLead(null);
     }
+    // Reset preview button state whenever the drawer is closed or the
+    // selected lead changes — prevents a stale "success" badge from
+    // bleeding across leads.
+    setPreviewState("idle");
+    setPreviewError("");
     return () => {
       abortRef.current?.abort();
     };
@@ -268,6 +290,48 @@ export function LeadDetailDrawer({
       toast.error("Chyba při ukládání");
     } finally {
       setSaving(false);
+    }
+  }
+
+  // Phase 2 KROK 4: trigger Apps Script processPreviewForLead_ via the
+  // /api/leads/[id]/generate-preview route. Maps known eligibility
+  // errors to user-friendly Czech messages; on success refreshes the
+  // lead so previewUrl + previewStage update without a manual reload.
+  async function handleGenerate() {
+    if (!leadId || previewState === "generating") return;
+    setPreviewState("generating");
+    setPreviewError("");
+    try {
+      const res = await fetch(`/api/leads/${leadId}/generate-preview`, {
+        method: "POST",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        const code = String(data.error ?? "");
+        const msg =
+          code === "not_qualified"
+            ? "Lead není kvalifikovaný — preview nelze vygenerovat."
+            : code === "dedupe_blocked"
+              ? "Lead je označen jako duplikát — preview se negeneruje."
+              : code.startsWith("lead_not_found")
+                ? "Lead nebyl nalezen v Sheets."
+                : code || "Generování selhalo.";
+        setPreviewState("error");
+        setPreviewError(msg);
+        toast.error(msg);
+        return;
+      }
+      setPreviewState("success");
+      toast.success("Preview vygenerováno");
+      // Refresh the lead so previewUrl / previewStage / previewHeadline
+      // reflect the just-written values from Apps Script.
+      await fetchLead(leadId);
+      onSaved();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Chyba při generování";
+      setPreviewState("error");
+      setPreviewError(msg);
+      toast.error("Chyba při generování preview");
     }
   }
 
@@ -383,31 +447,102 @@ export function LeadDetailDrawer({
 
                 <Separator />
 
-                {/* Preview */}
-                {(lead.previewUrl || lead.previewHeadline) && (
-                  <>
-                    <section>
-                      <SectionTitle>Preview</SectionTitle>
-                      {lead.previewHeadline && (
-                        <p className="text-sm text-foreground mb-1.5">
-                          {lead.previewHeadline}
-                        </p>
-                      )}
-                      {lead.previewUrl && (
-                        <a
-                          href={lead.previewUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-                        >
-                          Zobrazit preview
-                          <ExternalLink className="size-3" />
-                        </a>
-                      )}
-                    </section>
-                    <Separator />
-                  </>
-                )}
+                {/* Preview — Phase 2 KROK 4: always rendered (even when no
+                    preview yet) so operator can trigger generation. */}
+                <section>
+                  <SectionTitle>Preview</SectionTitle>
+                  {lead.previewHeadline && (
+                    <p className="text-sm text-foreground mb-1.5">
+                      {lead.previewHeadline}
+                    </p>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                    {lead.previewUrl && (
+                      <a
+                        href={lead.previewUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                      >
+                        Zobrazit preview
+                        <ExternalLink className="size-3" />
+                      </a>
+                    )}
+
+                    {lead.qualifiedForPreview ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={lead.previewUrl ? "outline" : "default"}
+                        onClick={handleGenerate}
+                        disabled={previewState === "generating"}
+                      >
+                        {previewState === "generating" ? (
+                          <>
+                            <Loader2 className="size-4 animate-spin" />
+                            Generuji preview… (5–15 s)
+                          </>
+                        ) : lead.previewUrl ? (
+                          <>
+                            <RefreshCw className="size-4" />
+                            Regenerovat
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="size-4" />
+                            Vygenerovat preview
+                          </>
+                        )}
+                      </Button>
+                    ) : (
+                      <Tooltip>
+                        {/* base-ui TooltipTrigger renders a <button> by
+                            default; we override with `render={<span>}` so
+                            the disabled button inside still triggers the
+                            tooltip on hover (disabled buttons do not
+                            dispatch pointer events themselves). */}
+                        <TooltipTrigger render={<span tabIndex={0} />}>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={lead.previewUrl ? "outline" : "default"}
+                            disabled
+                          >
+                            {lead.previewUrl ? (
+                              <>
+                                <RefreshCw className="size-4" />
+                                Regenerovat
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="size-4" />
+                                Vygenerovat preview
+                              </>
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          Lead není kvalifikovaný.
+                        </TooltipContent>
+                      </Tooltip>
+                    )}
+                  </div>
+
+                  {previewState === "success" && (
+                    <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-emerald-600">
+                      <CheckCircle2 className="size-3.5" />
+                      Preview vygenerováno.
+                    </p>
+                  )}
+                  {previewState === "error" && previewError && (
+                    <p className="mt-2 inline-flex items-start gap-1.5 text-xs text-destructive">
+                      <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
+                      {previewError}
+                    </p>
+                  )}
+                </section>
+                <Separator />
 
                 {/* E-mail draft */}
                 {(lead.emailSubjectDraft || lead.emailBodyDraft) && (
