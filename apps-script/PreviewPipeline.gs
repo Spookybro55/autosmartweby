@@ -955,7 +955,12 @@ function processPreviewQueue() {
       hr.set(row, 'preview_headline', brief.headline);
       hr.set(row, 'preview_subheadline', brief.subheadline);
       hr.set(row, 'preview_cta', brief.cta);
-      hr.set(row, 'preview_stage', PREVIEW_STAGES.BRIEF_READY);
+      // Phase 2 KROK 5: stage lands at READY_FOR_REVIEW immediately. The
+      // marketing web (autosmartweb.cz) hosts /preview/<slug> as a static
+      // template, so there is no async render to wait for. BRIEF_READY
+      // is now a dead state — kept in `eligibleStages` only so legacy
+      // pre-KROK-5 rows get re-processed and lifted forward.
+      hr.set(row, 'preview_stage', PREVIEW_STAGES.READY_FOR_REVIEW);
 
       // Step 3: Slug
       hr.set(row, 'preview_slug', artifacts.slug);
@@ -971,13 +976,19 @@ function processPreviewQueue() {
         }
       }
 
-      // Phase 2 KROK 2/4: persist into Sheets-backed _previews list BEFORE
-      // the webhook fires (Phase 2 KROK 2 / FF-004 fix). Centralized in
-      // persistPreviewArtifacts_ so the manual generate path stays in
-      // lockstep with the batch queue.
+      // Phase 2 KROK 2/4: persist into Sheets-backed _previews list. After
+      // KROK 5 this is the durable record — no webhook follows on the
+      // default flow. Stage is already READY_FOR_REVIEW above.
       try {
         if (artifacts.slug) {
           persistPreviewArtifacts_(artifacts, leadId);
+          // Phase 2 KROK 5: stamp preview_url + preview_generated_at on
+          // the LEADS row so the CRM lead detail surfaces them without
+          // a separate read pass. Mirror processPreviewForLead_.
+          hr.set(row, 'preview_url',
+            resolvePreviewUrl_(artifacts.slug, /*allowEmpty=*/false));
+          hr.set(row, 'preview_generated_at', new Date());
+          hr.set(row, 'preview_error', '');
         } else {
           aswLog_('WARN', 'processPreviewQueue',
             'Empty preview_slug for row ' + rowNum + ' — skipping _previews upsert');
@@ -989,7 +1000,17 @@ function processPreviewQueue() {
           { row: rowNum, leadId: leadId });
       }
 
-      // Step 5: Webhook (only when NOT dry run AND webhook enabled)
+      // Step 5: Webhook —  DEPRECATED (Phase 2 KROK 5)
+      // ─────────────────────────────────────────────────────────────
+      // Templates are now static on autosmartweb.cz; processPreviewQueue
+      // sets preview_stage = READY_FOR_REVIEW above and writes
+      // preview_url directly. The webhook block below is preserved for
+      // backward compatibility with any deployment that still flips
+      // ENABLE_WEBHOOK=true to feed an external Vercel render endpoint.
+      // Default config (`Config.gs`: DRY_RUN=true, ENABLE_WEBHOOK=false,
+      // WEBHOOK_URL='') keeps it dormant. B-05 unit tests
+      // (`scripts/test-b05-preview-webhook.mjs`) port the block in
+      // isolation and continue to gate transitions.
       if (!DRY_RUN && ENABLE_WEBHOOK && WEBHOOK_URL) {
         // B-05: single GENERATING state covers the whole in-flight window
         // (replaces legacy QUEUED + SENT_TO_WEBHOOK pair).
@@ -1760,14 +1781,9 @@ function computePreviewArtifacts_(rd) {
 
 function persistPreviewArtifacts_(artifacts, leadId) {
   if (!artifacts || !artifacts.slug) return null;
-  var publicBaseUrl = '';
-  try {
-    publicBaseUrl = PropertiesService.getScriptProperties()
-      .getProperty('PUBLIC_BASE_URL') || '';
-  } catch (e) { /* Script Properties not readable in some contexts */ }
-  var presumedPreviewUrl = publicBaseUrl
-    ? publicBaseUrl.replace(/\/+$/, '') + '/preview/' + artifacts.slug
-    : ''; // empty → upsertPreviewRecord_ defaults to autosmartweb.cz/preview/<slug>
+  // Pass empty when PUBLIC_BASE_URL is not set so upsertPreviewRecord_'s
+  // built-in default (autosmartweb.cz/preview/<slug>, PR #67) takes over.
+  var presumedPreviewUrl = resolvePreviewUrl_(artifacts.slug, /*allowEmpty=*/true);
   return upsertPreviewRecord_(
     artifacts.slug,
     JSON.stringify(artifacts.brief),
@@ -1776,6 +1792,37 @@ function persistPreviewArtifacts_(artifacts, leadId) {
     leadId,
     presumedPreviewUrl
   );
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   Phase 2 KROK 5 — preview URL resolver
+   ═══════════════════════════════════════════════════════════════
+   Single source of truth for the public preview URL written into
+   LEADS and _previews. Honors `PUBLIC_BASE_URL` Script Property
+   (used by staging deployments to override the marketing web URL),
+   falls back to https://autosmartweb.cz/preview/<slug> otherwise.
+
+   `allowEmpty` controls fallback behavior:
+   - true:  return empty string when PUBLIC_BASE_URL is unset, letting
+            upsertPreviewRecord_ stamp its own default into the
+            _previews sheet (avoids two callers stamping the same URL
+            from different code paths).
+   - false: always return a fully-qualified URL — used when writing
+            preview_url directly into the LEADS row.
+   ═══════════════════════════════════════════════════════════════ */
+
+function resolvePreviewUrl_(slug, allowEmpty) {
+  if (!slug) return '';
+  var publicBaseUrl = '';
+  try {
+    publicBaseUrl = PropertiesService.getScriptProperties()
+      .getProperty('PUBLIC_BASE_URL') || '';
+  } catch (e) { /* Script Properties not readable in some contexts */ }
+  if (publicBaseUrl) {
+    return publicBaseUrl.replace(/\/+$/, '') + '/preview/' + slug;
+  }
+  return allowEmpty ? '' : ('https://autosmartweb.cz/preview/' + slug);
 }
 
 
@@ -1846,14 +1893,7 @@ function processPreviewForLead_(leadId) {
   // marketing web serves /preview/<slug> as a static template (no
   // webhook, no async generation step).
   var nowDate = new Date();
-  var publicBaseUrl = '';
-  try {
-    publicBaseUrl = PropertiesService.getScriptProperties()
-      .getProperty('PUBLIC_BASE_URL') || '';
-  } catch (e) { /* ignore */ }
-  var previewUrl = publicBaseUrl
-    ? publicBaseUrl.replace(/\/+$/, '') + '/preview/' + artifacts.slug
-    : 'https://autosmartweb.cz/preview/' + artifacts.slug;
+  var previewUrl = resolvePreviewUrl_(artifacts.slug, /*allowEmpty=*/false);
 
   var writes = [
     ['template_type',          artifacts.templateType],
