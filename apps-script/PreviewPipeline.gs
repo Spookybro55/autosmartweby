@@ -966,6 +966,46 @@ function processPreviewQueue() {
         }
       }
 
+      // Phase 2 KROK 2: persist into Sheets-backed _previews list BEFORE
+      // the webhook fires. This makes Apps Script the source of truth so
+      // /preview/<slug> survives Vercel restarts (FF-004 fix). The
+      // webhook stays as an optional "warm" notifier for the frontend
+      // cache; AS upsert is the durable record.
+      try {
+        var slugForStore = hr.get(row, 'preview_slug');
+        if (slugForStore) {
+          var familyForStore = resolveTemplateFamily_(templateType);
+          var presumedPreviewUrl = '';
+          var publicBaseUrl = '';
+          try {
+            publicBaseUrl = PropertiesService.getScriptProperties()
+              .getProperty('PUBLIC_BASE_URL') || '';
+          } catch (ePB) { /* Script Properties may not be readable in test ctx */ }
+          if (publicBaseUrl) {
+            presumedPreviewUrl = publicBaseUrl.replace(/\/+$/, '') +
+              '/preview/' + slugForStore;
+          }
+          upsertPreviewRecord_(
+            slugForStore,
+            JSON.stringify(brief),
+            templateType,
+            familyForStore,
+            leadId,
+            presumedPreviewUrl
+          );
+        } else {
+          aswLog_('WARN', 'processPreviewQueue',
+            'Empty preview_slug for row ' + rowNum + ' — skipping _previews upsert');
+        }
+      } catch (storeErr) {
+        // Persisting to _previews must not block the existing webhook flow.
+        // Log and continue — webhook may still succeed and frontend has
+        // mock fixture fallback in dev.
+        aswLog_('ERROR', 'processPreviewQueue',
+          '_previews upsert failed row ' + rowNum + ': ' + storeErr.message,
+          { row: rowNum, leadId: leadId });
+      }
+
       // Step 5: Webhook (only when NOT dry run AND webhook enabled)
       if (!DRY_RUN && ENABLE_WEBHOOK && WEBHOOK_URL) {
         // B-05: single GENERATING state covers the whole in-flight window
