@@ -10,7 +10,14 @@
 
 ## 1. Shrnuti
 
-Projekt Autosmartweby se sklada ze tri hlavnich systemu: CRM backend (Apps Script + Google Sheets), CRM frontend (Next.js) a verejny web (web-starter / autosmartweb.cz). Byly provedeny dva nezavisle auditni streamy:
+> **Project boundary:** Tento repo (`Spookybro55/autosmartweby`) resi **interni system** — CRM backend (Apps Script + Google Sheets) + CRM frontend (Next.js). Verejny marketingovy web `https://autosmartweb.cz/` je samostatny projekt v repu **`Spookybro55/ASW-MARKETING-WEB`** a v tomto dokumentu se sleduje **pouze jako external dependency** — neni to predmetem zdejsiho auditu.
+
+Projekt Autosmartweby ma **dve velke casti** v oddelenych repozitarich:
+
+1. **Interni system** (tento repo): CRM backend (Apps Script + Google Sheets) + CRM frontend (Next.js).
+2. **Verejny web** (`Spookybro55/ASW-MARKETING-WEB`, live na `autosmartweb.cz`): mimo scope tohoto dokumentu.
+
+Byly provedeny dva nezavisle auditni streamy nad **internim systemem**:
 
 - **Stream 1 (nase sezeni):** Audit s pristupem ke kodu. Nalezeno 20 deduplikovanych problemu (C-1 az L-5), 8 rozhodnuti (D-1 az D-8). Vetsi cast vyresena.
 - **Stream 2 (nocni audity):** Audit BEZ pristupu k Apps Script kodu. 43 bugu (BUG-001 az BUG-043), prevazne o web-starteru. Mnohe byly hypotezy — nyni krizove overeny vuci skutecnemu kodu.
@@ -27,8 +34,8 @@ Projekt Autosmartweby se sklada ze tri hlavnich systemu: CRM backend (Apps Scrip
 | Komponenta | Umisteni | Technologie | Radky kodu | Ucel |
 |------------|----------|-------------|------------|------|
 | **CRM backend** | `apps-script/` | Google Apps Script (V8) | ~4 640 | Zpracovani leadu, emaily, synchronizace, write-back |
-| **CRM frontend** | `crm-frontend/` | Next.js 16, React 19 | ~6 220 | Dashboard, pipeline, leads, follow-ups, login |
-| **Verejny web** | *web-starter/* (externi repo) | HTML/CSS/JS | neurceno | autosmartweb.cz — prezentacni web |
+| **CRM frontend** | `crm-frontend/` | Next.js 16, React 19 | ~6 220 | Interni dashboard, pipeline, leads, follow-ups, login. **NENI to verejny web firmy** — viz radek nize. |
+| **Verejny web** (external) | repo `Spookybro55/ASW-MARKETING-WEB` (mimo tento repo) | — | mimo scope | `https://autosmartweb.cz/` — verejny marketingovy web (Web Starter nabidka, landing pages, kontakt). **External dependency** — auditovat se ma proti vlastnimu repu nebo live URL, ne proti tomuto repu. |
 | **Nabidky** | `offers/` | HTML, PDF, Python | ~8 souboru | Obchodni nabidky a nastroje pro konverzi |
 | **Dokumentace** | `docs/` | Markdown | 14+ souboru | Auditni zpravy, mapy, rozhodnuti, logy |
 

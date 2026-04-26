@@ -1,13 +1,15 @@
-# Current State — Autosmartweby
+# Current State — Autosmartweby (interni system)
 
 > **Kanonicky dokument.** Aktualizuje se pri kazdem tasku, ktery meni stav systemu.
 > **Posledni aktualizace:** 2026-04-21 (B-06)
+>
+> **Project boundary:** Tento dokument popisuje stav **interniho systemu** v repu `Spookybro55/autosmartweby`. Verejny marketingovy web `https://autosmartweb.cz/` je samostatny projekt v repu **`Spookybro55/ASW-MARKETING-WEB`** (LIVE, external dependency) — neni predmetem tohoto dokumentu ani auditu interniho systemu.
 
 ---
 
 ## Souhrn
 
-Autosmartweby je poloautomatizovany CRM system pro oslovovani ceskych zivnostniku bez webovych stranek.
+Autosmartweby je poloautomatizovany **interni CRM system** pro oslovovani ceskych zivnostniku bez webovych stranek. Verejny web firmy zije v separatnim repu (viz boundary callout vyse).
 
 **Apps Script backend** (~6700 LOC, 16 souboru): kvalifikace leadu, generovani briefu a emailovych draftu, per-lead odesilani pres GmailApp, mailbox sync, write-back z odvozeneho sheetu pres lead_id lookup (Variant B). Pipeline bezi v rezimu DRY_RUN=true a standardne se zastavi ve stavu BRIEF_READY. Webhook pipeline existuje v kodu, je vypnuta (ENABLE_WEBHOOK=false).
 
@@ -55,7 +57,7 @@ CI validuje aktuálnost generated files a existenci governance souboru. Nevalidu
 - Editace 5 poli per lead se zapisem zpet do Sheets
 - Data: Google Sheets pres service account (read), Apps Script Web App (write — doPost implementovan BX1, Web App deployment pending)
 - Mock service pro lokalni vyvoj bez Sheets pripojeni
-- Preview renderer (B-02): route `/preview/[slug]`, renderuje MVP landing page z hardcoded sample briefu. 6 sekci (hero, services, contact, reviews, location, faq) rizenych polem `suggested_sections` z B-01 contractu. Verejne pristupny bez auth.
+- Preview renderer (B-02): route `/preview/[slug]`, renderuje MVP landing page z hardcoded sample briefu. 6 sekci (hero, services, contact, reviews, location, faq) rizenych polem `suggested_sections` z B-01 contractu. Verejne pristupny bez auth (interni preview vrstva pro outreach k jednotlivym leadum — **NENI** to verejny marketingovy web firmy `autosmartweb.cz`, ten je v repu `Spookybro55/ASW-MARKETING-WEB`).
 - Template family mapping (B-03): `crm-frontend/src/lib/domain/template-family.ts` mapuje runtime `template_type` na 4 MVP family (`emergency`, `community-expert`, `technical-authority`, `generic-local`) + render hints. Renderer zatim zustava template-agnostic; family vrstva je pripravena pro nasledne family-specificke layouty.
 - Preview render endpoint (B-04): `POST /api/preview/render` (`crm-frontend/src/app/api/preview/render/route.ts`) prijima payload z Apps Scriptu, validuje proti B-01 MinimalRenderRequest, upsertne brief do in-memory preview store (`src/lib/preview/preview-store.ts`) a vrati `MinimalRenderResponseOk` s `preview_url = ${PUBLIC_BASE_URL}/preview/${preview_slug}`. Auth: header `X-Preview-Webhook-Secret` vs env `PREVIEW_WEBHOOK_SECRET` (timing-safe compare). Unknown template base fallback → `preview_needs_review=true`. B-02 route `/preview/[slug]` nyni prednostne cte runtime store a fallbackuje na hardcoded fixtures. Zive GAS propojeni zatim chybi — GAS payload jeste neobsahuje `preview_slug` (B-05 gap fix).
 - Bezi lokalne, neni nasazen na verejne URL
