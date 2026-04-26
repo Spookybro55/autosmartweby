@@ -33,6 +33,7 @@ interface LeadListItem {
   serviceType: string;
   contactName: string;
   previewUrl: string;
+  assigneeEmail: string;
 }
 
 interface LeadsTableProps {

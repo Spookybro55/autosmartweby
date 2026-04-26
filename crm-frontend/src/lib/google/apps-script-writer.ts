@@ -40,6 +40,11 @@ export async function updateLeadFields(
   if (fields.salesNote !== undefined) {
     payload.sales_note = fields.salesNote;
   }
+  if (fields.assigneeEmail !== undefined) {
+    // KROK 5: backend re-validates against ALLOWED_USERS — viz
+    // apps-script/WebAppEndpoint.gs:assertAssigneeAllowed_
+    payload.assignee_email = (fields.assigneeEmail || '').toLowerCase().trim();
+  }
 
   try {
     const res = await fetch(url, {

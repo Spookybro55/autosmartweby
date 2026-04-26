@@ -14,6 +14,14 @@ build/
 .env.*.local
 !.env.example
 
+# Apps Script clasp configs (SEC-002): scriptIds + parentIds were
+# historically committed and remain in git history; this prevents
+# future clasp pulls / re-creates from re-introducing them.
+# New contributors: copy apps-script/.clasp.json.example → .clasp.json
+apps-script/.clasp.json
+apps-script/.clasp.json.prod
+.clasprc.json
+
 # Claude Code runtime
 .claude-flow/daemon.pid
 .claude-flow/daemon.log

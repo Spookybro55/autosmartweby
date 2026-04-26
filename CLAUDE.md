@@ -1,10 +1,28 @@
 # Claude Code Configuration — Autosmartweby
 
+## Project boundary (POVINNE CIST)
+
+Projekt Autosmartweby ma **dva oddelene repozitare**:
+
+| Repo | URL | Co resi |
+|------|-----|---------|
+| **Spookybro55/autosmartweby** (tento repo) | https://github.com/Spookybro55/autosmartweby | Interni system: CRM, Apps Script, Google Sheets backend, lead pipeline, preview renderer, template pipeline, outbound / automation specifikace, governance docs |
+| **Spookybro55/ASW-MARKETING-WEB** (extern) | https://github.com/Spookybro55/ASW-MARKETING-WEB | Verejny marketingovy web `https://autosmartweb.cz/`, Web Starter nabidka, kontaktni formular, landing pages, inbound / duveryhodnost |
+
+**Pravidla pro audity, dokumentaci a Claude Code prompty:**
+
+- `crm-frontend/` v tomto repu **NENI** verejny web firmy. Je to interni CRM Next.js aplikace.
+- Preview renderer (`crm-frontend/src/app/preview/[slug]/`) **NENI** `autosmartweb.cz`. Je to interni renderovaci vrstva preview landingu pro outreach k jednotlivym leadum.
+- Pri auditu tohoto repa se **verejny web NESMI** oznacovat jako "missing feature" / "not deployed" / "P0 blocker" — patri do externiho repa.
+- Pri auditu verejneho webu se pracuje proti repu **Spookybro55/ASW-MARKETING-WEB** nebo proti live URL `https://autosmartweb.cz/`.
+- Status verejneho webu z pohledu tohoto repa = **external dependency / external public site (LIVE)**.
+
 ## Source of Truth
 
-- **Tento repo (GitHub) je jediny source of truth.**
+- **Tento repo (GitHub) je jediny source of truth pro interni system** (CRM + Apps Script + automation).
 - Apps Script editor NENI source of truth — clasp push se dela az z integrovaneho stavu po merge do main.
-- Google Sheets je runtime source of truth pro data; tento repo je source of truth pro kod a dokumentaci.
+- Google Sheets je runtime source of truth pro data; tento repo je source of truth pro kod a dokumentaci interniho systemu.
+- Verejny web `autosmartweb.cz` ma vlastni source of truth v repu **Spookybro55/ASW-MARKETING-WEB** — NEresi se zde.
 
 ## Tym a workflow
 

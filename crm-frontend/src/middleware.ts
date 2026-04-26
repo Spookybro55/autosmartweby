@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { SESSION_SECRET } from '@/lib/auth/session-secret';
 
 const PUBLIC_PATHS = ['/login', '/api/auth', '/preview'];
-const SESSION_SECRET = process.env.NEXTAUTH_SECRET || '';
 
 async function verifyToken(token: string): Promise<{ email: string; ts: number } | null> {
   const dotIndex = token.indexOf('.');

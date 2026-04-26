@@ -121,7 +121,10 @@ var EXTENSION_COLUMNS = [
   'review_decision',
   'review_note',
   'reviewed_at',
-  'reviewed_by'
+  'reviewed_by',
+  // KROK 5: multi-user assignee model — '' = unassigned, jinak email
+  // z ALLOWED_USERS (== Object.keys(ASSIGNEE_NAMES) — single source of truth)
+  'assignee_email'
 ];
 
 /* ── Preview stage state machine ──────────────────────────── */
@@ -214,7 +217,7 @@ var KNOWN_CHAINS = [
 
 /* ── Mailbox sync (read-only) ─────────────────────────────── */
 var EMAIL_SYNC_ENABLED              = true;
-var EMAIL_MAILBOX_ACCOUNT           = '';     // e.g. 'sales@autosmartweby.cz'
+var EMAIL_MAILBOX_ACCOUNT           = '';     // e.g. 'info@autosmartweb.cz' (centralni obchodni inbox; viz docs/22-technical-architecture.md "Email identity model")
 var EMAIL_SYNC_LOOKBACK_DAYS        = 30;
 var EMAIL_SYNC_MAX_THREADS          = 50;
 var EMAIL_SYNC_REQUIRE_EXACT_MATCH  = true;
@@ -243,3 +246,32 @@ var EMERGENCY_SEGMENTS = [
   'instalater','plumber','topenar','elektrikar',
   'havarijni','zamecnik','locksmith','nonstop'
 ];
+
+/* ── Pilot assignee identities (KROK 4/5) ─────────────────────
+   Maps lead.assignee_email → display name used for Reply-To header.
+   Used by resolveSenderIdentity_() in OutboundEmail.gs.
+
+   Sender of all outbound mail is the deploying account
+   (sfridrich@unipong.cz under executeAs: USER_DEPLOYING). Reply-To
+   redirects replies to the assigned operator's mailbox.
+
+   When lead has no assignee_email (KROK 4 state, before column is
+   added in KROK 5) or value is unknown, falls back to DEFAULT_REPLY_TO.
+
+   Diacritics: kept exact (Sebastián, Tomáš). All .gs files are saved
+   as UTF-8; clasp + Apps Script editor preserve encoding.            */
+var ASSIGNEE_NAMES = {
+  'sfridrich@unipong.cz':       'Sebastián Fridrich',
+  'sebastian@autosmartweb.cz':  'Sebastián Fridrich',
+  'tomas@autosmartweb.cz':      'Tomáš Maixner',
+  'jan.bezemek@autosmartweb.cz':'Jan Bezemek'
+};
+
+var DEFAULT_REPLY_TO_EMAIL = 'sebastian@autosmartweb.cz';
+var DEFAULT_REPLY_TO_NAME  = 'Sebastián Fridrich';
+
+/* ── KROK 5: allowlist of pilot users that may own a lead ─────
+   Derived from ASSIGNEE_NAMES so we have a single source of truth
+   across (a) Reply-To resolution, (b) frontend display labels,
+   (c) backend assignee validation in WebAppEndpoint.gs:assignLead. */
+var ALLOWED_USERS = Object.keys(ASSIGNEE_NAMES);

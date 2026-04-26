@@ -43,6 +43,7 @@ export const MOCK_LEADS: Lead[] = [
     lastContactAt: '',
     nextFollowupAt: '',
     salesNote: '',
+    assigneeEmail: '',
   },
   {
     id: 'ASW-m1abc002',
@@ -85,6 +86,7 @@ export const MOCK_LEADS: Lead[] = [
     lastContactAt: '',
     nextFollowupAt: '',
     salesNote: '',
+    assigneeEmail: '',
   },
   {
     id: 'ASW-m1abc003',
@@ -127,6 +129,7 @@ export const MOCK_LEADS: Lead[] = [
     lastContactAt: '2025-03-25',
     nextFollowupAt: '2026-04-04',
     salesNote: 'E-mail odeslán, zatím bez odpovědi',
+    assigneeEmail: '',
   },
   {
     id: 'ASW-m1abc004',
@@ -169,6 +172,7 @@ export const MOCK_LEADS: Lead[] = [
     lastContactAt: '',
     nextFollowupAt: '',
     salesNote: '',
+    assigneeEmail: '',
   },
   {
     id: 'ASW-m1abc005',
@@ -211,6 +215,7 @@ export const MOCK_LEADS: Lead[] = [
     lastContactAt: '2025-03-19',
     nextFollowupAt: '2026-04-05',
     salesNote: 'Reagoval pozitivně, chce se sejít příští týden. Preferuje telefonický kontakt.',
+    assigneeEmail: '',
   },
   {
     id: 'ASW-m1abc006',
@@ -253,6 +258,7 @@ export const MOCK_LEADS: Lead[] = [
     lastContactAt: '',
     nextFollowupAt: '',
     salesNote: '',
+    assigneeEmail: '',
   },
   {
     id: 'ASW-m1abc007',
@@ -295,6 +301,7 @@ export const MOCK_LEADS: Lead[] = [
     lastContactAt: '',
     nextFollowupAt: '',
     salesNote: 'Připravit personalizovaný e-mail, zmínit 67 recenzí',
+    assigneeEmail: '',
   },
   {
     id: 'ASW-m1abc008',
@@ -337,6 +344,7 @@ export const MOCK_LEADS: Lead[] = [
     lastContactAt: '2025-03-22',
     nextFollowupAt: '2026-04-03',
     salesNote: 'E-mail se vrátil (bounce), zkusit zavolat na telefon',
+    assigneeEmail: '',
   },
   {
     id: 'ASW-m1abc009',
@@ -379,6 +387,7 @@ export const MOCK_LEADS: Lead[] = [
     lastContactAt: '',
     nextFollowupAt: '',
     salesNote: '',
+    assigneeEmail: '',
   },
   {
     id: 'ASW-m1abc010',
@@ -421,6 +430,7 @@ export const MOCK_LEADS: Lead[] = [
     lastContactAt: '2025-03-28',
     nextFollowupAt: '2026-04-07',
     salesNote: 'Odeslán e-mail, naplánovat follow-up za týden',
+    assigneeEmail: '',
   },
   {
     id: 'ASW-m1abc011',
@@ -463,6 +473,7 @@ export const MOCK_LEADS: Lead[] = [
     lastContactAt: '2025-03-11',
     nextFollowupAt: '',
     salesNote: 'Má zájem! Chce web s online rezervacemi. Schůzka domluvena na příští úterý.',
+    assigneeEmail: '',
   },
   {
     id: 'ASW-m1abc012',
@@ -505,5 +516,6 @@ export const MOCK_LEADS: Lead[] = [
     lastContactAt: '2025-04-01',
     nextFollowupAt: '',
     salesNote: 'Zavolal, nemá zájem. Říká, že nepotřebuje web.',
+    assigneeEmail: '',
   },
 ];

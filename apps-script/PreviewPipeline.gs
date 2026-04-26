@@ -1352,9 +1352,19 @@ function installProjectTriggers() {
   var hasWebCheck = false;
   var hasAutoQualify = false;
 
+  // KROK 4 (FF-002 + FF-008): force-recreate these so interval/handler
+  // changes between deploys are picked up. Pattern: delete every existing
+  // trigger with matching handler name, then create fresh.
+  var FORCE_RECREATE = ['processRawImportBatch', 'syncMailboxMetadata'];
+
   for (var i = 0; i < existing.length; i++) {
     var fn = existing[i].getHandlerFunction();
     var evType = existing[i].getEventType();
+
+    if (FORCE_RECREATE.indexOf(fn) !== -1) {
+      ScriptApp.deleteTrigger(existing[i]);
+      continue;
+    }
 
     if (fn === 'processPreviewQueue' && evType === ScriptApp.EventType.CLOCK) {
       hasTime = true;
@@ -1398,6 +1408,25 @@ function installProjectTriggers() {
       .create();
     installed.push('Timer: autoQualifyTrigger (15 min) — A-07');
   }
+
+  // KROK 4 (FF-002): scraper output → _raw_import → LEADS auto-import.
+  // 30-min interval keeps fresh scraper batches moving without
+  // saturating Apps Script quotas.
+  ScriptApp.newTrigger('processRawImportBatch')
+    .timeBased()
+    .everyMinutes(30)
+    .create();
+  installed.push('Timer: processRawImportBatch (30 min) — FF-002');
+
+  // KROK 4 (FF-008): pull reply/bounce metadata from Gmail into LEADS.
+  // 1-hour interval is conservative (lower Gmail API cost).
+  // Note: ScriptApp.everyMinutes() accepts only {1,5,10,15,30} — for
+  // hourly cadence we must use everyHours().
+  ScriptApp.newTrigger('syncMailboxMetadata')
+    .timeBased()
+    .everyHours(1)
+    .create();
+  installed.push('Timer: syncMailboxMetadata (1 hour) — FF-008');
 
   if (!hasOnOpen) {
     ScriptApp.newTrigger('onOpen')

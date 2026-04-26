@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/select";
 import { PriorityBadge } from "@/components/leads/priority-badge";
 import { StatusBadge } from "@/components/leads/status-badge";
+import { ASSIGNEE_NAMES, ALLOWED_USERS, UNASSIGNED_LABEL } from "@/lib/config";
 
 const OUTREACH_STAGES: Record<string, string> = {
   NOT_CONTACTED: "Neosloveno",
@@ -55,6 +56,10 @@ const NEXT_ACTIONS = [
   "Follow-up",
   "Naplánovat schůzku",
 ];
+
+// KROK 5: sentinel for the "Nepřiděleno" Select option (cannot use ""
+// because Radix Select treats empty strings as placeholder reset).
+const UNASSIGNED_VALUE = "__unassigned__";
 
 interface Lead {
   id: string;
@@ -93,6 +98,7 @@ interface Lead {
   nextFollowupAt: string;
   salesNote: string;
   personalizationLevel: string;
+  assigneeEmail: string;
 }
 
 interface LeadEditableFields {
@@ -101,6 +107,7 @@ interface LeadEditableFields {
   lastContactAt: string;
   nextFollowupAt: string;
   salesNote: string;
+  assigneeEmail: string;
 }
 
 interface LeadDetailDrawerProps {
@@ -196,6 +203,7 @@ export function LeadDetailDrawer({
     lastContactAt: "",
     nextFollowupAt: "",
     salesNote: "",
+    assigneeEmail: "",
   });
 
   const abortRef = useRef<AbortController | null>(null);
@@ -221,6 +229,7 @@ export function LeadDetailDrawer({
         lastContactAt: formatDateForInput(data.lastContactAt),
         nextFollowupAt: formatDateForInput(data.nextFollowupAt),
         salesNote: data.salesNote ?? "",
+        assigneeEmail: (data.assigneeEmail ?? "").toLowerCase(),
       });
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
@@ -455,6 +464,49 @@ export function LeadDetailDrawer({
                               </SelectItem>
                             )
                           )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="drawer-assignee">Přiděleno</Label>
+                      <Select
+                        value={
+                          form.assigneeEmail === ""
+                            ? UNASSIGNED_VALUE
+                            : ALLOWED_USERS.includes(form.assigneeEmail)
+                              ? form.assigneeEmail
+                              : form.assigneeEmail /* unknown legacy email — render raw */
+                        }
+                        onValueChange={(val) => {
+                          if (val == null) return;
+                          updateForm({
+                            assigneeEmail: val === UNASSIGNED_VALUE ? "" : val,
+                          });
+                        }}
+                      >
+                        <SelectTrigger id="drawer-assignee" className="w-full">
+                          <SelectValue placeholder="Zvolte přidělení" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={UNASSIGNED_VALUE}>
+                            {UNASSIGNED_LABEL}
+                          </SelectItem>
+                          {ALLOWED_USERS.map((email) => (
+                            <SelectItem key={email} value={email}>
+                              {ASSIGNEE_NAMES[email]}{" "}
+                              <span className="text-xs text-muted-foreground">
+                                ({email})
+                              </span>
+                            </SelectItem>
+                          ))}
+                          {/* Surface orphaned legacy assignee so operator can re-pick */}
+                          {form.assigneeEmail !== "" &&
+                            !ALLOWED_USERS.includes(form.assigneeEmail) && (
+                              <SelectItem value={form.assigneeEmail}>
+                                Neznámý: {form.assigneeEmail}
+                              </SelectItem>
+                            )}
                         </SelectContent>
                       </Select>
                     </div>

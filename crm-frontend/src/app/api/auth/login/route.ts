@@ -1,14 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import crypto from 'crypto';
+import { SESSION_SECRET } from '@/lib/auth/session-secret';
 
 const VALID_USERS = (process.env.ALLOWED_EMAILS || '').split(',').map(e => e.trim()).filter(Boolean);
 const AUTH_PASSWORD = process.env.AUTH_PASSWORD;
-const SESSION_SECRET = process.env.NEXTAUTH_SECRET || '';
-
-if (!SESSION_SECRET) {
-  console.warn('[CRM Auth] NEXTAUTH_SECRET is not set — session tokens will not be signed securely.');
-}
 
 function signToken(payload: object): string {
   const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
