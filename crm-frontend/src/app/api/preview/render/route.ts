@@ -6,10 +6,24 @@
  * Body: MinimalRenderRequest (B-01 contract).
  * Response: MinimalRenderResponseOk | MinimalRenderResponseError (B-01).
  *
- * This endpoint:
- * - validates payload at runtime (see validate-render-request.ts)
- * - upserts the brief into the in-memory preview store
- * - returns preview_url = `${PUBLIC_BASE_URL}/preview/${preview_slug}`
+ * ⚠ DEPRECATED — Phase 2 KROK 5
+ * ─────────────────────────────────────────────────────────────────
+ * Preview templates are now static on autosmartweb.cz. The default
+ * Apps Script flow (`processPreviewQueue` and the per-lead manual
+ * `processPreviewForLead_`) writes preview_stage=READY_FOR_REVIEW
+ * directly after the `_previews` upsert and does NOT call this
+ * webhook anymore.
+ *
+ * The endpoint is kept for backward compatibility with deployments
+ * that still flip `ENABLE_WEBHOOK=true` in Config.gs to feed an
+ * external Vercel render. When invoked, it validates the payload
+ * and invalidates the in-memory frontend cache so the next
+ * /preview/<slug> read fetches fresh data from `_previews`.
+ *
+ * Backlog: drop the route once no AS deployment flips ENABLE_WEBHOOK
+ * (track via `_asw_logs` and external usage telemetry). The frontend
+ * `/preview/[slug]` route itself is also slated for deprecation —
+ * autosmartweb.cz hosts the render now.
  *
  * Out of scope (B-05): preview_slug generation, write-back into LEADS,
  * PREVIEW_STAGES transitions, retries, Apps Script changes.
