@@ -102,6 +102,54 @@ export function generateMockPreview(leadId: string): MockGeneratePreviewResult {
   };
 }
 
+// Phase 2 KROK 6: mock send. Mirrors sendEmailForLead_ contract:
+// validates qualified + READY_FOR_REVIEW + drafts + email, applies
+// overrides into the in-memory mock, and returns { ok, sentAt }. No
+// external IO — strictly dev-mode only.
+export interface MockSendEmailResult {
+  ok: boolean;
+  sentAt?: string;
+  threadId?: string;
+  error?: string;
+}
+
+export function sendMockEmail(
+  leadId: string,
+  opts?: { subjectOverride?: string; bodyOverride?: string },
+): MockSendEmailResult {
+  const lead = mockState.find(l => l.id === leadId);
+  if (!lead) return { ok: false, error: 'lead_not_found: ' + leadId };
+  if (!lead.qualifiedForPreview) return { ok: false, error: 'not_qualified' };
+  if (lead.previewStage !== 'READY_FOR_REVIEW') {
+    return { ok: false, error: 'preview_not_ready: ' + (lead.previewStage || 'EMPTY') };
+  }
+
+  // Apply overrides
+  if (opts?.subjectOverride) lead.emailSubjectDraft = opts.subjectOverride;
+  if (opts?.bodyOverride) lead.emailBodyDraft = opts.bodyOverride;
+
+  const subject = (lead.emailSubjectDraft || '').trim();
+  const body = (lead.emailBodyDraft || '').trim();
+  if (!subject || !body) return { ok: false, error: 'empty_drafts' };
+  if (!lead.email || !lead.email.includes('@')) return { ok: false, error: 'invalid_email' };
+
+  const sentAt = new Date().toISOString();
+  lead.lastEmailSentAt = sentAt;
+  lead.emailSyncStatus = 'SENT';
+  // Mirror persistOutboundMetadata_ outreach_stage transition: only
+  // upgrade from early states (NOT_CONTACTED / DRAFT_READY).
+  if (lead.outreachStage === 'NOT_CONTACTED' || lead.outreachStage === 'DRAFT_READY') {
+    lead.outreachStage = 'CONTACTED';
+  }
+  lead.lastContactAt = sentAt;
+
+  return {
+    ok: true,
+    sentAt,
+    threadId: 'mock-thread-' + leadId,
+  };
+}
+
 export function leadToListItem(lead: Lead): LeadListItem {
   return {
     id: lead.id,

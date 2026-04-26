@@ -431,6 +431,12 @@ function persistOutboundMetadata_(payload, result, mode) {
       hr.set(currentRow, 'email_last_message_id', result.messageId);
     }
     hr.set(currentRow, 'email_subject_last', payload.subject);
+    // Phase 2 KROK 6: snapshot the body that was sent so the CRM has a
+    // durable copy independent of the Gmail thread (which the operator
+    // might delete). Mirrors email_subject_last naming.
+    if (hr.colOrNull('email_body_last')) {
+      hr.set(currentRow, 'email_body_last', payload.body);
+    }
     hr.set(currentRow, 'email_mailbox_account', payload.account);
     hr.set(currentRow, 'email_last_error', '');
 
@@ -470,4 +476,134 @@ function persistOutboundMetadata_(payload, result, mode) {
     aswLog_('ERROR', 'persistOutboundMetadata_',
       'Failed to persist metadata for CRM row ' + payload.crmRowNum + ': ' + e.message);
   }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   Phase 2 KROK 6 — sendEmailForLead_(leadId, opts)
+   ═══════════════════════════════════════════════════════════════
+   Frontend-driven send entry point. Resolves the lead by lead_id
+   directly from LEADS (no "Ke kontaktování" UI dependency, no
+   ui.alert prompts), reuses the pilot's send primitives
+   (resolveSenderIdentity_ for Reply-To, sendGmailMessage_ for the
+   GmailApp call, persistOutboundMetadata_ for write-back).
+
+   Validation gate (Phase 2 KROK 6 — INTENTIONALLY MILDER than
+   the Sheet path's assertSendability_):
+   - lead exists
+   - qualified_for_preview === 'true'
+   - preview_stage === 'READY_FOR_REVIEW'
+   - drafts non-empty (after applying overrides)
+   - recipient email valid
+
+   The Sheet path keeps requiring `review_decision === 'APPROVE'` for
+   backward compat with B-06 review queue. KROK 6 frontend treats the
+   operator's click on "Odeslat" as the approval act — see PR #70 body
+   for the drift discussion + sjednoceni backlog item.
+
+   opts.subjectOverride / opts.bodyOverride: when set (non-empty),
+   the value is persisted into email_subject_draft / email_body_draft
+   BEFORE the send so the LEADS draft columns reflect what was actually
+   sent. Empty/undefined overrides fall back to existing draft values.
+
+   Returns: { ok: true, sentAt: ISO, leadId, threadId? }
+   Throws:  Error('lead_not_found' | 'not_qualified' | 'preview_not_ready' |
+                  'empty_drafts' | 'invalid_email' | <msg>)
+   ═══════════════════════════════════════════════════════════════ */
+
+function sendEmailForLead_(leadId, opts) {
+  var s = String(leadId || '').trim();
+  if (!s || s.length < 3) throw new Error('Invalid leadId');
+  opts = opts || {};
+
+  var ss = openCrmSpreadsheet_();
+  var sheet = ss.getSheetByName(MAIN_SHEET_NAME);
+  if (!sheet) throw new Error('LEADS sheet not found');
+
+  var hr = getHeaderResolver_(sheet);
+  var leadIdCol = hr.colOrNull('lead_id');
+  if (!leadIdCol) throw new Error('lead_id column not found');
+
+  var rowNum = findRowByLeadId_(sheet, leadIdCol, s);
+  if (!rowNum) throw new Error('lead_not_found: ' + s);
+
+  var sourceRow = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+  // --- Apply overrides into draft columns BEFORE validation/send so a
+  //     subsequent re-fetch shows the same content the operator just
+  //     pressed Send on. Empty / undefined overrides leave drafts alone.
+  var subjectOverride = String(opts.subjectOverride == null ? '' : opts.subjectOverride);
+  var bodyOverride    = String(opts.bodyOverride    == null ? '' : opts.bodyOverride);
+  if (subjectOverride) {
+    var subjCol = hr.colOrNull('email_subject_draft');
+    if (subjCol) {
+      sheet.getRange(rowNum, subjCol).setValue(subjectOverride);
+      hr.set(sourceRow, 'email_subject_draft', subjectOverride);
+    }
+  }
+  if (bodyOverride) {
+    var bodyCol = hr.colOrNull('email_body_draft');
+    if (bodyCol) {
+      sheet.getRange(rowNum, bodyCol).setValue(bodyOverride);
+      hr.set(sourceRow, 'email_body_draft', bodyOverride);
+    }
+  }
+
+  // --- Read post-override draft values + identity fields ---
+  var subject = String(hr.get(sourceRow, 'email_subject_draft') || '').trim();
+  var body    = String(hr.get(sourceRow, 'email_body_draft') || '').trim();
+  var qualified    = trimLower_(hr.get(sourceRow, 'qualified_for_preview'));
+  var previewStage = String(hr.get(sourceRow, 'preview_stage') || '').trim();
+  var recipientEmail = String(hr.get(sourceRow, 'email') || '').trim();
+  var businessName = String(
+    sheet.getRange(rowNum, LEGACY_COL.BUSINESS_NAME).getValue() || ''
+  ).trim();
+  var assigneeCol = hr.colOrNull('assignee_email');
+  var assigneeEmail = assigneeCol
+    ? String(hr.get(sourceRow, 'assignee_email') || '').trim()
+    : '';
+
+  // --- Validation gate (mild — see header comment) ---
+  if (qualified !== 'true') throw new Error('not_qualified');
+  if (previewStage !== PREVIEW_STAGES.READY_FOR_REVIEW) {
+    throw new Error('preview_not_ready: ' + (previewStage || 'EMPTY'));
+  }
+  if (!subject || !body) throw new Error('empty_drafts');
+  if (!recipientEmail || recipientEmail.indexOf('@') === -1) {
+    throw new Error('invalid_email');
+  }
+
+  // --- Build payload + resolve sender (Reply-To assignee map) ---
+  var payload = {
+    recipientEmail: recipientEmail,
+    subject:        subject,
+    body:           body,
+    crmRowNum:      rowNum,
+    businessName:   businessName,
+    outreachStage:  trimLower_(hr.get(sourceRow, 'outreach_stage')),
+    reviewDecision: String(hr.get(sourceRow, 'review_decision') || '').trim(),
+    assigneeEmail:  assigneeEmail,
+    account:        Session.getActiveUser().getEmail() || '',
+    sourceSheet:    sheet,
+    hr:             hr,
+    sourceRow:      sourceRow
+  };
+  payload.sender = resolveSenderIdentity_(assigneeEmail);
+
+  aswLog_('INFO', 'sendEmailForLead_',
+    'leadId=' + s + ' to=' + recipientEmail + ' replyTo=' + payload.sender.email);
+
+  // --- Send + persist ---
+  var result = sendGmailMessage_(payload);
+  if (!result.ok) {
+    throw new Error('send_failed: ' + result.error);
+  }
+  persistOutboundMetadata_(payload, result, 'SEND');
+
+  return {
+    ok:       true,
+    leadId:   s,
+    sentAt:   result.sentAt,
+    threadId: result.threadId || ''
+  };
 }
