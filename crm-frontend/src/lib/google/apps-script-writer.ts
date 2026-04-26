@@ -146,3 +146,63 @@ export async function generatePreview(leadId: string): Promise<GeneratePreviewRe
     };
   }
 }
+
+
+// Phase 2 KROK 6: frontend-driven send. Wraps Apps Script doPost
+// `sendEmail` action which delegates to OutboundEmail.gs:sendEmailForLead_.
+// Optional overrides persist into the LEADS draft columns BEFORE the
+// send so what the operator typed is what gets stored.
+export interface SendEmailResult {
+  success: boolean;
+  /** Set on success — ISO timestamp from `sendGmailMessage_`. */
+  sentAt?: string;
+  /** Set on success when Gmail indexing resolved the thread. */
+  threadId?: string;
+  /** Set on failure — known codes: not_qualified, preview_not_ready,
+   * empty_drafts, invalid_email, lead_not_found, send_failed. */
+  error?: string;
+}
+
+export async function sendEmail(
+  leadId: string,
+  opts?: { subjectOverride?: string; bodyOverride?: string },
+): Promise<SendEmailResult> {
+  const url = SHEET_CONFIG.APPS_SCRIPT_URL;
+  if (!url) {
+    return { success: false, error: 'Apps Script URL not configured' };
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'sendEmail',
+        leadId,
+        subjectOverride: opts?.subjectOverride,
+        bodyOverride: opts?.bodyOverride,
+        token: process.env.APPS_SCRIPT_SECRET,
+      }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      return { success: false, error: `HTTP ${res.status}: ${text}` };
+    }
+
+    const data = await res.json();
+    if (data.ok === true) {
+      return {
+        success: true,
+        sentAt: data.sentAt,
+        threadId: data.threadId,
+      };
+    }
+    return { success: false, error: data.error ?? 'Apps Script returned ok=false' };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error',
+    };
+  }
+}

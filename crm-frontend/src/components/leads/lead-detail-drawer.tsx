@@ -13,6 +13,7 @@ import {
   Phone,
   RefreshCw,
   Save,
+  Send,
   Sparkles,
   User,
   Building2,
@@ -44,6 +45,14 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { PriorityBadge } from "@/components/leads/priority-badge";
 import { StatusBadge } from "@/components/leads/status-badge";
 import { ASSIGNEE_NAMES, ALLOWED_USERS, UNASSIGNED_LABEL } from "@/lib/config";
@@ -214,6 +223,18 @@ export function LeadDetailDrawer({
     "idle" | "generating" | "success" | "error"
   >("idle");
   const [previewError, setPreviewError] = useState<string>("");
+  // Phase 2 KROK 6: editable email draft + send state machine.
+  // emailSubject/Body initialise from the lead drafts on fetch and
+  // diverge only while the operator types — no auto-save, no AS write
+  // until the operator clicks "Odeslat" (then sendEmailForLead_
+  // persists the override into draft columns before the GmailApp call).
+  const [emailSubject, setEmailSubject] = useState<string>("");
+  const [emailBody, setEmailBody] = useState<string>("");
+  const [sendState, setSendState] = useState<
+    "idle" | "sending" | "success" | "error"
+  >("idle");
+  const [sendError, setSendError] = useState<string>("");
+  const [confirmOpen, setConfirmOpen] = useState<boolean>(false);
   const [form, setForm] = useState<LeadEditableFields>({
     outreachStage: "",
     nextAction: "",
@@ -248,6 +269,11 @@ export function LeadDetailDrawer({
         salesNote: data.salesNote ?? "",
         assigneeEmail: (data.assigneeEmail ?? "").toLowerCase(),
       });
+      // Phase 2 KROK 6: re-seed email editor from the latest drafts
+      // every time the lead loads (covers initial fetch, regenerate,
+      // post-send refresh).
+      setEmailSubject(data.emailSubjectDraft ?? "");
+      setEmailBody(data.emailBodyDraft ?? "");
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
         toast.error("Chyba při načítání leadu");
@@ -269,6 +295,9 @@ export function LeadDetailDrawer({
     // bleeding across leads.
     setPreviewState("idle");
     setPreviewError("");
+    setSendState("idle");
+    setSendError("");
+    setConfirmOpen(false);
     return () => {
       abortRef.current?.abort();
     };
@@ -332,6 +361,59 @@ export function LeadDetailDrawer({
       setPreviewState("error");
       setPreviewError(msg);
       toast.error("Chyba při generování preview");
+    }
+  }
+
+  // Phase 2 KROK 6: send email via /api/leads/[id]/send-email which
+  // delegates to OutboundEmail.gs:sendEmailForLead_. Subject/body
+  // overrides are forwarded so the operator's edits land on the wire.
+  async function handleSend() {
+    if (!leadId || sendState === "sending") return;
+    setSendState("sending");
+    setSendError("");
+    setConfirmOpen(false);
+    try {
+      const res = await fetch(`/api/leads/${leadId}/send-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subjectOverride: emailSubject,
+          bodyOverride: emailBody,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        const code = String(data.error ?? "");
+        const msg =
+          code === "not_qualified"
+            ? "Lead není kvalifikovaný."
+            : code.startsWith("preview_not_ready")
+              ? "Preview ještě není ve stavu READY_FOR_REVIEW. Vygenerujte ho nejdřív."
+              : code === "empty_drafts"
+                ? "Předmět nebo tělo emailu je prázdné."
+                : code === "invalid_email"
+                  ? "Lead nemá validní emailovou adresu."
+                  : code.startsWith("lead_not_found")
+                    ? "Lead nebyl nalezen v Sheets."
+                    : code.startsWith("send_failed")
+                      ? "Gmail odmítl odeslání: " + code.slice("send_failed: ".length)
+                      : code || "Odeslání selhalo.";
+        setSendState("error");
+        setSendError(msg);
+        toast.error(msg);
+        return;
+      }
+      setSendState("success");
+      toast.success("Email odeslán");
+      // Refresh so lastEmailSentAt + outreachStage update in the drawer
+      // header / status pill without a manual reload.
+      await fetchLead(leadId);
+      onSaved();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Chyba při odesílání";
+      setSendState("error");
+      setSendError(msg);
+      toast.error("Chyba při odesílání emailu");
     }
   }
 
@@ -544,37 +626,193 @@ export function LeadDetailDrawer({
                 </section>
                 <Separator />
 
-                {/* E-mail draft */}
-                {(lead.emailSubjectDraft || lead.emailBodyDraft) && (
-                  <>
+                {/* E-mail draft — Phase 2 KROK 6: editable + Odeslat */}
+                {(() => {
+                  const alreadySent = !!lead.lastEmailSentAt;
+                  const senderName =
+                    lead.assigneeEmail && ASSIGNEE_NAMES[lead.assigneeEmail]
+                      ? ASSIGNEE_NAMES[lead.assigneeEmail]
+                      : "Sebastián Fridrich";
+                  const senderEmail =
+                    lead.assigneeEmail && ASSIGNEE_NAMES[lead.assigneeEmail]
+                      ? lead.assigneeEmail
+                      : "sebastian@autosmartweb.cz";
+
+                  // Disable reasons (most-specific first)
+                  let disabledReason: string | null = null;
+                  if (!lead.qualifiedForPreview) {
+                    disabledReason = "Lead není kvalifikovaný.";
+                  } else if (!lead.previewUrl || lead.previewStage !== "READY_FOR_REVIEW") {
+                    disabledReason =
+                      "Preview ještě není připravený (stav " +
+                      (lead.previewStage || "—") +
+                      "). Nejdřív vygenerujte preview.";
+                  } else if (!emailSubject.trim() || !emailBody.trim()) {
+                    disabledReason = "Předmět nebo tělo emailu je prázdné.";
+                  } else if (!lead.email || !lead.email.includes("@")) {
+                    disabledReason = "Lead nemá validní emailovou adresu.";
+                  }
+                  const sendDisabled =
+                    !!disabledReason || sendState === "sending";
+
+                  const buttonLabel =
+                    sendState === "sending"
+                      ? "Odesílám…"
+                      : alreadySent
+                        ? "Odeslat znovu"
+                        : "Odeslat";
+
+                  return (
                     <section>
-                      <SectionTitle>E-mail draft</SectionTitle>
-                      {lead.emailSubjectDraft && (
-                        <div className="mb-2">
-                          <p className="text-xs text-muted-foreground mb-0.5">
-                            Předmět
-                          </p>
-                          <p className="text-sm text-foreground font-medium">
-                            {lead.emailSubjectDraft}
-                          </p>
-                        </div>
+                      <SectionTitle>E-mail</SectionTitle>
+
+                      {alreadySent && (
+                        <p className="mb-3 inline-flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                          <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
+                          <span>
+                            Email byl již odeslán{" "}
+                            {(() => {
+                              try {
+                                return format(
+                                  parseISO(lead.lastEmailSentAt),
+                                  "d. MMMM yyyy 'v' HH:mm",
+                                  { locale: cs },
+                                );
+                              } catch {
+                                return lead.lastEmailSentAt;
+                              }
+                            })()}
+                            . Opětovné odeslání pošle email znovu.
+                          </span>
+                        </p>
                       )}
-                      {lead.emailBodyDraft && (
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-0.5">
-                            Tělo e-mailu
-                          </p>
-                          <Textarea
-                            readOnly
-                            value={lead.emailBodyDraft}
-                            className="min-h-24 text-sm bg-muted/30 resize-none"
+
+                      <div className="space-y-3">
+                        <div className="space-y-1.5">
+                          <Label htmlFor="drawer-email-subject">Předmět</Label>
+                          <Input
+                            id="drawer-email-subject"
+                            value={emailSubject}
+                            onChange={(e) => setEmailSubject(e.target.value)}
+                            disabled={sendState === "sending"}
+                            placeholder="Předmět emailu"
                           />
                         </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="drawer-email-body">Tělo e-mailu</Label>
+                          <Textarea
+                            id="drawer-email-body"
+                            value={emailBody}
+                            onChange={(e) => setEmailBody(e.target.value)}
+                            disabled={sendState === "sending"}
+                            className="min-h-32 text-sm font-mono"
+                            placeholder="Tělo emailu"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="mt-4 flex flex-wrap items-center gap-2">
+                        {sendDisabled && disabledReason ? (
+                          <Tooltip>
+                            <TooltipTrigger render={<span tabIndex={0} />}>
+                              <Button type="button" disabled>
+                                {sendState === "sending" ? (
+                                  <Loader2 className="size-4 animate-spin" />
+                                ) : (
+                                  <Send className="size-4" />
+                                )}
+                                {buttonLabel}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{disabledReason}</TooltipContent>
+                          </Tooltip>
+                        ) : (
+                          <Button
+                            type="button"
+                            onClick={() => setConfirmOpen(true)}
+                            disabled={sendDisabled}
+                          >
+                            {sendState === "sending" ? (
+                              <Loader2 className="size-4 animate-spin" />
+                            ) : (
+                              <Send className="size-4" />
+                            )}
+                            {buttonLabel}
+                          </Button>
+                        )}
+                      </div>
+
+                      {sendState === "success" && (
+                        <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-emerald-600">
+                          <CheckCircle2 className="size-3.5" />
+                          Email odeslán.
+                        </p>
                       )}
+                      {sendState === "error" && sendError && (
+                        <p className="mt-2 inline-flex items-start gap-1.5 text-xs text-destructive">
+                          <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
+                          {sendError}
+                        </p>
+                      )}
+
+                      {/* Confirm dialog */}
+                      <Dialog
+                        open={confirmOpen}
+                        onOpenChange={(o) => setConfirmOpen(o)}
+                      >
+                        <DialogContent>
+                          <DialogHeader>
+                            <DialogTitle>Odeslat email</DialogTitle>
+                            <DialogDescription>
+                              Email půjde rovnou klientovi. Po odeslání se aktualizuje
+                              stav leadu na <strong>CONTACTED</strong>.
+                            </DialogDescription>
+                          </DialogHeader>
+                          <div className="space-y-3 py-2 text-sm">
+                            <div>
+                              <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                                Příjemce
+                              </p>
+                              <p className="font-medium">
+                                {lead.businessName} &lt;{lead.email}&gt;
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                                Reply-To
+                              </p>
+                              <p className="font-medium">
+                                {senderName} &lt;{senderEmail}&gt;
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                                Předmět
+                              </p>
+                              <p className="font-medium break-words">
+                                {emailSubject}
+                              </p>
+                            </div>
+                          </div>
+                          <DialogFooter>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => setConfirmOpen(false)}
+                            >
+                              Zrušit
+                            </Button>
+                            <Button type="button" onClick={handleSend}>
+                              <Send className="size-4" />
+                              {alreadySent ? "Odeslat znovu" : "Odeslat"}
+                            </Button>
+                          </DialogFooter>
+                        </DialogContent>
+                      </Dialog>
                     </section>
-                    <Separator />
-                  </>
-                )}
+                  );
+                })()}
+                <Separator />
 
                 {/* Editovatelna pole */}
                 <section>

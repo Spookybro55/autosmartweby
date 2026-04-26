@@ -114,6 +114,10 @@ var EXTENSION_COLUMNS = [
   'email_reply_type',
   'email_mailbox_account',
   'email_subject_last',
+  // Phase 2 KROK 6: snapshot of the body that was actually sent. Mirrors
+  // email_subject_last naming. Idempotent migration via
+  // setupPreviewExtension — the column is added on first run if missing.
+  'email_body_last',
   'email_last_error',
   'source_job_id',
   'source_portal',
