@@ -8,7 +8,7 @@
 
 ## 2026-04-28
 
-### [B/B-13] Email template schema + CRUD + runtime wiring + bootstrap + backend + API layer + UI listing (T1+T2+T3+T3.5+T4+T5+T6+T7 of 13-task email templating + analytics project) — UI_LISTING_DONE
+### [B/B-13] Email template schema + CRUD + runtime wiring + bootstrap + backend + API layer + UI listing + editor (T1+T2+T3+T3.5+T4+T5+T6+T7+T8 of 13-task email templating + analytics project) — UI_EDITOR_DONE
 - **Scope:** Foundation pro multi-task projekt: nahradit hardcoded `composeDraft_` editovatelnym template systemem s versioning + analytikou per template+segment.
 
 T1 je jen schema migration — zadna business logika, zadne doPost akce, zadny frontend. To prijde v T2-T13.
@@ -143,8 +143,42 @@ Novy soubor `crm-frontend/src/components/templates/templates-page-skeleton.tsx`:
 `crm-frontend/src/components/layout/sidebar.tsx` modified (+2 radky): pridana navigation entry "Nastavení" -> `/settings` (Settings lucide icon) na konec `navigation` array. Nav infrastruktura uz existuje — pridani je trivial.
 
 T7 NEMENI: API routes (T6), apps-script-writer (T6), AS files, lead drawer, ostatni komponenty. Editor (T8 sub-task) zatim neni — klik na card v T7 vede na neexistujici cestu, planovane.
+
+**T8 update (commit ve stejnem PR):** plne funkcni editor `/settings/templates/[key]`. Largest frontend task v projektu.
+
+Novy klient renderer `crm-frontend/src/lib/templates/render-preview.ts`:
+- Mirror of AS `EmailTemplateStore.gs:renderTemplate_` + `buildPlaceholderValues_`. Sync requirement — drift mezi tymto a AS = visible bug.
+- 18 known placeholders (LEAD/PREVIEW/SENDER/COMPUTED). Unknown → renderuje prázdné, vrací jejich seznam pro warning UI.
+- `humanizeServiceType` ma 12-entry Czech approximation map (instalatér → instalatérské služby etc.). Best-effort — AS-side puvodni `humanizeServiceType_` v `PreviewPipeline.gs` je canonical, frontend je informativni preview.
+
+`SAMPLE_LEADS` fixture (`sample-leads.ts`): 3 leady s ruznymi profily (s/bez contact_name, s/bez area, s/bez pain_point) aby editor preview umel ukazat vsechny code paths. Sender block hard-coded na Sebastiana — T9 swap na real leads dropdown.
+
+5 novych komponent v `crm-frontend/src/components/templates/`:
+
+| Komponenta | Role |
+|------------|------|
+| `template-editor.tsx` | Hlavni client komponenta, ~280 LOC. Split-pane editor + preview, dirty tracking proti baseline snapshotu, beforeunload warning, paralelni fetch active+draft, AS error code → cz toast mapping. |
+| `template-preview-pane.tsx` | Lead dropdown + email-style preview card (Komu/Předmět/Tělo). useMemo na render. |
+| `placeholder-legend.tsx` | Collapsible panel s 18 placeholdery, click-to-copy `{name}`, warning ribbon kdyz template pouziva unknown tokens. |
+| `publish-dialog.tsx` | shadcn Dialog s commit message Textarea (≥ 5 chars required), AS error code mapping, Loader2 spinner. |
+| `history-drawer.tsx` | shadcn Sheet (right, max-w-xl) s GET `/api/templates/[key]/history`, expandable rows pro detail subject + body, status badges. Refactored na `useCallback`+`useEffect` pattern aby uspokojil React 19 lint rule (`react-you-might-not-need-an-effect`). |
+
+Page route `crm-frontend/src/app/settings/templates/[key]/page.tsx` (server component, dynamic) — async params unwrap, `generateMetadata` for cz title, renders `<TemplateEditor>`.
+
+User flow:
+1. `/settings/templates` (T7) — operator klikne card -> `/settings/templates/no-website` (T8).
+2. Editor nacita active + draft paralelne. Pokud draft existuje, zacina v editoru s draftem (rozpracovano), jinak s active content.
+3. Operator edituje. `dirty` flag se vypocita realtime, "Neuložené změny" badge svítí, beforeunload guard aktivni.
+4. "Uložit draft" -> PUT (`saveTemplateDraft_`). Baseline se posune na nove ulozeny stav.
+5. "Zahodit změny" -> kdyz draft existuje, confirm() + DELETE (`discardTemplateDraft_`); jinak jen reset na active.
+6. "Publikovat..." -> Dialog s commit message ≥ 5 chars -> POST (`publishTemplate_`). Po success: baseline reset na new active, draft cleared.
+7. "Historie" -> Sheet s GET history. Expand row pro inline preview (read-only).
+
+Live preview: na kazdou zmenu editoru se subject + body re-rendituji s vybranym sample leadem. PlaceholderLegend warning ukaze unknown tokens v real-time.
+
+T8 NEMENI: API routes (T6), apps-script-writer (T6), AS files, lead drawer (T9 scope), listing page (T7).
 - **Owner:** Stream B
-- **Code:** apps-script/Config.gs (modified), apps-script/EmailTemplateStore.gs (new (T1)), apps-script/EmailTemplateStore.gs (modified (T2)), apps-script/EmailTemplateStore.gs (modified (T3)), apps-script/PreviewPipeline.gs (modified (T3)), apps-script/Config.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T4)), apps-script/PreviewPipeline.gs (modified (T3.5+T4)), apps-script/Menu.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T5)), apps-script/WebAppEndpoint.gs (modified (T5)), crm-frontend/src/types/templates.ts (new (T6)), crm-frontend/src/lib/google/apps-script-writer.ts (modified (T6)), crm-frontend/src/app/api/templates/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/draft/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/history/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/publish/route.ts (new (T6)), crm-frontend/src/app/api/analytics/templates/route.ts (new (T6)), crm-frontend/src/app/api/leads/[id]/regenerate-draft/route.ts (new (T6)), crm-frontend/src/app/settings/page.tsx (new (T7)), crm-frontend/src/app/settings/templates/page.tsx (new (T7)), crm-frontend/src/components/templates/template-card.tsx (new (T7)), crm-frontend/src/components/templates/templates-page-skeleton.tsx (new (T7)), crm-frontend/src/components/layout/sidebar.tsx (modified (T7)), apps-script/Menu.gs (modified)
+- **Code:** apps-script/Config.gs (modified), apps-script/EmailTemplateStore.gs (new (T1)), apps-script/EmailTemplateStore.gs (modified (T2)), apps-script/EmailTemplateStore.gs (modified (T3)), apps-script/PreviewPipeline.gs (modified (T3)), apps-script/Config.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T4)), apps-script/PreviewPipeline.gs (modified (T3.5+T4)), apps-script/Menu.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T5)), apps-script/WebAppEndpoint.gs (modified (T5)), crm-frontend/src/types/templates.ts (new (T6)), crm-frontend/src/lib/google/apps-script-writer.ts (modified (T6)), crm-frontend/src/app/api/templates/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/draft/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/history/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/publish/route.ts (new (T6)), crm-frontend/src/app/api/analytics/templates/route.ts (new (T6)), crm-frontend/src/app/api/leads/[id]/regenerate-draft/route.ts (new (T6)), crm-frontend/src/app/settings/page.tsx (new (T7)), crm-frontend/src/app/settings/templates/page.tsx (new (T7)), crm-frontend/src/components/templates/template-card.tsx (new (T7)), crm-frontend/src/components/templates/templates-page-skeleton.tsx (new (T7)), crm-frontend/src/components/layout/sidebar.tsx (modified (T7)), crm-frontend/src/lib/templates/sample-leads.ts (new (T8)), crm-frontend/src/lib/templates/render-preview.ts (new (T8)), crm-frontend/src/components/templates/placeholder-legend.tsx (new (T8)), crm-frontend/src/components/templates/template-preview-pane.tsx (new (T8)), crm-frontend/src/components/templates/publish-dialog.tsx (new (T8)), crm-frontend/src/components/templates/history-drawer.tsx (new (T8)), crm-frontend/src/components/templates/template-editor.tsx (new (T8)), crm-frontend/src/app/settings/templates/[key]/page.tsx (new (T8)), apps-script/Menu.gs (modified)
 - **Docs:** docs/30-task-records/B-13.md, docs/11-change-log.md, docs/29-task-registry.md
 
 ## 2026-04-27
