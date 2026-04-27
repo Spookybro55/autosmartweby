@@ -87,6 +87,7 @@ export function mapRowToLead(row: SheetRow, headers: HeaderMap, rowNumber: numbe
     previewHeadline: col(row, headers, 'preview_headline'),
     emailSubjectDraft: col(row, headers, 'email_subject_draft'),
     emailBodyDraft: col(row, headers, 'email_body_draft'),
+    emailTemplateKey: col(row, headers, 'email_template_key'),
     emailSyncStatus: col(row, headers, 'email_sync_status'),
     emailReplyType: col(row, headers, 'email_reply_type'),
     lastEmailSentAt: col(row, headers, 'last_email_sent_at'),

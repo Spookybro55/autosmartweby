@@ -45,6 +45,7 @@ export interface Lead {
   // Email (read-only)
   emailSubjectDraft: string;
   emailBodyDraft: string;
+  emailTemplateKey: string;       // B-13: which template generated the draft ('' = fallback)
   emailSyncStatus: string;
   emailReplyType: string;
   lastEmailSentAt: string;

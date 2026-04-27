@@ -8,7 +8,7 @@
 
 ## 2026-04-28
 
-### [B/B-13] Email template schema + CRUD + runtime wiring + bootstrap + backend + API layer + UI listing + editor (T1+T2+T3+T3.5+T4+T5+T6+T7+T8 of 13-task email templating + analytics project) — UI_EDITOR_DONE
+### [B/B-13] Email template schema + CRUD + runtime wiring + bootstrap + backend + API layer + UI listing + editor + consumer integration (T1+T2+T3+T3.5+T4+T5+T6+T7+T8+T9 of 13-task email templating + analytics project) — CONSUMER_INTEGRATION_DONE
 - **Scope:** Foundation pro multi-task projekt: nahradit hardcoded `composeDraft_` editovatelnym template systemem s versioning + analytikou per template+segment.
 
 T1 je jen schema migration — zadna business logika, zadne doPost akce, zadny frontend. To prijde v T2-T13.
@@ -177,8 +177,33 @@ User flow:
 Live preview: na kazdou zmenu editoru se subject + body re-rendituji s vybranym sample leadem. PlaceholderLegend warning ukaze unknown tokens v real-time.
 
 T8 NEMENI: API routes (T6), apps-script-writer (T6), AS files, lead drawer (T9 scope), listing page (T7).
+
+**T9 update (commit ve stejnem PR):** consumer integration. Dva uplne separatni features ktere oba consumuji T6 endpoints — zadne nove API, zadne AS zmeny, pure UI work.
+
+Feature 1 — lead drawer template selector + regenerate (`lead-detail-drawer.tsx`):
+- Pridana sekce nad subject input: `<select>` s 6 options (auto-select default + 5 template keys: no-website, weak-website, has-website, follow-up-1, follow-up-2) + "Vygenerovat znovu" button.
+- State seedovan z `data.emailTemplateKey` pri fetchLead — operator hned vidi ktera sablona byla pouzita pro current draft.
+- Click "Vygenerovat znovu" -> POST `/api/leads/[id]/regenerate-draft` s `{ templateKey }`. Confirm dialog kdyz current draft neni prazdny (zabranuje accidental overwrite).
+- Po success: drawer state refreshovan z response (subject/body/templateKey), success toast s template_key + version pokud bylo template-renderovano, "fallback text" toast pokud doslo k fallback path.
+- Below selector: amber warning hláška kdyz draft existuje ale `templateKey === ''` (= fallback). Vizualni signal pro operatora ze tento draft NEPOUZIL T8 sablony.
+
+Feature 2 — real leads in editor preview pane (`template-preview-pane.tsx`):
+- On mount fetch `/api/leads`, mapuje pres novy `leadToSampleLead` helper (LeadListItem -> SampleLead shape).
+- Filter: jen leady s `previewUrl` (jinak `{preview_url}` placeholder by renderoval prazdne, useless preview). Cap 10 entries.
+- Dropdown rendering: `<optgroup>` "Reálné leady (qualified, s preview)" first, pak `<optgroup>` "— ukázková data —" se 3 sample leads jako fallback.
+- Auto-select: pri prvním load po fetch, pokud current `selectedLeadId` patri sample leadu, prepne na first real lead (operator usually wants real data).
+- Graceful fallback: pokud fetch selze nebo prázdne → zobrazi se jen sample leads, zadny error toast (silent).
+- Cancellation flag v cleanup zabranuje setState po unmount.
+
+Type infrastruktura — `emailTemplateKey: string` field threaded through 6 souboru:
+- `lib/domain/lead.ts` — canonical Lead interface (mezi emailBodyDraft a emailSyncStatus)
+- `lib/mappers/sheet-to-domain.ts` — map z `email_template_key` Sheets sloupce
+- `lib/mock/leads-data.ts` — 12 mock entries s `emailTemplateKey: ''`
+- `components/leads/lead-detail-drawer.tsx` — local Lead interface + state hydration
+
+T9 NEMENI: AS files, API routes, apps-script-writer, T8 editor main shell, T7 listing.
 - **Owner:** Stream B
-- **Code:** apps-script/Config.gs (modified), apps-script/EmailTemplateStore.gs (new (T1)), apps-script/EmailTemplateStore.gs (modified (T2)), apps-script/EmailTemplateStore.gs (modified (T3)), apps-script/PreviewPipeline.gs (modified (T3)), apps-script/Config.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T4)), apps-script/PreviewPipeline.gs (modified (T3.5+T4)), apps-script/Menu.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T5)), apps-script/WebAppEndpoint.gs (modified (T5)), crm-frontend/src/types/templates.ts (new (T6)), crm-frontend/src/lib/google/apps-script-writer.ts (modified (T6)), crm-frontend/src/app/api/templates/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/draft/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/history/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/publish/route.ts (new (T6)), crm-frontend/src/app/api/analytics/templates/route.ts (new (T6)), crm-frontend/src/app/api/leads/[id]/regenerate-draft/route.ts (new (T6)), crm-frontend/src/app/settings/page.tsx (new (T7)), crm-frontend/src/app/settings/templates/page.tsx (new (T7)), crm-frontend/src/components/templates/template-card.tsx (new (T7)), crm-frontend/src/components/templates/templates-page-skeleton.tsx (new (T7)), crm-frontend/src/components/layout/sidebar.tsx (modified (T7)), crm-frontend/src/lib/templates/sample-leads.ts (new (T8)), crm-frontend/src/lib/templates/render-preview.ts (new (T8)), crm-frontend/src/components/templates/placeholder-legend.tsx (new (T8)), crm-frontend/src/components/templates/template-preview-pane.tsx (new (T8)), crm-frontend/src/components/templates/publish-dialog.tsx (new (T8)), crm-frontend/src/components/templates/history-drawer.tsx (new (T8)), crm-frontend/src/components/templates/template-editor.tsx (new (T8)), crm-frontend/src/app/settings/templates/[key]/page.tsx (new (T8)), apps-script/Menu.gs (modified)
+- **Code:** apps-script/Config.gs (modified), apps-script/EmailTemplateStore.gs (new (T1)), apps-script/EmailTemplateStore.gs (modified (T2)), apps-script/EmailTemplateStore.gs (modified (T3)), apps-script/PreviewPipeline.gs (modified (T3)), apps-script/Config.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T4)), apps-script/PreviewPipeline.gs (modified (T3.5+T4)), apps-script/Menu.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T5)), apps-script/WebAppEndpoint.gs (modified (T5)), crm-frontend/src/types/templates.ts (new (T6)), crm-frontend/src/lib/google/apps-script-writer.ts (modified (T6)), crm-frontend/src/app/api/templates/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/draft/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/history/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/publish/route.ts (new (T6)), crm-frontend/src/app/api/analytics/templates/route.ts (new (T6)), crm-frontend/src/app/api/leads/[id]/regenerate-draft/route.ts (new (T6)), crm-frontend/src/app/settings/page.tsx (new (T7)), crm-frontend/src/app/settings/templates/page.tsx (new (T7)), crm-frontend/src/components/templates/template-card.tsx (new (T7)), crm-frontend/src/components/templates/templates-page-skeleton.tsx (new (T7)), crm-frontend/src/components/layout/sidebar.tsx (modified (T7)), crm-frontend/src/lib/templates/sample-leads.ts (new (T8)), crm-frontend/src/lib/templates/render-preview.ts (new (T8)), crm-frontend/src/components/templates/placeholder-legend.tsx (new (T8)), crm-frontend/src/components/templates/template-preview-pane.tsx (new (T8)), crm-frontend/src/components/templates/publish-dialog.tsx (new (T8)), crm-frontend/src/components/templates/history-drawer.tsx (new (T8)), crm-frontend/src/components/templates/template-editor.tsx (new (T8)), crm-frontend/src/app/settings/templates/[key]/page.tsx (new (T8)), crm-frontend/src/lib/domain/lead.ts (modified (T9)), crm-frontend/src/lib/mappers/sheet-to-domain.ts (modified (T9)), crm-frontend/src/lib/mock/leads-data.ts (modified (T9)), crm-frontend/src/lib/templates/sample-leads.ts (modified (T9)), crm-frontend/src/components/templates/template-preview-pane.tsx (modified (T9)), crm-frontend/src/components/leads/lead-detail-drawer.tsx (modified (T9)), apps-script/Menu.gs (modified)
 - **Docs:** docs/30-task-records/B-13.md, docs/11-change-log.md, docs/29-task-registry.md
 
 ## 2026-04-27

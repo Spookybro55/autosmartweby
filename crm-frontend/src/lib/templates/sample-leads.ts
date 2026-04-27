@@ -37,6 +37,48 @@ const SEBASTIAN_SIGNATURE = {
   sender_web: 'autosmartweb.cz',
 };
 
+/**
+ * Map a real LeadListItem from /api/leads into the SampleLead shape used
+ * by the template preview renderer. Sender block defaults to Sebastián
+ * (matches T8) — operator-specific signature swap is out of scope for
+ * the editor preview (operator picks own template at send time, not
+ * at template authoring time).
+ *
+ * Returns null if the lead is missing required fields (businessName,
+ * city) — caller should fall back to SAMPLE_LEADS in that case.
+ *
+ * Note: LeadListItem (the shape returned by /api/leads list endpoint)
+ * doesn't carry segment / area / painPoint, so those placeholders will
+ * render empty when previewing against a real lead. Operator who needs
+ * a fully-populated preview can switch back to a sample.
+ */
+export function leadToSampleLead(lead: {
+  id: string;
+  businessName: string;
+  contactName?: string;
+  city: string;
+  serviceType?: string;
+  previewUrl?: string;
+  email?: string;
+}): SampleLead | null {
+  if (!lead?.businessName || !lead?.city) return null;
+
+  return {
+    id: lead.id,
+    business_name: lead.businessName,
+    contact_name: lead.contactName ?? '',
+    city: lead.city,
+    area: '',                    // not on LeadListItem
+    service_type: lead.serviceType ?? '',
+    segment: lead.serviceType ?? '',  // best-effort: segment ≈ serviceType from list view
+    pain_point: '',              // not on LeadListItem
+    preview_url: lead.previewUrl ?? '',
+    email: lead.email ?? '',
+    ...SEBASTIAN_SIGNATURE,
+  };
+}
+
+
 export const SAMPLE_LEADS: SampleLead[] = [
   {
     id: 'sample-1',
