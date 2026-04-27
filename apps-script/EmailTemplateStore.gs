@@ -194,3 +194,392 @@ function setupEmailTemplates() {
   aswLog_('INFO', 'setupEmailTemplates', msg.replace(/\n/g, ' | '));
   safeAlert_(msg);
 }
+
+
+/* ═══════════════════════════════════════════════════════════════
+   buildTemplateRowMap_ — column index helper
+   Mirrors PreviewStore.gs buildHeaderIndex_ pattern. Returns map
+   of header_name → 1-based column index.
+   ═══════════════════════════════════════════════════════════════ */
+
+function buildTemplateRowMap_() {
+  var map = {};
+  for (var i = 0; i < EMAIL_TEMPLATES_SHEET_HEADERS.length; i++) {
+    map[EMAIL_TEMPLATES_SHEET_HEADERS[i]] = i + 1;
+  }
+  return map;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   rowToTemplate_ — convert sheet row array to typed object
+   Returns null if row[0] (template_id) is empty.
+   ═══════════════════════════════════════════════════════════════ */
+
+function rowToTemplate_(row, rowNum) {
+  if (!row || !row[0]) return null;
+  return {
+    template_id:        String(row[0] || ''),
+    template_key:       String(row[1] || ''),
+    version:            Number(row[2] || 0),
+    name:               String(row[3] || ''),
+    description:        String(row[4] || ''),
+    subject_template:   String(row[5] || ''),
+    body_template:      String(row[6] || ''),
+    placeholders_used:  String(row[7] || ''),
+    status:             String(row[8] || ''),
+    commit_message:     String(row[9] || ''),
+    created_at:         row[10] ? String(row[10]) : '',
+    created_by:         String(row[11] || ''),
+    activated_at:       row[12] ? String(row[12]) : '',
+    activated_by:       String(row[13] || ''),
+    archived_at:        row[14] ? String(row[14]) : '',
+    parent_template_id: String(row[15] || ''),
+    _rowNum:            rowNum  // 1-based, for in-place updates
+  };
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   extractPlaceholders_ — find {placeholder_name} tokens in text
+   Returns sorted unique array of placeholder names (without braces).
+   Used for placeholders_used CSV computation.
+   ═══════════════════════════════════════════════════════════════ */
+
+function extractPlaceholders_(text) {
+  if (!text) return [];
+  var seen = {};
+  var matches = String(text).match(/\{([a-z_][a-z0-9_]*)\}/gi) || [];
+  for (var i = 0; i < matches.length; i++) {
+    var name = matches[i].slice(1, -1).toLowerCase();
+    seen[name] = true;
+  }
+  return Object.keys(seen).sort();
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   listAllTemplates_ — returns all rows as objects
+   Filters out empty rows. Order: sheet order (= insertion order).
+   No pagination — _email_templates is small (<100 rows expected).
+   ═══════════════════════════════════════════════════════════════ */
+
+function listAllTemplates_() {
+  var sheet = ensureEmailTemplatesSheet_();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var range = sheet.getRange(2, 1, lastRow - 1, EMAIL_TEMPLATES_SHEET_HEADERS.length);
+  var values = range.getValues();
+  var out = [];
+  for (var i = 0; i < values.length; i++) {
+    var t = rowToTemplate_(values[i], i + 2);
+    if (t) out.push(t);
+  }
+  return out;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   loadActiveTemplate_(key) — returns active template for given key
+   Throws Error if no active template exists for key (caller must
+   handle, e.g. composeDraft_ falls back to hardcoded text).
+   ═══════════════════════════════════════════════════════════════ */
+
+function loadActiveTemplate_(key) {
+  var k = String(key || '').trim();
+  if (!k) throw new Error('loadActiveTemplate_: empty key');
+
+  var all = listAllTemplates_();
+  for (var i = 0; i < all.length; i++) {
+    if (all[i].template_key === k && all[i].status === 'active') {
+      return all[i];
+    }
+  }
+  throw new Error('No active template for key: ' + k);
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   getTemplateDraft_(key) — returns draft for given key, or null
+   ═══════════════════════════════════════════════════════════════ */
+
+function getTemplateDraft_(key) {
+  var k = String(key || '').trim();
+  if (!k) return null;
+
+  var all = listAllTemplates_();
+  for (var i = 0; i < all.length; i++) {
+    if (all[i].template_key === k && all[i].status === 'draft') {
+      return all[i];
+    }
+  }
+  return null;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   listTemplateHistory_(key) — all rows for key, newest version first
+   Includes: empty placeholder, draft (if any), active, archived.
+   ═══════════════════════════════════════════════════════════════ */
+
+function listTemplateHistory_(key) {
+  var k = String(key || '').trim();
+  if (!k) return [];
+
+  var all = listAllTemplates_();
+  var matching = [];
+  for (var i = 0; i < all.length; i++) {
+    if (all[i].template_key === k) matching.push(all[i]);
+  }
+  matching.sort(function(a, b) {
+    // Status priority: draft > active > archived > empty
+    var statusOrder = { draft: 0, active: 1, archived: 2, empty: 3 };
+    var sa = statusOrder[a.status] !== undefined ? statusOrder[a.status] : 99;
+    var sb = statusOrder[b.status] !== undefined ? statusOrder[b.status] : 99;
+    if (sa !== sb) return sa - sb;
+    return b.version - a.version;  // newest first within same status
+  });
+  return matching;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   saveTemplateDraft_(key, subject, body, name, description) — upsert draft
+   ═══════════════════════════════════════════════════════════════
+   Behaviour:
+     - If draft exists for key → overwrite subject/body/name/desc, refresh
+       updated_at via created_at column (we don't track separate updated_at
+       to keep schema flat; created_at is "when this draft started")
+     - If no draft → insert new row with status='draft', version=0,
+       parent_template_id = current active template_id (if any)
+   1 draft per template_key invariant — never creates a second draft row.
+
+   Uses LockService to prevent concurrent draft writes from racing.
+   Returns the saved draft template object.
+   ═══════════════════════════════════════════════════════════════ */
+
+function saveTemplateDraft_(key, subject, body, name, description) {
+  var k = String(key || '').trim();
+  if (!k) throw new Error('saveTemplateDraft_: empty key');
+
+  // Validate key is a known default key (defensive — frontend shouldn't
+  // ever send arbitrary keys but guard against typo / injection)
+  var validKey = false;
+  for (var i = 0; i < EMAIL_TEMPLATE_DEFAULT_KEYS.length; i++) {
+    if (EMAIL_TEMPLATE_DEFAULT_KEYS[i] === k) { validKey = true; break; }
+  }
+  if (!validKey) throw new Error('Unknown template key: ' + k);
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) {
+    throw new Error('Could not acquire lock for saveTemplateDraft_');
+  }
+
+  try {
+    var sheet = ensureEmailTemplatesSheet_();
+    var nowIso = new Date().toISOString();
+    var actor = (Session.getActiveUser().getEmail() || 'system').toLowerCase();
+    var subjStr = String(subject == null ? '' : subject);
+    var bodyStr = String(body == null ? '' : body);
+    var nameStr = String(name == null ? '' : name);
+    var descStr = String(description == null ? '' : description);
+    var placeholders = extractPlaceholders_(subjStr + ' ' + bodyStr).join(',');
+
+    // Find existing draft for this key
+    var existing = getTemplateDraft_(k);
+
+    if (existing) {
+      // Overwrite in place — keep template_id, created_at, created_by stable
+      var rowNum = existing._rowNum;
+      var map = buildTemplateRowMap_();
+      sheet.getRange(rowNum, map['name']).setValue(nameStr || existing.name);
+      sheet.getRange(rowNum, map['description']).setValue(descStr || existing.description);
+      sheet.getRange(rowNum, map['subject_template']).setValue(subjStr);
+      sheet.getRange(rowNum, map['body_template']).setValue(bodyStr);
+      sheet.getRange(rowNum, map['placeholders_used']).setValue(placeholders);
+      // Refresh created_at to mark "draft last touched at"
+      sheet.getRange(rowNum, map['created_at']).setValue(nowIso);
+      sheet.getRange(rowNum, map['created_by']).setValue(actor);
+
+      aswLog_('INFO', 'saveTemplateDraft_',
+        'Updated draft for ' + k + ' (template_id=' + existing.template_id + ')');
+
+      // Return refreshed object
+      var refreshed = getTemplateDraft_(k);
+      return refreshed;
+    }
+
+    // New draft — find current active to reference as parent
+    var parentId = '';
+    try {
+      var current = loadActiveTemplate_(k);
+      parentId = current.template_id;
+    } catch (e) {
+      // No active yet (first publish for this key) — parent stays empty
+      parentId = '';
+    }
+
+    var newRow = [
+      generateTemplateId_(),  // template_id
+      k,                      // template_key
+      0,                      // version (0 = draft, gets bumped on publish)
+      nameStr,                // name
+      descStr,                // description
+      subjStr,                // subject_template
+      bodyStr,                // body_template
+      placeholders,           // placeholders_used
+      'draft',                // status
+      '',                     // commit_message (set on publish)
+      nowIso,                 // created_at
+      actor,                  // created_by
+      '',                     // activated_at
+      '',                     // activated_by
+      '',                     // archived_at
+      parentId                // parent_template_id
+    ];
+
+    sheet.appendRow(newRow);
+
+    aswLog_('INFO', 'saveTemplateDraft_',
+      'Created new draft for ' + k + ' (parent=' + (parentId || 'none') + ')');
+
+    return getTemplateDraft_(k);
+
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   discardTemplateDraft_(key) — delete draft row for key
+   No-op if no draft exists.
+   Returns true if a draft was deleted, false otherwise.
+   ═══════════════════════════════════════════════════════════════ */
+
+function discardTemplateDraft_(key) {
+  var k = String(key || '').trim();
+  if (!k) return false;
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) {
+    throw new Error('Could not acquire lock for discardTemplateDraft_');
+  }
+
+  try {
+    var draft = getTemplateDraft_(k);
+    if (!draft) return false;
+
+    var sheet = ensureEmailTemplatesSheet_();
+    sheet.deleteRow(draft._rowNum);
+
+    aswLog_('INFO', 'discardTemplateDraft_',
+      'Deleted draft for ' + k + ' (template_id=' + draft.template_id + ')');
+    return true;
+
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   publishTemplate_(key, commitMessage) — promote draft to active
+   ═══════════════════════════════════════════════════════════════
+   Steps (atomic-ish via LockService):
+     1. Validate: draft exists, commitMessage >= 5 chars, draft has
+        non-empty subject AND body
+     2. Determine new version number: max(version) for key + 1
+        (handles empty placeholder version=0 → first publish becomes v1)
+     3. If existing active for key: flip its status to 'archived',
+        set archived_at = now
+     4. If existing empty placeholder for key (version=0, status=empty):
+        delete it (it served its purpose as a slot reservation)
+     5. Update draft row: version = new, status = 'active',
+        commit_message = commitMessage, activated_at = now,
+        activated_by = actor
+     Throws on any validation failure; partial state cleanup not needed
+     because nothing has been mutated until step 3.
+   Returns the published template object.
+   ═══════════════════════════════════════════════════════════════ */
+
+function publishTemplate_(key, commitMessage) {
+  var k = String(key || '').trim();
+  if (!k) throw new Error('publishTemplate_: empty key');
+  var msg = String(commitMessage == null ? '' : commitMessage).trim();
+  if (msg.length < 5) {
+    throw new Error('Commit message required (min 5 chars), got: "' + msg + '"');
+  }
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) {
+    throw new Error('Could not acquire lock for publishTemplate_');
+  }
+
+  try {
+    var draft = getTemplateDraft_(k);
+    if (!draft) throw new Error('No draft to publish for key: ' + k);
+    if (!draft.subject_template || !draft.body_template) {
+      throw new Error('Draft has empty subject or body — cannot publish');
+    }
+
+    var sheet = ensureEmailTemplatesSheet_();
+    var map = buildTemplateRowMap_();
+    var nowIso = new Date().toISOString();
+    var actor = (Session.getActiveUser().getEmail() || 'system').toLowerCase();
+
+    // Determine new version
+    var history = listTemplateHistory_(k);
+    var maxVersion = 0;
+    var existingActiveRowNum = null;
+    var existingEmptyRowNum = null;
+    for (var i = 0; i < history.length; i++) {
+      var t = history[i];
+      if (t.version > maxVersion) maxVersion = t.version;
+      if (t.status === 'active') existingActiveRowNum = t._rowNum;
+      if (t.status === 'empty') existingEmptyRowNum = t._rowNum;
+    }
+    var newVersion = maxVersion + 1;
+    if (newVersion < 1) newVersion = 1;  // safety
+
+    // Step 3: archive existing active (if any)
+    if (existingActiveRowNum) {
+      sheet.getRange(existingActiveRowNum, map['status']).setValue('archived');
+      sheet.getRange(existingActiveRowNum, map['archived_at']).setValue(nowIso);
+    }
+
+    // Step 4: delete empty placeholder (if any) — the published row
+    // takes its slot in the conceptual list
+    if (existingEmptyRowNum) {
+      // Re-resolve rowNum after potential row 3 archive, since deleteRow
+      // shifts indices. listTemplateHistory_ was called BEFORE archive
+      // mutation, so rowNum is still correct (archive doesn't shift rows).
+      sheet.deleteRow(existingEmptyRowNum);
+      // After delete, draft._rowNum may have shifted if empty was above it
+      if (existingEmptyRowNum < draft._rowNum) {
+        draft._rowNum = draft._rowNum - 1;
+      }
+      if (existingActiveRowNum && existingEmptyRowNum < existingActiveRowNum) {
+        // (only relevant if we wanted to touch active again — we don't)
+      }
+    }
+
+    // Step 5: promote draft to active
+    sheet.getRange(draft._rowNum, map['version']).setValue(newVersion);
+    sheet.getRange(draft._rowNum, map['status']).setValue('active');
+    sheet.getRange(draft._rowNum, map['commit_message']).setValue(msg);
+    sheet.getRange(draft._rowNum, map['activated_at']).setValue(nowIso);
+    sheet.getRange(draft._rowNum, map['activated_by']).setValue(actor);
+
+    aswLog_('INFO', 'publishTemplate_',
+      'Published ' + k + ' v' + newVersion +
+      ' (template_id=' + draft.template_id + ', commit="' + msg + '")');
+
+    // Re-read for fresh object
+    return loadActiveTemplate_(k);
+
+  } finally {
+    lock.releaseLock();
+  }
+}

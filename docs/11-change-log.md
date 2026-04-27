@@ -23,7 +23,7 @@ Fix C (hybrid) — implementovan dual-side:
 - **Code:** apps-script/PreviewPipeline.gs (modified)
 - **Docs:** docs/30-task-records/B-12.md
 
-### [B/B-13] Email template schema migration (T1 of 13-task email templating + analytics project) — SCHEMA_DONE
+### [B/B-13] Email template schema + CRUD (T1+T2 of 13-task email templating + analytics project) — CRUD_DONE
 - **Scope:** Foundation pro multi-task projekt: nahradit hardcoded `composeDraft_` editovatelnym template systemem s versioning + analytikou per template+segment.
 
 T1 je jen schema migration — zadna business logika, zadne doPost akce, zadny frontend. To prijde v T2-T13.
@@ -34,8 +34,19 @@ Co T1 dodava:
 - Idempotentni setup funkce `setupEmailTemplates()` volana z menu — wrapper, ktery (1) zavola `setupPreviewExtension` aby pribyly 4 LEADS sloupce, (2) zavola `ensureEmailTemplatesSheet_` pro vytvoreni hidden listu, (3) zavola `bootstrapEmptyTemplates_` pro nasem 5 placeholder radku.
 
 T1 NEMENI `composeDraft_`, `buildEmailDrafts`, `OutboundEmail.gs`, `WebAppEndpoint.gs`, `PreviewStore.gs` ani frontend. Po clasp push + spusteni `setupEmailTemplates` v editoru je sheet pripraveny pro CRUD operace v T2.
+
+**T2 update (commit pridany ve stejnem PR):** CRUD vrstva nad `_email_templates` sheetem. 10 novych funkci v `EmailTemplateStore.gs` (file: 195 -> 585 radku). Drafts + Publish flow:
+- `saveTemplateDraft_(key, subject, body, name, description)` — upsert draft (1-per-key invariant, overwrite-on-update, parent_template_id zachycen z aktualniho active).
+- `publishTemplate_(key, commitMessage)` — promotuje draft na novy active (povinny commit message ≥ 5 znaku, blokuje publish prazdneho subject/body, archivuje predchozi active, maze empty placeholder, version+1).
+- `discardTemplateDraft_(key)` — smaze draft row (no-op kdyz neexistuje).
+- Read API: `loadActiveTemplate_`, `getTemplateDraft_`, `listAllTemplates_`, `listTemplateHistory_`.
+- Helpers: `buildTemplateRowMap_`, `rowToTemplate_`, `extractPlaceholders_`.
+- Mutace chranene `LockService.getScriptLock()` (5s timeout, try/finally release).
+- Zadny in-memory cache — vse ze Sheet.
+
+T2 stale NEMENI `composeDraft_`, `WebAppEndpoint.gs` ani frontend — to je T3 a T5.
 - **Owner:** Stream B
-- **Code:** apps-script/Config.gs (modified), apps-script/EmailTemplateStore.gs (new), apps-script/Menu.gs (modified)
+- **Code:** apps-script/Config.gs (modified), apps-script/EmailTemplateStore.gs (new (T1)), apps-script/EmailTemplateStore.gs (modified (T2)), apps-script/Menu.gs (modified)
 - **Docs:** docs/30-task-records/B-13.md, docs/11-change-log.md, docs/29-task-registry.md
 
 ## 2026-04-26
