@@ -23,6 +23,21 @@ Fix C (hybrid) — implementovan dual-side:
 - **Code:** apps-script/PreviewPipeline.gs (modified)
 - **Docs:** docs/30-task-records/B-12.md
 
+### [B/B-13] Email template schema migration (T1 of 13-task email templating + analytics project) — SCHEMA_DONE
+- **Scope:** Foundation pro multi-task projekt: nahradit hardcoded `composeDraft_` editovatelnym template systemem s versioning + analytikou per template+segment.
+
+T1 je jen schema migration — zadna business logika, zadne doPost akce, zadny frontend. To prijde v T2-T13.
+
+Co T1 dodava:
+- Novy hidden sheet `_email_templates` (16 sloupcu) s 5 placeholder radky pro default template keys: `no-website`, `weak-website`, `has-website`, `follow-up-1`, `follow-up-2` (status='empty', version=0).
+- 4 nove `EXTENSION_COLUMNS` v LEADS pro per-lead template tracking: `email_template_key`, `email_template_version`, `email_template_id`, `email_segment_at_send`.
+- Idempotentni setup funkce `setupEmailTemplates()` volana z menu — wrapper, ktery (1) zavola `setupPreviewExtension` aby pribyly 4 LEADS sloupce, (2) zavola `ensureEmailTemplatesSheet_` pro vytvoreni hidden listu, (3) zavola `bootstrapEmptyTemplates_` pro nasem 5 placeholder radku.
+
+T1 NEMENI `composeDraft_`, `buildEmailDrafts`, `OutboundEmail.gs`, `WebAppEndpoint.gs`, `PreviewStore.gs` ani frontend. Po clasp push + spusteni `setupEmailTemplates` v editoru je sheet pripraveny pro CRUD operace v T2.
+- **Owner:** Stream B
+- **Code:** apps-script/Config.gs (modified), apps-script/EmailTemplateStore.gs (new), apps-script/Menu.gs (modified)
+- **Docs:** docs/30-task-records/B-13.md, docs/11-change-log.md, docs/29-task-registry.md
+
 ## 2026-04-26
 
 ### [B/B-09] Phase 2 KROK 4 — manual "Vygenerovat preview" button v CRM — DONE

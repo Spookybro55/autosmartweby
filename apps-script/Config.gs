@@ -24,6 +24,40 @@ var PREVIEW_SHEET_NAME = '_previews';
 var HEADER_ROW      = 1;
 var DATA_START_ROW  = 2;
 
+/* ── B-13: Email templates store (hidden sheet) ───────────── */
+var EMAIL_TEMPLATES_SHEET_NAME = '_email_templates';
+
+// Schema — ORDER MATTERS, headers are written in this order.
+// All columns are strings/dates; no numeric formulas.
+var EMAIL_TEMPLATES_SHEET_HEADERS = [
+  'template_id',         // ASW-TPL-{ts_base36}-{rand4} — immutable identifier
+  'template_key',        // 'no-website' | 'weak-website' | 'has-website' | 'follow-up-1' | 'follow-up-2'
+  'version',             // 0 (empty placeholder) / 1+ (active or archived)
+  'name',                // human-readable, e.g. 'No website — initial outreach'
+  'description',         // 1–3 sentences, what audience this targets
+  'subject_template',    // raw template string with {placeholders}
+  'body_template',       // raw template string with {placeholders}
+  'placeholders_used',   // CSV of placeholder names found in subject+body
+  'status',              // 'empty' | 'draft' | 'active' | 'archived'
+  'commit_message',      // required when publishing (status='active'), min 5 chars
+  'created_at',          // ISO timestamp
+  'created_by',          // email of user who created this version
+  'activated_at',        // ISO timestamp when status flipped to active
+  'activated_by',        // email of user who published this version
+  'archived_at',         // ISO timestamp when status flipped from active to archived
+  'parent_template_id'   // template_id of the version this was published over (null for v1)
+];
+
+// Default template keys to seed as empty placeholders on first run.
+// Frozen for now — adjust when more web templates ship.
+var EMAIL_TEMPLATE_DEFAULT_KEYS = [
+  'no-website',
+  'weak-website',
+  'has-website',
+  'follow-up-1',
+  'follow-up-2'
+];
+
 /* ── Pipeline control ─────────────────────────────────────── */
 var DRY_RUN        = true;
 var ENABLE_WEBHOOK = false;
@@ -132,7 +166,13 @@ var EXTENSION_COLUMNS = [
   'reviewed_by',
   // KROK 5: multi-user assignee model — '' = unassigned, jinak email
   // z ALLOWED_USERS (== Object.keys(ASSIGNEE_NAMES) — single source of truth)
-  'assignee_email'
+  'assignee_email',
+  // B-13: Email template tracking — written at draft generation time,
+  // immutable through send/reply lifecycle. Enables analytics joins.
+  'email_template_key',      // e.g. 'no-website'
+  'email_template_version',  // e.g. '1' (string for sheet compat)
+  'email_template_id',       // FK to _email_templates.template_id
+  'email_segment_at_send'    // snapshot of segment at draft time
 ];
 
 /* ── Preview stage state machine ──────────────────────────── */

@@ -35,6 +35,7 @@ function onOpen() {
 
   ui.createMenu('Autosmartweby CRM')
     .addItem('Setup preview extension', 'setupPreviewExtension')
+    .addItem('Setup email templates', 'setupEmailTemplates')
     .addItem('Ensure lead IDs', 'ensureLeadIds')
     .addSeparator()
     .addItem('Qualify leads', 'qualifyLeads')
