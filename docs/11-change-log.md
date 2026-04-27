@@ -8,7 +8,7 @@
 
 ## 2026-04-28
 
-### [B/B-13] Email template schema + CRUD + runtime wiring + bootstrap + backend + Next.js API layer (T1+T2+T3+T3.5+T4+T5+T6 of 13-task email templating + analytics project) — API_LAYER_COMPLETE
+### [B/B-13] Email template schema + CRUD + runtime wiring + bootstrap + backend + API layer + UI listing (T1+T2+T3+T3.5+T4+T5+T6+T7 of 13-task email templating + analytics project) — UI_LISTING_DONE
 - **Scope:** Foundation pro multi-task projekt: nahradit hardcoded `composeDraft_` editovatelnym template systemem s versioning + analytikou per template+segment.
 
 T1 je jen schema migration — zadna business logika, zadne doPost akce, zadny frontend. To prijde v T2-T13.
@@ -117,8 +117,34 @@ Novy soubor `crm-frontend/src/types/templates.ts`:
 Error mapping konvence: 400 = validation (chybi key, JSON parse fail, length over limit), 404 = not found (`no_active_template`, `lead_not_found`), 502 = AS upstream `{ ok: false }`, 500 = unexpected catch.
 
 T6 NEMENI Apps Script files, frontend pages, ostatni komponenty.
+
+**T7 update (commit ve stejnem PR):** prvni UI stranka — landing pro spravu sablon. URL `/settings/templates`. Listing only — editor je T8.
+
+Novy soubor `crm-frontend/src/app/settings/page.tsx` (server component, prerendered):
+- Top-level `/settings` landing s 2 cards: "Šablony emailů" -> `/settings/templates`, "Analýza šablon" -> `/analytics/templates`.
+- Lucide icons (Mail, BarChart3). `metadata.title` set.
+
+Novy soubor `crm-frontend/src/app/settings/templates/page.tsx` (client component):
+- Fetch z `/api/templates` v `useEffect`. Loading state -> `TemplatesPageSkeleton`. Error state -> destruktivni rounded box s "Zkusit znovu" retry tlacitkem + `sonner` toast.
+- `groupByKey` helper — buckets pres `template_key` na `{ active, draft, empty }`. Filtruje `archived` (patri do history view T8).
+- Pre-bootstrap state: pred prvnim spustenim `bootstrapEmptyTemplates_` `/api/templates` muze vratit `[]`. Page presto renderuje 5 placeholder cards (po jedne za kazdy klic v `DEFAULT_TEMPLATE_KEYS`) se statusom `empty`. Klik vede na `/settings/templates/[key]` (T8 — zatim 404).
+- Stable sort: `DEFAULT_TEMPLATE_KEYS` order first (no-website, weak-website, has-website, follow-up-1, follow-up-2), pak custom keys alphabetical.
+
+Novy soubor `crm-frontend/src/components/templates/template-card.tsx`:
+- `StatusBadge` 3 variants: active (green pill `aktivní · v{n}`), draft (amber pill s ✎ icon), empty (gray pill s outline circle). Archived varianta neni — archivovane verze se v listingu nezobrazuji.
+- Shows `name` v uvozovkach kdyz active. Italic "— připraveno k vytvoření —" kdyz empty.
+- "Rozpracovaná verze" amber pill below name kdyz oba `active` + `draft` existuji (operator je v polovine editovani v2).
+- Activated_at byline format: "{authorShort}, {day}. {month}." (e.g. `s.fridrich, 28. 4.`).
+- CTA: "Upravit" (kdyz je active) nebo "Vytvořit" (kdyz empty/no active), oba s ArrowRight icon ktery se posune na hover.
+
+Novy soubor `crm-frontend/src/components/templates/templates-page-skeleton.tsx`:
+- 5 skeleton cards mimicking actual layout (used existing `<Skeleton>` shadcn primitive z `src/components/ui/skeleton.tsx`).
+
+`crm-frontend/src/components/layout/sidebar.tsx` modified (+2 radky): pridana navigation entry "Nastavení" -> `/settings` (Settings lucide icon) na konec `navigation` array. Nav infrastruktura uz existuje — pridani je trivial.
+
+T7 NEMENI: API routes (T6), apps-script-writer (T6), AS files, lead drawer, ostatni komponenty. Editor (T8 sub-task) zatim neni — klik na card v T7 vede na neexistujici cestu, planovane.
 - **Owner:** Stream B
-- **Code:** apps-script/Config.gs (modified), apps-script/EmailTemplateStore.gs (new (T1)), apps-script/EmailTemplateStore.gs (modified (T2)), apps-script/EmailTemplateStore.gs (modified (T3)), apps-script/PreviewPipeline.gs (modified (T3)), apps-script/Config.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T4)), apps-script/PreviewPipeline.gs (modified (T3.5+T4)), apps-script/Menu.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T5)), apps-script/WebAppEndpoint.gs (modified (T5)), crm-frontend/src/types/templates.ts (new (T6)), crm-frontend/src/lib/google/apps-script-writer.ts (modified (T6)), crm-frontend/src/app/api/templates/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/draft/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/history/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/publish/route.ts (new (T6)), crm-frontend/src/app/api/analytics/templates/route.ts (new (T6)), crm-frontend/src/app/api/leads/[id]/regenerate-draft/route.ts (new (T6)), apps-script/Menu.gs (modified)
+- **Code:** apps-script/Config.gs (modified), apps-script/EmailTemplateStore.gs (new (T1)), apps-script/EmailTemplateStore.gs (modified (T2)), apps-script/EmailTemplateStore.gs (modified (T3)), apps-script/PreviewPipeline.gs (modified (T3)), apps-script/Config.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T4)), apps-script/PreviewPipeline.gs (modified (T3.5+T4)), apps-script/Menu.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T5)), apps-script/WebAppEndpoint.gs (modified (T5)), crm-frontend/src/types/templates.ts (new (T6)), crm-frontend/src/lib/google/apps-script-writer.ts (modified (T6)), crm-frontend/src/app/api/templates/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/draft/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/history/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/publish/route.ts (new (T6)), crm-frontend/src/app/api/analytics/templates/route.ts (new (T6)), crm-frontend/src/app/api/leads/[id]/regenerate-draft/route.ts (new (T6)), crm-frontend/src/app/settings/page.tsx (new (T7)), crm-frontend/src/app/settings/templates/page.tsx (new (T7)), crm-frontend/src/components/templates/template-card.tsx (new (T7)), crm-frontend/src/components/templates/templates-page-skeleton.tsx (new (T7)), crm-frontend/src/components/layout/sidebar.tsx (modified (T7)), apps-script/Menu.gs (modified)
 - **Docs:** docs/30-task-records/B-13.md, docs/11-change-log.md, docs/29-task-registry.md
 
 ## 2026-04-27
