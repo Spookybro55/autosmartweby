@@ -3,7 +3,9 @@
 Sales CRM nad Google Sheets s Apps Script backend a Next.js frontendem.
 Jednostránkový rozcestník pro 4 audience (operátor, dev, ops, owner).
 
-> **Status:** 🟡 PILOT (4 internal users) · `git tag pilot-v1.0` po smoke testu.
+> **Status:** 🟢 PHASE 2 LAUNCHED (preview pipeline + CRM email send) · `git tag phase2-v1.0`
+> **Pilot v1.0:** 4 internal users since 2026-04-25 · `git tag pilot-v1.0`
+> **Last hotfix:** brief field aliases (#73) — 2026-04-27
 > **Owner:** [sfridrich@unipong.cz](mailto:sfridrich@unipong.cz)
 > **Repo:** github.com/Spookybro55/autosmartweby (private)
 
@@ -12,6 +14,8 @@ Jednostránkový rozcestník pro 4 audience (operátor, dev, ops, owner).
 ## Co projekt dělá
 
 Scraper → Sheet → Apps Script preview pipeline → operátor review → outbound email + reply tracking. CRM frontend pro 4 obchodníky s "Mé leady" view. Cílem je škálovat outreach na malé firmy bez vlastních webů, kterým připravujeme personalizované preview.
+
+Phase 2 přidává: Sheets-backed preview storage (FF-004 fixed), manual "Vygenerovat preview" button v CRM, auto trigger READY_FOR_REVIEW přes 15-min cron, email send z CRM drawer + autosmartweb.cz/preview/<slug> rendering.
 
 ## Architektura (one-liner)
 

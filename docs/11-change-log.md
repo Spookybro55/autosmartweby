@@ -6,6 +6,65 @@
 
 ---
 
+## 2026-04-27
+
+### [B/B-12] Phase 2 hotfix — brief phone/email aliases for marketing web compat — DONE
+- **Scope:** Phase 2 launch hotfix po prvnim e2e produkcnim run (lead "ALVITO s.r.o. PLYNOSERVIS"). Marketing web `autosmartweb.cz/preview/<slug>` vracel **HTTP 500** na vsechny CRM-generovane preview slugs. Test slug `test-bauhaus-praha` fungoval (200) — mock data v `preview-reader.ts` mela spravne field names.
+
+**Root cause — schema mismatch:**
+- CRM Apps Script `buildPreviewBrief_` (`apps-script/PreviewPipeline.gs:634-653`) vracel brief s `contact_phone` + `contact_email` (legacy CRM frontend names).
+- Marketing web `ClientBrief` interface (`Spookybro55/ASW-MARKETING-WEB:src/templates/core/types.ts`) vyžaduje `phone` + `email`.
+- Render: `<EmergencyProfessional>` template volá `telHref(brief.phone)` v `Header`, `Hero`, `Services`, `Pricing`, `Locations`, `Contact`, `Footer`, `MobileStickyCta` — `brief.phone === undefined` → `undefined.replace(/\s/g, "")` → **TypeError** → SSR throw → 500.
+
+Fix C (hybrid) — implementovan dual-side:
+- **PR #73 (CRM Apps Script source-side):** `buildPreviewBrief_` přidá `phone:` a `email:` aliasy vedle existujicich `contact_phone:` a `contact_email:`. Newly-written `_previews` rows budou mit oba klice.
+- **ASW-MARKETING-WEB#2 (read-time fallback, companion PR):** `preview-reader.ts:getPreviewBySlug` mapuje `rawBrief.contact_phone → brief.phone` (a email/website) pri čteni z Sheet. Existing rows zapsane pred B-12 (vc. ALVITO + 8 dalsich pilot leadů) renderuji okamzite po Vercel auto-deploy.
+- **Owner:** Stream B
+- **Code:** apps-script/PreviewPipeline.gs (modified)
+- **Docs:** docs/30-task-records/B-12.md
+
+## 2026-04-26
+
+### [B/B-09] Phase 2 KROK 4 — manual "Vygenerovat preview" button v CRM — DONE
+- **Scope:** Phase 2 KROK 4 doplnuje operatorske manualni vygenerovani preview pro 1 lead z CRM lead detail draweru. Flow: kliknuti "Vygenerovat preview" → frontend POST `/api/leads/[id]/generate-preview` → Apps Script doPost akce `generatePreview` → `processPreviewForLead_(leadId)` → `_previews` row + LEADS write-back → response s `previewUrl`. Frontend drawer ukaze "Preview hotov" + odkaz "Otevrit".
+
+Reuse existujicich Phase 2 KROK 2 primitiv: `upsertPreviewRecord_` (Sheets-backed `_previews` storage), `buildPreviewBrief_` (18-pole brief). Refactor: extrakce `computePreviewArtifacts_(rd)` (pure helper sdileny `processPreviewQueue` + manual flow) a `persistPreviewArtifacts_(artifacts, leadId)` wrapper.
+
+KROK 4 NEMENI B-04 webhook endpoint, NEMENI B-01 `PreviewBrief` shape, nemeni B-05 testy (regression PASS).
+- **Owner:** Stream B
+- **Code:** apps-script/PreviewPipeline.gs (modified), apps-script/WebAppEndpoint.gs (modified), crm-frontend/src/lib/google/apps-script-writer.ts (modified), crm-frontend/src/app/api/leads/[id]/generate-preview/route.ts (new), crm-frontend/src/lib/mock/mock-service.ts (modified), crm-frontend/src/components/leads/lead-detail-drawer.tsx (modified)
+- **Docs:** docs/30-task-records/B-09.md
+
+### [B/B-10] Phase 2 KROK 5 — auto trigger lands READY_FOR_REVIEW directly — DONE
+- **Scope:** Phase 2 KROK 5 narovnava `processPreviewQueue` (15-min cron) tak, aby leady BEZ preview_slug skoncily end-to-end na `READY_FOR_REVIEW` v ramci jednoho run. Templaty jsou staticke na `autosmartweb.cz`, neexistuje runtime webhook → KROK 5 obchazi B-04 webhook block, zapisuje do `_previews` (Sheets-backed storage z KROK 2) + LEADS row a posuva preview_stage rovnou na READY_FOR_REVIEW.
+
+Webhook code (B-05 cesta) zachovan s DEPRECATED bannerem — B-05 testy stale beze zmeny (42/42 PASS) protoze beziu izolovane unit-test mode.
+
+Sjednoceni s KROK 4 (B-09): novy helper `resolvePreviewUrl_(slug, allowEmpty)` — single source of truth pro preview URL resolution (honors `PUBLIC_BASE_URL` Script Property pro staging override). Replace 3 inline duplicates v `persistPreviewArtifacts_`, `processPreviewForLead_`, novy queue write.
+
+KROK 5 NEMENI B-04 endpoint, NEMENI B-01 brief, NEMENI B-05 webhook block (jen deprecation banner v komentari).
+- **Owner:** Stream B
+- **Code:** apps-script/PreviewPipeline.gs (modified), crm-frontend/src/app/api/preview/render/route.ts (modified)
+- **Docs:** docs/30-task-records/B-10.md
+
+### [B/B-11] Phase 2 KROK 6 — email z CRM (UI editor + Odeslat button) — DONE
+- **Scope:** Phase 2 KROK 6 doplnuje operatorske posilani emailu primo z CRM lead detail draweru. Operator vidi pre-generated email draft (z KROK 4/5), edituje subject/body inline, klikne "Odeslat" → confirm Dialog → email letiu klientovi pres existing pilot send primitives.
+
+Reuse pilot KROK 4 primitives bez modifikace: `resolveSenderIdentity_` (Reply-To assignee map), `sendGmailMessage_` (GmailApp send), `persistOutboundMetadata_` (LEADS write-back).
+
+**Drift uznán (Q1 decision):** frontend send má mírnější gate než Sheet path:
+- **Sheet path** (`executeCrmOutbound_` operator menu): `assertSendability_` requires `review_decision === 'APPROVE'`.
+- **Frontend path** (`sendEmailForLead_` z drawer Odeslat): jen `qualified + preview_stage=READY_FOR_REVIEW + drafts + email valid`.
+
+Argument: KROK 4/5 generuji preview do `READY_FOR_REVIEW` ale `review_decision=''` (B-06 review queue se aktivuje jen pri Sheet edit). Pokud by frontend send vyzadoval APPROVE, kazdý CRM-only workflow by byl zablokovany. Operator klik "Odeslat" + Dialog confirm IS the approval. Sheet path keeps APPROVE pro operatory kteri preferuji Sheet review queue.
+
+**Backlog:** sjednotit gates jakmile CRM-only workflow stabilizuje (likely: drop B-06 review queue + assertSendability_, frontend confirm dialog becomes single source of approval).
+
+KROK 6 NEMENI Sheet outbound flow, NEMENI pilot send primitives, NEMENI B-04 contract.
+- **Owner:** Stream B
+- **Code:** apps-script/Config.gs (modified), apps-script/OutboundEmail.gs (modified), apps-script/WebAppEndpoint.gs (modified), crm-frontend/src/lib/google/apps-script-writer.ts (modified), crm-frontend/src/lib/mock/mock-service.ts (modified), crm-frontend/src/app/api/leads/[id]/send-email/route.ts (new), crm-frontend/src/components/leads/lead-detail-drawer.tsx (modified)
+- **Docs:** docs/30-task-records/B-11.md
+
 ## 2026-04-24
 
 ### [B/B-07] Buffer / podpora — pilot support package pro soucasny preview lifecycle (B-05) — DONE
