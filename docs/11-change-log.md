@@ -8,7 +8,7 @@
 
 ## 2026-04-28
 
-### [B/B-13] Email template schema + CRUD + runtime wiring + bootstrap + backend endpoints (T1+T2+T3+T3.5+T4+T5 of 13-task email templating + analytics project) — BACKEND_COMPLETE
+### [B/B-13] Email template schema + CRUD + runtime wiring + bootstrap + backend + Next.js API layer (T1+T2+T3+T3.5+T4+T5+T6 of 13-task email templating + analytics project) — API_LAYER_COMPLETE
 - **Scope:** Foundation pro multi-task projekt: nahradit hardcoded `composeDraft_` editovatelnym template systemem s versioning + analytikou per template+segment.
 
 T1 je jen schema migration — zadna business logika, zadne doPost akce, zadny frontend. To prijde v T2-T13.
@@ -89,8 +89,36 @@ T4 NEMENI `OutboundEmail.gs:resolveSenderIdentity_` (per spec). `DEFAULT_REPLY_T
 `{ ok: true/false, error: '<reason>' }` shape matches Phase 2 KROK 4-6 (`getPreview`, `sendEmail`, `generatePreview`). Token verification handled upstream v `doPost` `FRONTEND_API_SECRET` check — handlers don't repeat. Existing 5 actions (`updateLead`, `assignLead`, `getPreview`, `generatePreview`, `sendEmail`) untouched.
 
 T5 NEMENI Config.gs, Menu.gs, PreviewPipeline.gs, OutboundEmail.gs, frontend.
+
+**T6 update (commit ve stejnem PR):** Next.js API layer + writer wrappers. Pure proxy vrstva — zadna business logika, jen request validation, AS dispatch, error mapping. Po T6 mohou frontend pages (T7-T11) volat tyto routy primo bez znalosti AS payload shape.
+
+Novy soubor `crm-frontend/src/types/templates.ts`:
+- 4 main interfaces: `EmailTemplate` (16 fields mirror AS sheet schema), `TemplateAnalyticsTotals`, `TemplateAnalyticsEntry`, `RegenerateDraftResult`.
+- `TemplateStatus` union type.
+- `DEFAULT_TEMPLATE_KEYS` const tuple — sync s `EMAIL_TEMPLATE_DEFAULT_KEYS` v `apps-script/Config.gs`.
+- `TEMPLATE_KEY_LABELS` map ('Bez webu', 'Slabý web', 'Má web', 'Follow-up 1/2') pro UI fallback display jmena kdyz template je empty.
+
+`crm-frontend/src/lib/google/apps-script-writer.ts` (+317 radku):
+- 9 new exported async wrappers s Result interfaces — same pattern jako existing `generatePreview` / `sendEmail`: `SHEET_CONFIG.APPS_SCRIPT_URL` POST s `process.env.APPS_SCRIPT_SECRET` token, AS `{ ok }` response shape mapped to `{ success }`.
+- Existujici wrappers (`updateLeadFields`, `generatePreview`, `sendEmail`) untouched.
+
+7 new Next.js API routes (vsechny pouzivaji Next 16 async `params: Promise<...>` pattern dle docs in `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/dynamic-routes.md`):
+
+| Route | Methods | Notes |
+|-------|---------|-------|
+| `/api/templates` | GET | List all templates. 502 on AS upstream failure. |
+| `/api/templates/[key]` | GET | Active template. 404 on `no_active_template`. |
+| `/api/templates/[key]/draft` | GET / PUT / DELETE | Per-key draft CRUD. PUT validates `subject ≤ 500`, `body ≤ 50000`. |
+| `/api/templates/[key]/history` | GET | All versions for key. |
+| `/api/templates/[key]/publish` | POST | Body `{ commitMessage }`. Front-loads `commit_message_too_short` validation. AS publish-gate failures (`no_draft`, `empty_draft_content`) → 400. |
+| `/api/analytics/templates` | GET | Live aggregation per (key, version) + by_segment. |
+| `/api/leads/[id]/regenerate-draft` | POST | Optional `{ templateKey }` (T9 placeholder). 404 on `lead_not_found`. |
+
+Error mapping konvence: 400 = validation (chybi key, JSON parse fail, length over limit), 404 = not found (`no_active_template`, `lead_not_found`), 502 = AS upstream `{ ok: false }`, 500 = unexpected catch.
+
+T6 NEMENI Apps Script files, frontend pages, ostatni komponenty.
 - **Owner:** Stream B
-- **Code:** apps-script/Config.gs (modified), apps-script/EmailTemplateStore.gs (new (T1)), apps-script/EmailTemplateStore.gs (modified (T2)), apps-script/EmailTemplateStore.gs (modified (T3)), apps-script/PreviewPipeline.gs (modified (T3)), apps-script/Config.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T4)), apps-script/PreviewPipeline.gs (modified (T3.5+T4)), apps-script/Menu.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T5)), apps-script/WebAppEndpoint.gs (modified (T5)), apps-script/Menu.gs (modified)
+- **Code:** apps-script/Config.gs (modified), apps-script/EmailTemplateStore.gs (new (T1)), apps-script/EmailTemplateStore.gs (modified (T2)), apps-script/EmailTemplateStore.gs (modified (T3)), apps-script/PreviewPipeline.gs (modified (T3)), apps-script/Config.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T4)), apps-script/PreviewPipeline.gs (modified (T3.5+T4)), apps-script/Menu.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T5)), apps-script/WebAppEndpoint.gs (modified (T5)), crm-frontend/src/types/templates.ts (new (T6)), crm-frontend/src/lib/google/apps-script-writer.ts (modified (T6)), crm-frontend/src/app/api/templates/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/draft/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/history/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/publish/route.ts (new (T6)), crm-frontend/src/app/api/analytics/templates/route.ts (new (T6)), crm-frontend/src/app/api/leads/[id]/regenerate-draft/route.ts (new (T6)), apps-script/Menu.gs (modified)
 - **Docs:** docs/30-task-records/B-13.md, docs/11-change-log.md, docs/29-task-registry.md
 
 ## 2026-04-27
