@@ -221,7 +221,7 @@ var KNOWN_CHAINS = [
 
 /* ── Mailbox sync (read-only) ─────────────────────────────── */
 var EMAIL_SYNC_ENABLED              = true;
-var EMAIL_MAILBOX_ACCOUNT           = '';     // e.g. 'sales@autosmartweby.cz'
+var EMAIL_MAILBOX_ACCOUNT           = '';     // e.g. 'info@autosmartweb.cz' (centralni obchodni inbox; viz docs/22-technical-architecture.md "Email identity model")
 var EMAIL_SYNC_LOOKBACK_DAYS        = 30;
 var EMAIL_SYNC_MAX_THREADS          = 50;
 var EMAIL_SYNC_REQUIRE_EXACT_MATCH  = true;

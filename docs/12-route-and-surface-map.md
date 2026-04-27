@@ -90,11 +90,13 @@
 
 ---
 
-## web-starter (oddeleny repo: `C:\Users\spook\Desktop\web-starter`)
+## ASW-MARKETING-WEB — verejny web (external dependency)
 
-> Toto je ODDELENY projekt (verejny web autosmartweb.cz). Neni soucasti tohoto monorepa.
+> **Tento repo NEobsahuje verejny web.** Verejny marketingovy web `https://autosmartweb.cz/` je samostatny projekt v repu **`Spookybro55/ASW-MARKETING-WEB`** (https://github.com/Spookybro55/ASW-MARKETING-WEB).
+>
+> Routes uvedene nize jsou **external referenc** pro orientaci pri planovani outreach linku z interniho systemu — autoritativni source of truth pro tyto routes je v `ASW-MARKETING-WEB` repu, ne zde. Pri auditu verejneho webu pracuj proti tomu repu nebo proti live URL.
 
-### Stranky
+### Stranky (external — pro orientaci)
 
 | Route | Ucel |
 |-------|------|

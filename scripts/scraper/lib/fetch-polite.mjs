@@ -1,7 +1,7 @@
 // Rate-limited HTTP fetcher with identifying User-Agent.
 // Uses Node.js built-in global fetch (Node 18+).
 
-const DEFAULT_UA = 'autosmartweby-scraper/0.1 (A-04 pilot; contact: jan.bezemek6@gmail.com)';
+const DEFAULT_UA = 'autosmartweby-scraper/0.1 (A-04 pilot; contact: info@autosmartweb.cz)';
 const DEFAULT_DELAY_MS = 1500;
 const DEFAULT_TIMEOUT_MS = 15000;
 
