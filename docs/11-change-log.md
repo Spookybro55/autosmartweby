@@ -8,7 +8,7 @@
 
 ## 2026-04-28
 
-### [B/B-13] Email template schema + CRUD + runtime wiring + bootstrap + backend + API layer + UI listing + editor + consumer integration + analytics dashboard + testing layer (T1-T9 + T11 + T12 of 13-task email templating + analytics project; T10 deferred to backlog) — TESTING_DONE
+### [B/B-13] Email template schema + CRUD + runtime wiring + bootstrap + backend + API layer + UI listing + editor + consumer integration + analytics dashboard + testing layer (T1-T9 + T11 + T12 of 13-task email templating + analytics project; T10 deferred to backlog) — READY_FOR_DEPLOY
 - **Scope:** Foundation pro multi-task projekt: nahradit hardcoded `composeDraft_` editovatelnym template systemem s versioning + analytikou per template+segment.
 
 T1 je jen schema migration — zadna business logika, zadne doPost akce, zadny frontend. To prijde v T2-T13.
