@@ -583,3 +583,132 @@ function publishTemplate_(key, commitMessage) {
     lock.releaseLock();
   }
 }
+
+
+/* ═══════════════════════════════════════════════════════════════
+   renderTemplate_ — substitute {placeholder} tokens with lead data
+   ═══════════════════════════════════════════════════════════════
+   Input:
+     template: object with subject_template + body_template strings
+     leadData: object with normalized lead fields
+   Output:
+     { subject, body } — both strings, all placeholders substituted
+   Behaviour:
+     - Unknown placeholder → empty string (graceful)
+     - Empty value → empty string (no "undefined", no leftover braces)
+     - Case-insensitive placeholder names ({Business_Name} == {business_name})
+     - Special computed placeholders (greeting, firm_ref, contact_name_comma)
+       resolve via internal helpers — these are convenience tokens that
+       wrap common conditional logic (greeting always works, firm_ref
+       falls back, contact_name_comma adds ", {name}" or "" gracefully)
+
+   Supported placeholders (T3 set — frozen for now):
+     LEAD: business_name, contact_name, city, area, service_type,
+           segment, pain_point
+     PREVIEW: preview_url
+     SENDER: sender_name, sender_email
+     COMPUTED: greeting, firm_ref, contact_name_comma
+
+   Future: phone, email, location_phrase, context_phrase (as needed)
+   ═══════════════════════════════════════════════════════════════ */
+
+function renderTemplate_(template, leadData) {
+  if (!template) throw new Error('renderTemplate_: null template');
+  var subj = String(template.subject_template || '');
+  var body = String(template.body_template || '');
+  var ld = leadData || {};
+
+  var values = buildPlaceholderValues_(ld);
+
+  function replacer(match, name) {
+    var key = String(name || '').toLowerCase();
+    return Object.prototype.hasOwnProperty.call(values, key)
+      ? String(values[key] == null ? '' : values[key])
+      : '';
+  }
+
+  var re = /\{([a-z_][a-z0-9_]*)\}/gi;
+  return {
+    subject: subj.replace(re, replacer),
+    body:    body.replace(re, replacer)
+  };
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   buildPlaceholderValues_ — flatten leadData into placeholder map
+   ═══════════════════════════════════════════════════════════════
+   Internal helper. Resolves both raw fields and computed convenience
+   placeholders. Lowercase keys.
+   ═══════════════════════════════════════════════════════════════ */
+
+function buildPlaceholderValues_(ld) {
+  var businessName = String(ld.business_name || '').trim();
+  var contactName = String(ld.contact_name || '').trim();
+  var city = String(ld.city || '').trim();
+  var area = String(ld.area || '').trim();
+  var serviceType = String(ld.service_type || '').trim();
+  var segment = String(ld.segment || '').trim();
+  var painPoint = String(ld.pain_point || '').trim();
+  var previewUrl = String(ld.preview_url || '').trim();
+  var senderName = String(ld.sender_name || '').trim();
+  var senderEmail = String(ld.sender_email || '').trim();
+
+  // Computed convenience placeholders
+  var greeting = contactName ? ('Dobrý den, ' + contactName) : 'Dobrý den';
+  var firmRef = businessName || 'vaši firmu';
+  var contactNameComma = contactName ? (', ' + contactName) : '';
+
+  return {
+    business_name:       businessName,
+    contact_name:        contactName,
+    city:                city,
+    area:                area,
+    service_type:        serviceType,
+    segment:             segment,
+    pain_point:          painPoint,
+    preview_url:         previewUrl,
+    sender_name:         senderName,
+    sender_email:        senderEmail,
+    greeting:            greeting,
+    firm_ref:            firmRef,
+    contact_name_comma:  contactNameComma
+  };
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   chooseEmailTemplate_ — auto-select template key from lead data
+   ═══════════════════════════════════════════════════════════════
+   Routing logic (T3 — initial, will expand with more keys):
+     - resolveWebsiteState_ === 'NO_WEBSITE'   → 'no-website'
+     - resolveWebsiteState_ === 'WEAK_WEBSITE' → 'weak-website'
+     - resolveWebsiteState_ === 'HAS_WEBSITE'  → 'has-website'
+     - default (CONFLICT, UNKNOWN, anything else) → 'no-website'
+       (safest default — matches the current cautious fallback in
+       hardcoded composeDraft_)
+
+   Follow-up keys (follow-up-1, follow-up-2) are NOT chosen automatically
+   here — they're triggered by lifecycle/follow-up scheduler (future task,
+   not T3). For initial outreach, this returns one of the 3 web-state keys.
+
+   Returns: string key from EMAIL_TEMPLATE_DEFAULT_KEYS
+   Never throws. Caller (composeDraft_) decides what to do if the
+   returned key has no active template (fallback to hardcoded).
+   ═══════════════════════════════════════════════════════════════ */
+
+function chooseEmailTemplate_(leadData) {
+  var rd = leadData || {};
+  var state;
+  try {
+    state = resolveWebsiteState_(rd);
+  } catch (e) {
+    state = 'UNKNOWN';
+  }
+
+  if (state === 'NO_WEBSITE')   return 'no-website';
+  if (state === 'WEAK_WEBSITE') return 'weak-website';
+  if (state === 'HAS_WEBSITE')  return 'has-website';
+  // CONFLICT, UNKNOWN, or anything unexpected → safest default
+  return 'no-website';
+}

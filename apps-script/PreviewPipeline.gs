@@ -712,6 +712,21 @@ function buildEmailDrafts() {
       var draft = composeDraft_(rd);
       hr.set(row, 'email_subject_draft', draft.subject);
       hr.set(row, 'email_body_draft', draft.body);
+      // B-13 T3: capture template metadata for analytics joins.
+      // colOrNull guards keep this graceful pre-migration; once
+      // setupEmailTemplates has run on the live sheet, all 4 cols exist.
+      if (hr.colOrNull('email_template_key')) {
+        hr.set(row, 'email_template_key', draft.template_key);
+      }
+      if (hr.colOrNull('email_template_version')) {
+        hr.set(row, 'email_template_version', String(draft.template_version || ''));
+      }
+      if (hr.colOrNull('email_template_id')) {
+        hr.set(row, 'email_template_id', draft.template_id);
+      }
+      if (hr.colOrNull('email_segment_at_send')) {
+        hr.set(row, 'email_segment_at_send', draft.segment_at_send);
+      }
 
       // FIX #4 + P0.2: outreach_stage → DRAFT_READY only if not already progressed
       var curOutreach = trimLower_(hr.get(row, 'outreach_stage'));
@@ -732,7 +747,93 @@ function buildEmailDrafts() {
   safeAlert_('E-mail drafty dokončeny.\nVytvořeno: ' + count);
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   composeDraft_ — main entrypoint for draft email generation
+   ═══════════════════════════════════════════════════════════════
+   Behaviour (B-13 T3):
+     1. chooseEmailTemplate_(rd) → key (e.g. 'no-website')
+     2. Try loadActiveTemplate_(key) — if active template exists, render
+        it via renderTemplate_ with sender identity resolved from
+        rd.assignee_email; capture template metadata for caller
+     3. If no active template (LoadError / first-deploy state) → fall
+        back to composeDraftFallback_ (hardcoded). Metadata fields
+        stay empty — analytics will show these legacy drafts as
+        "untemplated".
+
+   Returns:
+     {
+       subject: string,
+       body: string,
+       template_key: string,      // '' if fallback used
+       template_version: number,  // 0 if fallback used
+       template_id: string,       // '' if fallback used
+       segment_at_send: string    // snapshot from rd.segment
+     }
+
+   Callers (buildEmailDrafts, processPreviewQueue) write the metadata
+   fields to LEADS row alongside subject/body.
+   ═══════════════════════════════════════════════════════════════ */
+
+function composeDraft_(rd) {
+  var key = chooseEmailTemplate_(rd);
+  var segment = String((rd && rd.segment) || '').trim();
+
+  // Resolve sender identity (mirrors OutboundEmail.gs:resolveSenderIdentity_
+  // but inline-light — at draft generation time the assignee may not be
+  // set yet, so fall back to defaults).
+  var assigneeEmail = String((rd && rd.assignee_email) || '').toLowerCase().trim();
+  var senderEmail = '';
+  var senderName = '';
+  if (assigneeEmail && typeof ASSIGNEE_NAMES !== 'undefined' && ASSIGNEE_NAMES[assigneeEmail]) {
+    senderEmail = assigneeEmail;
+    senderName = ASSIGNEE_NAMES[assigneeEmail];
+  } else {
+    senderEmail = (typeof DEFAULT_REPLY_TO_EMAIL !== 'undefined') ? DEFAULT_REPLY_TO_EMAIL : '';
+    senderName = (typeof DEFAULT_REPLY_TO_NAME !== 'undefined') ? DEFAULT_REPLY_TO_NAME : '';
+  }
+
+  // Augment rd with sender + preview_url for placeholder substitution
+  // (rd may already have preview_url from buildPreviewBrief_)
+  var augmented = {};
+  for (var k in rd) {
+    if (Object.prototype.hasOwnProperty.call(rd, k)) augmented[k] = rd[k];
+  }
+  augmented.sender_name = senderName;
+  augmented.sender_email = senderEmail;
+
+  try {
+    var template = loadActiveTemplate_(key);
+    var rendered = renderTemplate_(template, augmented);
+    return {
+      subject:          rendered.subject,
+      body:             rendered.body,
+      template_key:     template.template_key,
+      template_version: template.version,
+      template_id:      template.template_id,
+      segment_at_send:  segment
+    };
+  } catch (e) {
+    // No active template for this key — fall back to hardcoded.
+    aswLog_('INFO', 'composeDraft_',
+      'No active template for key=' + key + ' — using hardcoded fallback. (' + e.message + ')');
+    var fb = composeDraftFallback_(rd);
+    return {
+      subject:          fb.subject,
+      body:             fb.body,
+      template_key:     '',
+      template_version: 0,
+      template_id:      '',
+      segment_at_send:  segment
+    };
+  }
+}
+
+
 /**
+ * B-13 T3: Hardcoded fallback used when no active template exists for
+ * the chosen key in `_email_templates`. Pure rename of the original
+ * `composeDraft_` (commits a2157a8 and earlier) — body unchanged.
+ *
  * Compose email draft with conflict-safe website state detection.
  * Uses resolveWebsiteState_() for robust has_website vs website_url handling.
  *
@@ -742,8 +843,12 @@ function buildEmailDrafts() {
  *   CONFLICT     — neutral, never claims web missing/present
  *   HAS_WEBSITE  — acknowledges existing web, offers improvement
  *   UNKNOWN      — neutral approach
+ *
+ * Returns: { subject, body }
+ *   The new dispatching `composeDraft_` wraps this return into the
+ *   metadata-augmented shape used by callers.
  */
-function composeDraft_(rd) {
+function composeDraftFallback_(rd) {
   var name = String(rd.business_name || '').trim();
   var contactName = String(rd.contact_name || '').trim();
   var city = String(rd.city || '').trim();
@@ -971,6 +1076,20 @@ function processPreviewQueue() {
       if (artifacts.draft) {
         hr.set(row, 'email_subject_draft', artifacts.draft.subject);
         hr.set(row, 'email_body_draft', artifacts.draft.body);
+        // B-13 T3: capture template metadata for analytics joins (same
+        // pattern as buildEmailDrafts; colOrNull guards graceful pre-migration).
+        if (hr.colOrNull('email_template_key')) {
+          hr.set(row, 'email_template_key', artifacts.draft.template_key || '');
+        }
+        if (hr.colOrNull('email_template_version')) {
+          hr.set(row, 'email_template_version', String(artifacts.draft.template_version || ''));
+        }
+        if (hr.colOrNull('email_template_id')) {
+          hr.set(row, 'email_template_id', artifacts.draft.template_id || '');
+        }
+        if (hr.colOrNull('email_segment_at_send')) {
+          hr.set(row, 'email_segment_at_send', artifacts.draft.segment_at_send || '');
+        }
         // FIX #4 + P0.2: outreach_stage → DRAFT_READY only if not already progressed
         var curOutreach2 = trimLower_(hr.get(row, 'outreach_stage'));
         if (!curOutreach2 || curOutreach2 === 'not_contacted') {
@@ -1279,6 +1398,19 @@ function refreshProcessedPreviewCopy() {
         var draft = composeDraft_(rd);
         hr.set(row, 'email_subject_draft', draft.subject);
         hr.set(row, 'email_body_draft', draft.body);
+        // B-13 T3: capture template metadata (same pattern as buildEmailDrafts).
+        if (hr.colOrNull('email_template_key')) {
+          hr.set(row, 'email_template_key', draft.template_key);
+        }
+        if (hr.colOrNull('email_template_version')) {
+          hr.set(row, 'email_template_version', String(draft.template_version || ''));
+        }
+        if (hr.colOrNull('email_template_id')) {
+          hr.set(row, 'email_template_id', draft.template_id);
+        }
+        if (hr.colOrNull('email_segment_at_send')) {
+          hr.set(row, 'email_segment_at_send', draft.segment_at_send);
+        }
       } else if (!outreachIsEarly) {
         aswLog_('INFO', 'refreshProcessedPreviewCopy',
           'Row ' + (i + DATA_START_ROW) + ': skipping draft rebuild, outreach_stage=' + curOutreach);
@@ -1913,6 +2045,12 @@ function processPreviewForLead_(leadId) {
   if (artifacts.draft) {
     writes.push(['email_subject_draft', artifacts.draft.subject]);
     writes.push(['email_body_draft',    artifacts.draft.body]);
+    // B-13 T3: capture template metadata (writes[] is filtered by
+    // colOrNull below, so unmigrated sheets gracefully skip these).
+    writes.push(['email_template_key',     artifacts.draft.template_key || '']);
+    writes.push(['email_template_version', String(artifacts.draft.template_version || '')]);
+    writes.push(['email_template_id',      artifacts.draft.template_id || '']);
+    writes.push(['email_segment_at_send',  artifacts.draft.segment_at_send || '']);
     var curOutreach = trimLower_(rd.outreach_stage);
     if (!curOutreach || curOutreach === 'not_contacted') {
       writes.push(['outreach_stage', 'DRAFT_READY']);

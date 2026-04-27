@@ -6,24 +6,9 @@
 
 ---
 
-## 2026-04-27
+## 2026-04-28
 
-### [B/B-12] Phase 2 hotfix — brief phone/email aliases for marketing web compat — DONE
-- **Scope:** Phase 2 launch hotfix po prvnim e2e produkcnim run (lead "ALVITO s.r.o. PLYNOSERVIS"). Marketing web `autosmartweb.cz/preview/<slug>` vracel **HTTP 500** na vsechny CRM-generovane preview slugs. Test slug `test-bauhaus-praha` fungoval (200) — mock data v `preview-reader.ts` mela spravne field names.
-
-**Root cause — schema mismatch:**
-- CRM Apps Script `buildPreviewBrief_` (`apps-script/PreviewPipeline.gs:634-653`) vracel brief s `contact_phone` + `contact_email` (legacy CRM frontend names).
-- Marketing web `ClientBrief` interface (`Spookybro55/ASW-MARKETING-WEB:src/templates/core/types.ts`) vyžaduje `phone` + `email`.
-- Render: `<EmergencyProfessional>` template volá `telHref(brief.phone)` v `Header`, `Hero`, `Services`, `Pricing`, `Locations`, `Contact`, `Footer`, `MobileStickyCta` — `brief.phone === undefined` → `undefined.replace(/\s/g, "")` → **TypeError** → SSR throw → 500.
-
-Fix C (hybrid) — implementovan dual-side:
-- **PR #73 (CRM Apps Script source-side):** `buildPreviewBrief_` přidá `phone:` a `email:` aliasy vedle existujicich `contact_phone:` a `contact_email:`. Newly-written `_previews` rows budou mit oba klice.
-- **ASW-MARKETING-WEB#2 (read-time fallback, companion PR):** `preview-reader.ts:getPreviewBySlug` mapuje `rawBrief.contact_phone → brief.phone` (a email/website) pri čteni z Sheet. Existing rows zapsane pred B-12 (vc. ALVITO + 8 dalsich pilot leadů) renderuji okamzite po Vercel auto-deploy.
-- **Owner:** Stream B
-- **Code:** apps-script/PreviewPipeline.gs (modified)
-- **Docs:** docs/30-task-records/B-12.md
-
-### [B/B-13] Email template schema + CRUD (T1+T2 of 13-task email templating + analytics project) — CRUD_DONE
+### [B/B-13] Email template schema + CRUD + runtime wiring (T1+T2+T3 of 13-task email templating + analytics project) — RUNTIME_WIRED
 - **Scope:** Foundation pro multi-task projekt: nahradit hardcoded `composeDraft_` editovatelnym template systemem s versioning + analytikou per template+segment.
 
 T1 je jen schema migration — zadna business logika, zadne doPost akce, zadny frontend. To prijde v T2-T13.
@@ -45,9 +30,41 @@ T1 NEMENI `composeDraft_`, `buildEmailDrafts`, `OutboundEmail.gs`, `WebAppEndpoi
 - Zadny in-memory cache — vse ze Sheet.
 
 T2 stale NEMENI `composeDraft_`, `WebAppEndpoint.gs` ani frontend — to je T3 a T5.
+
+**T3 update (commit pridany ve stejnem PR):** runtime wiring. `composeDraft_` v `PreviewPipeline.gs` ted dispatchuje pres template store. 3 nove funkce v `EmailTemplateStore.gs`:
+- `renderTemplate_(template, leadData)` — placeholder substitution `{name}` → value, unknown → empty, case-insensitive. Computed convenience tokens: `{greeting}` (`Dobrý den[, jméno]`), `{firm_ref}` (`{business_name}` nebo `vaši firmu`), `{contact_name_comma}` (`, {contact_name}` nebo `''`).
+- `buildPlaceholderValues_(ld)` — interni helper, mapuje rd na placeholder dict. Skupiny: LEAD (business_name, contact_name, city, area, service_type, segment, pain_point), PREVIEW (preview_url), SENDER (sender_name, sender_email), COMPUTED (greeting, firm_ref, contact_name_comma).
+- `chooseEmailTemplate_(rd)` — auto-route via `resolveWebsiteState_`: NO_WEBSITE → `no-website`, WEAK_WEBSITE → `weak-website`, HAS_WEBSITE → `has-website`. CONFLICT/UNKNOWN/jakekoliv jine → `no-website` (safest default). Nikdy nethrowuje.
+
+`composeDraft_(rd)` v `PreviewPipeline.gs`:
+- Stary kod prejmenovan na `composeDraftFallback_` (pure rename, telo nezmeneno).
+- Novy `composeDraft_` (~73 radku) volá `chooseEmailTemplate_` → `loadActiveTemplate_` → `renderTemplate_` v try/catch. Pri chybe (vc. `No active template for key:`) fallback na `composeDraftFallback_` + `aswLog INFO`.
+- Vraci 6-field shape `{subject, body, template_key, template_version, template_id, segment_at_send}`. Pri fallback path jsou template_*  prazdne (analytics oznaci jako "untemplated").
+- Sender identity resolvovana inline z `rd.assignee_email` přes `ASSIGNEE_NAMES` map (s defensive `typeof !== 'undefined'` checky pro test contexty), fallback na `DEFAULT_REPLY_TO_*`.
+
+Caller capture pattern (4× `hr.colOrNull` + `hr.set`) zaveden ve vsech 4 LEADS write-back cestach: `buildEmailDrafts`, `processPreviewQueue` (via `artifacts.draft`), `refreshProcessedPreviewCopy`, `processPreviewForLead_` (writes[] array). Spec zminila jen prvni dva, ale ostatni dva jsou stejnou code-path (composeDraft + LEADS row write), takze stejny princip aplikovan vsude pro consistency v analytics.
+
+T3 NEMENI Config.gs, Menu.gs, OutboundEmail.gs, WebAppEndpoint.gs, frontend. Bez `_email_templates` content (T4 ho bootstrapuje) vsechny drafty jdou pres fallback path — ZADNY behavioural change v pilot az do T4.
 - **Owner:** Stream B
-- **Code:** apps-script/Config.gs (modified), apps-script/EmailTemplateStore.gs (new (T1)), apps-script/EmailTemplateStore.gs (modified (T2)), apps-script/Menu.gs (modified)
+- **Code:** apps-script/Config.gs (modified), apps-script/EmailTemplateStore.gs (new (T1)), apps-script/EmailTemplateStore.gs (modified (T2)), apps-script/EmailTemplateStore.gs (modified (T3)), apps-script/PreviewPipeline.gs (modified (T3)), apps-script/Menu.gs (modified)
 - **Docs:** docs/30-task-records/B-13.md, docs/11-change-log.md, docs/29-task-registry.md
+
+## 2026-04-27
+
+### [B/B-12] Phase 2 hotfix — brief phone/email aliases for marketing web compat — DONE
+- **Scope:** Phase 2 launch hotfix po prvnim e2e produkcnim run (lead "ALVITO s.r.o. PLYNOSERVIS"). Marketing web `autosmartweb.cz/preview/<slug>` vracel **HTTP 500** na vsechny CRM-generovane preview slugs. Test slug `test-bauhaus-praha` fungoval (200) — mock data v `preview-reader.ts` mela spravne field names.
+
+**Root cause — schema mismatch:**
+- CRM Apps Script `buildPreviewBrief_` (`apps-script/PreviewPipeline.gs:634-653`) vracel brief s `contact_phone` + `contact_email` (legacy CRM frontend names).
+- Marketing web `ClientBrief` interface (`Spookybro55/ASW-MARKETING-WEB:src/templates/core/types.ts`) vyžaduje `phone` + `email`.
+- Render: `<EmergencyProfessional>` template volá `telHref(brief.phone)` v `Header`, `Hero`, `Services`, `Pricing`, `Locations`, `Contact`, `Footer`, `MobileStickyCta` — `brief.phone === undefined` → `undefined.replace(/\s/g, "")` → **TypeError** → SSR throw → 500.
+
+Fix C (hybrid) — implementovan dual-side:
+- **PR #73 (CRM Apps Script source-side):** `buildPreviewBrief_` přidá `phone:` a `email:` aliasy vedle existujicich `contact_phone:` a `contact_email:`. Newly-written `_previews` rows budou mit oba klice.
+- **ASW-MARKETING-WEB#2 (read-time fallback, companion PR):** `preview-reader.ts:getPreviewBySlug` mapuje `rawBrief.contact_phone → brief.phone` (a email/website) pri čteni z Sheet. Existing rows zapsane pred B-12 (vc. ALVITO + 8 dalsich pilot leadů) renderuji okamzite po Vercel auto-deploy.
+- **Owner:** Stream B
+- **Code:** apps-script/PreviewPipeline.gs (modified)
+- **Docs:** docs/30-task-records/B-12.md
 
 ## 2026-04-26
 
