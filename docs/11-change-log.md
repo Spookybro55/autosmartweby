@@ -8,7 +8,7 @@
 
 ## 2026-04-28
 
-### [B/B-13] Email template schema + CRUD + runtime wiring + bootstrap (T1+T2+T3+T3.5+T4 of 13-task email templating + analytics project) — BOOTSTRAP_READY
+### [B/B-13] Email template schema + CRUD + runtime wiring + bootstrap + backend endpoints (T1+T2+T3+T3.5+T4+T5 of 13-task email templating + analytics project) — BACKEND_COMPLETE
 - **Scope:** Foundation pro multi-task projekt: nahradit hardcoded `composeDraft_` editovatelnym template systemem s versioning + analytikou per template+segment.
 
 T1 je jen schema migration — zadna business logika, zadne doPost akce, zadny frontend. To prijde v T2-T13.
@@ -72,8 +72,25 @@ Po spusteni `migrateAndBootstrap` v Apps Script editoru:
 - Od te chvile `composeDraft_` pro NO_WEBSITE leady prestane padat do fallbacku → vsechny novy drafty jsou template-rendered + maji `email_template_*` metadata.
 
 T4 NEMENI `OutboundEmail.gs:resolveSenderIdentity_` (per spec). `DEFAULT_REPLY_TO_*` zustavaji na legacy `sebastian@autosmartweb.cz` — viz Known Limits.
+
+**T5 update (commit ve stejnem PR):** backend doPost endpoints + live analytics aggregation. ZADNY behavioural change v existujicim flow — pure additive surface area pro frontend (T6+).
+
+3 nove funkce v `EmailTemplateStore.gs`:
+- `getTemplateAnalytics_()` — single-pass LEADS scan, groupuje podle `(template_key, version)` + per-segment breakdown. Counts: `sent` (rows kde `email_sync_status` ∈ {SENT, REPLIED, LINKED} a non-empty `email_template_id` — fallback drafts excluded), `replied` (subset s `email_reply_type === 'REPLY'`), `won` (subset s `status === 'WON'`). Vraci aktivni-template zero-state entries i kdyz 0 sends, aby UI ukazalo 0/0/0 misto skryti. Stable sort: key ASC, version DESC. Range fetch optimalizovan na min/max needed columns (~50ms / 800 rows ocekavano).
+- `_emptyAnalyticsForAllActiveTemplates_()` — interni helper pro pre-migration pripad.
+- `regenerateDraftForLead_(leadId, templateKeyOverride)` — LockService 5s, lookup row pres existing `findRowByLeadId_`, primy `getRange()` row read (`readSingleRow_` neexistuje v codebase), spusti `composeDraft_(rd)`, zapise 6 cells. Required cells (`email_subject_draft`, `email_body_draft`) pres `hr.col` (throws on missing), metadata cells pres `hr.colOrNull` guard. `templateKeyOverride` param prijima ale ignoruje — placeholder pro T9 manual override path (vyzaduje composeDraft_ refactor s template injection).
+
+9 novych doPost handlers v `WebAppEndpoint.gs`:
+- Read: `listTemplates`, `getTemplate`, `getTemplateDraft`, `getTemplateHistory` (vsechny strip `_rowNum` z return objektu).
+- Write: `saveTemplateDraft` (subject ≤ 500, body ≤ 50000 chars validation, returns `subject_too_long` / `body_too_long`), `discardTemplateDraft`, `publishTemplate` (mapuje 3 publish-gate failures: `commit_message_too_short`, `no_draft`, `empty_draft_content` — frontend mapuje na localized cz hlasky).
+- Analytics: `getTemplateAnalytics`.
+- Operator: `regenerateDraft` (T9 dependency — frontend zatim posila `templateKey` ale handler ho ignoruje az do T9 wiring).
+
+`{ ok: true/false, error: '<reason>' }` shape matches Phase 2 KROK 4-6 (`getPreview`, `sendEmail`, `generatePreview`). Token verification handled upstream v `doPost` `FRONTEND_API_SECRET` check — handlers don't repeat. Existing 5 actions (`updateLead`, `assignLead`, `getPreview`, `generatePreview`, `sendEmail`) untouched.
+
+T5 NEMENI Config.gs, Menu.gs, PreviewPipeline.gs, OutboundEmail.gs, frontend.
 - **Owner:** Stream B
-- **Code:** apps-script/Config.gs (modified), apps-script/EmailTemplateStore.gs (new (T1)), apps-script/EmailTemplateStore.gs (modified (T2)), apps-script/EmailTemplateStore.gs (modified (T3)), apps-script/PreviewPipeline.gs (modified (T3)), apps-script/Config.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T4)), apps-script/PreviewPipeline.gs (modified (T3.5+T4)), apps-script/Menu.gs (modified (T4)), apps-script/Menu.gs (modified)
+- **Code:** apps-script/Config.gs (modified), apps-script/EmailTemplateStore.gs (new (T1)), apps-script/EmailTemplateStore.gs (modified (T2)), apps-script/EmailTemplateStore.gs (modified (T3)), apps-script/PreviewPipeline.gs (modified (T3)), apps-script/Config.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T4)), apps-script/PreviewPipeline.gs (modified (T3.5+T4)), apps-script/Menu.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T5)), apps-script/WebAppEndpoint.gs (modified (T5)), apps-script/Menu.gs (modified)
 - **Docs:** docs/30-task-records/B-13.md, docs/11-change-log.md, docs/29-task-registry.md
 
 ## 2026-04-27

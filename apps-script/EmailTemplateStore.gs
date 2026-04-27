@@ -903,3 +903,272 @@ function migrateAndBootstrap() {
     'Legacy assignees migrated: ' + migrated + '\n' +
     'See Apps Script logs for details.');
 }
+
+
+/* ═══════════════════════════════════════════════════════════════
+   getTemplateAnalytics_ — live aggregation per template version
+   ═══════════════════════════════════════════════════════════════
+   Iterates LEADS once, groups by (email_template_key, email_template_version,
+   email_segment_at_send), counts:
+     - sent:    rows where email_sync_status IN [SENT, REPLIED, LINKED]
+                AND email_template_id is not empty (filters out fallback drafts)
+     - replied: subset of sent where email_reply_type === 'REPLY'
+     - won:     subset of sent where status === 'WON'
+
+   Returns array of {
+     template_key, template_version, template_id, name, status,
+     totals: { sent, replied, won },
+     by_segment: { [segment]: { sent, replied, won }, ... }
+   }, one entry per template VERSION found in LEADS data + every
+   currently-active template (even if 0 sends — that's the empty state).
+
+   Live read — no cache. ~50ms for 800 rows expected.
+   ═══════════════════════════════════════════════════════════════ */
+
+function getTemplateAnalytics_() {
+  var ss = openCrmSpreadsheet_();
+  var sheet = getExternalSheet_(ss);
+  var hr = getHeaderResolver_(sheet);
+
+  // Required columns for analytics — return empty if migration hasn't run
+  var keyCol     = hr.colOrNull('email_template_key');
+  var versionCol = hr.colOrNull('email_template_version');
+  var idCol      = hr.colOrNull('email_template_id');
+  var segCol     = hr.colOrNull('email_segment_at_send');
+  var syncCol    = hr.colOrNull('email_sync_status');
+  var replyCol   = hr.colOrNull('email_reply_type');
+  var statusCol  = hr.colOrNull('status');
+
+  if (!keyCol || !versionCol || !syncCol) {
+    aswLog_('WARN', 'getTemplateAnalytics_',
+      'Required columns missing — returning empty result');
+    return _emptyAnalyticsForAllActiveTemplates_();
+  }
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < DATA_START_ROW) {
+    return _emptyAnalyticsForAllActiveTemplates_();
+  }
+
+  var numRows = lastRow - DATA_START_ROW + 1;
+  // Fetch only the columns we need — minimize range size
+  var needed = [keyCol, versionCol, idCol, segCol, syncCol, replyCol, statusCol]
+    .filter(function(c) { return c != null; });
+  needed.sort(function(a, b) { return a - b; });
+  var minCol = needed[0];
+  var maxCol = needed[needed.length - 1];
+  var width = maxCol - minCol + 1;
+
+  var values = sheet.getRange(DATA_START_ROW, minCol, numRows, width).getValues();
+
+  // Helper to read a cell from the fetched range using sheet column index
+  function cell(rowArr, sheetCol) {
+    if (sheetCol == null) return '';
+    return rowArr[sheetCol - minCol];
+  }
+
+  var SENT_STATUSES = { 'SENT': 1, 'REPLIED': 1, 'LINKED': 1 };
+
+  // groups: key = "templateKey::version" → { template_id, totals, by_segment }
+  var groups = {};
+
+  for (var i = 0; i < values.length; i++) {
+    var r = values[i];
+    var syncStatus = String(cell(r, syncCol) || '').trim().toUpperCase();
+    if (!SENT_STATUSES[syncStatus]) continue;
+
+    var tplId = String(cell(r, idCol) || '').trim();
+    if (!tplId) continue;  // fallback drafts (no template) excluded
+
+    var tplKey = String(cell(r, keyCol) || '').trim();
+    var tplVersion = String(cell(r, versionCol) || '').trim();
+    if (!tplKey || !tplVersion) continue;
+
+    var seg = String(cell(r, segCol) || '').trim() || '(unknown)';
+    var replyType = String(cell(r, replyCol) || '').trim().toUpperCase();
+    var leadStatus = String(cell(r, statusCol) || '').trim().toUpperCase();
+
+    var groupKey = tplKey + '::' + tplVersion;
+    if (!groups[groupKey]) {
+      groups[groupKey] = {
+        template_key:     tplKey,
+        template_version: Number(tplVersion) || 0,
+        template_id:      tplId,
+        totals:           { sent: 0, replied: 0, won: 0 },
+        by_segment:       {}
+      };
+    }
+    var g = groups[groupKey];
+    if (!g.by_segment[seg]) {
+      g.by_segment[seg] = { sent: 0, replied: 0, won: 0 };
+    }
+
+    g.totals.sent++;
+    g.by_segment[seg].sent++;
+    if (replyType === 'REPLY') {
+      g.totals.replied++;
+      g.by_segment[seg].replied++;
+    }
+    if (leadStatus === 'WON') {
+      g.totals.won++;
+      g.by_segment[seg].won++;
+    }
+  }
+
+  // Enrich with template metadata (name, status) from _email_templates
+  var allTemplates = listAllTemplates_();
+  var byId = {};
+  for (var j = 0; j < allTemplates.length; j++) {
+    byId[allTemplates[j].template_id] = allTemplates[j];
+  }
+
+  var result = [];
+  for (var k in groups) {
+    if (!Object.prototype.hasOwnProperty.call(groups, k)) continue;
+    var gg = groups[k];
+    var meta = byId[gg.template_id] || {};
+    result.push({
+      template_key:     gg.template_key,
+      template_version: gg.template_version,
+      template_id:      gg.template_id,
+      name:             meta.name || gg.template_key,
+      status:           meta.status || 'unknown',  // active / archived / unknown if deleted
+      totals:           gg.totals,
+      by_segment:       gg.by_segment
+    });
+  }
+
+  // Append empty entries for currently-active templates that have ZERO sends
+  // (so UI shows them as 0/0/0 instead of hiding them entirely — per UX decision)
+  var seenIds = {};
+  for (var m = 0; m < result.length; m++) seenIds[result[m].template_id] = true;
+  for (var n = 0; n < allTemplates.length; n++) {
+    var t = allTemplates[n];
+    if (t.status !== 'active') continue;
+    if (seenIds[t.template_id]) continue;
+    result.push({
+      template_key:     t.template_key,
+      template_version: t.version,
+      template_id:      t.template_id,
+      name:             t.name,
+      status:           'active',
+      totals:           { sent: 0, replied: 0, won: 0 },
+      by_segment:       {}
+    });
+  }
+
+  // Stable sort: by template_key alphabetical, then by version desc
+  result.sort(function(a, b) {
+    if (a.template_key !== b.template_key) {
+      return a.template_key < b.template_key ? -1 : 1;
+    }
+    return b.template_version - a.template_version;
+  });
+
+  return result;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   _emptyAnalyticsForAllActiveTemplates_ — internal helper
+   Returns one zero-state entry per active template. Used when
+   LEADS schema is pre-migration or empty.
+   ═══════════════════════════════════════════════════════════════ */
+
+function _emptyAnalyticsForAllActiveTemplates_() {
+  var all = listAllTemplates_();
+  var out = [];
+  for (var i = 0; i < all.length; i++) {
+    if (all[i].status !== 'active') continue;
+    out.push({
+      template_key:     all[i].template_key,
+      template_version: all[i].version,
+      template_id:      all[i].template_id,
+      name:             all[i].name,
+      status:           'active',
+      totals:           { sent: 0, replied: 0, won: 0 },
+      by_segment:       {}
+    });
+  }
+  return out;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   regenerateDraftForLead_ — re-run composeDraft_ for one lead
+   ═══════════════════════════════════════════════════════════════
+   Used when operator changes template selection in lead drawer.
+   Reads lead row, runs composeDraft_ (which uses chooseEmailTemplate_
+   + loadActiveTemplate_), writes new subject/body + 4 metadata cells
+   back to LEADS.
+
+   IMPORTANT: T5 scope only honors the auto-selected template (whatever
+   chooseEmailTemplate_ picks). Manual override-by-templateKey is T9
+   scope (frontend dropdown). For T5 we accept the templateKey param
+   but ignore it — full override needs composeDraft_ refactor to accept
+   template injection, which isn't in T5 scope.
+
+   Frontend (T9) will pass the chosen key once we wire that path.
+
+   Returns refreshed { subject, body, template_key, template_version,
+                       template_id, segment_at_send }
+   Throws lead_not_found if the leadId doesn't exist.
+   ═══════════════════════════════════════════════════════════════ */
+
+function regenerateDraftForLead_(leadId, templateKeyOverride) {
+  var lid = String(leadId || '').trim();
+  if (!lid || lid.length < 3) throw new Error('lead_not_found');
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) {
+    throw new Error('Could not acquire lock for regenerateDraftForLead_');
+  }
+
+  try {
+    var ss = openCrmSpreadsheet_();
+    var sheet = getExternalSheet_(ss);
+    var hr = getHeaderResolver_(sheet);
+
+    var leadIdCol = hr.colOrNull('lead_id');
+    if (!leadIdCol) throw new Error('lead_id column not found');
+    var rowNum = findRowByLeadId_(sheet, leadIdCol, lid);
+    if (!rowNum) throw new Error('lead_not_found');
+
+    // readSingleRow_ helper doesn't exist — read directly via getRange.
+    var rowValues = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var rd = hr.row(rowValues);
+
+    // T5 NOTE: templateKeyOverride accepted but unused — accepted in
+    // signature for T9 compatibility. composeDraft_ chooses via
+    // chooseEmailTemplate_(rd) at call time.
+    var draft = composeDraft_(rd);
+
+    // Write back to LEADS — required cols use hr.col (throws if missing),
+    // optional metadata cols use hr.colOrNull (graceful pre-migration).
+    sheet.getRange(rowNum, hr.col('email_subject_draft')).setValue(draft.subject);
+    sheet.getRange(rowNum, hr.col('email_body_draft')).setValue(draft.body);
+    if (hr.colOrNull('email_template_key')) {
+      sheet.getRange(rowNum, hr.col('email_template_key')).setValue(draft.template_key);
+    }
+    if (hr.colOrNull('email_template_version')) {
+      sheet.getRange(rowNum, hr.col('email_template_version'))
+        .setValue(String(draft.template_version || ''));
+    }
+    if (hr.colOrNull('email_template_id')) {
+      sheet.getRange(rowNum, hr.col('email_template_id')).setValue(draft.template_id);
+    }
+    if (hr.colOrNull('email_segment_at_send')) {
+      sheet.getRange(rowNum, hr.col('email_segment_at_send'))
+        .setValue(draft.segment_at_send);
+    }
+
+    aswLog_('INFO', 'regenerateDraftForLead_',
+      'Regenerated draft for ' + lid + ' (template=' + draft.template_key +
+      ' v' + draft.template_version + ')');
+
+    return draft;
+
+  } finally {
+    lock.releaseLock();
+  }
+}
