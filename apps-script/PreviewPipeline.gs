@@ -646,6 +646,8 @@ function buildPreviewBrief_(rd) {
     cta: cta,
     contact_phone: phone,
     contact_email: email,
+    phone: phone,
+    email: email,
     website_status: websiteStatus,
     rating: rating,
     reviews_count: reviewsCnt,
