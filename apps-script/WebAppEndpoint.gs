@@ -39,6 +39,14 @@ function doPost(e) {
       return handleGeneratePreview_(payload);
     }
 
+    // Phase 2 KROK 6: frontend-driven email send. Wraps
+    // sendEmailForLead_ which uses a milder gate than the Sheet path
+    // (no review_decision=APPROVE requirement) — see PR #70 for the
+    // intentional drift discussion.
+    if (payload.action === 'sendEmail') {
+      return handleSendEmail_(payload);
+    }
+
     return jsonResponse_({ success: false, error: 'Unknown action: ' + payload.action });
 
   } catch (err) {
@@ -212,6 +220,42 @@ function handleGetPreview_(payload) {
   } catch (err) {
     aswLog_('ERROR', 'handleGetPreview_',
       'slug=' + slug + ' err=' + err.message);
+    return jsonResponse_({ ok: false, error: err.message });
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   Phase 2 KROK 6 — sendEmail action
+   ═══════════════════════════════════════════════════════════════
+   Input:  { action:'sendEmail', leadId, token,
+             subjectOverride?, bodyOverride? }
+   Output (success): { ok:true, leadId, sentAt, threadId? }
+   Output (error):   { ok:false, error: 'not_qualified' |
+                                          'preview_not_ready' |
+                                          'empty_drafts' |
+                                          'invalid_email' |
+                                          'lead_not_found' |
+                                          'send_failed: <msg>' }
+
+   When subjectOverride / bodyOverride are non-empty, sendEmailForLead_
+   persists them into email_subject_draft / email_body_draft BEFORE the
+   send so the LEADS draft columns reflect what was actually sent.
+   ═══════════════════════════════════════════════════════════════ */
+function handleSendEmail_(payload) {
+  var leadId = String(payload.leadId || '').trim();
+  if (!leadId || leadId.length < 3) {
+    return jsonResponse_({ ok: false, error: 'Invalid or missing leadId' });
+  }
+  try {
+    var result = sendEmailForLead_(leadId, {
+      subjectOverride: payload.subjectOverride,
+      bodyOverride:    payload.bodyOverride
+    });
+    return jsonResponse_(result);
+  } catch (err) {
+    aswLog_('ERROR', 'handleSendEmail_',
+      'leadId=' + leadId + ' err=' + err.message);
     return jsonResponse_({ ok: false, error: err.message });
   }
 }
