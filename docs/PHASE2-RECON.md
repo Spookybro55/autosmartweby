@@ -1,5 +1,11 @@
 # Phase 2 — Recon: Preview pipeline + CRM email
 
+> **Status (post-launch):** This is a pre-implementation snapshot from 2026-04-26 before
+> Phase 2 KROK 2–6 were merged. KROK 2 (FF-004) and KROK 4–6 (PRs #68/#71/#72) are now
+> in main as of `phase2-v1.0` tag. Section E "Co chybí" is fully addressed.
+>
+> Kept as historical artifact for retro-audit context.
+
 > **Účel:** mapa "co je hotové, co chybí" pro end-to-end preview pipeline a CRM email send.
 > Vstup pro plánování KROK 2–10.
 > **Audit baseline:** `498b613` (post-pilot v1.0).
