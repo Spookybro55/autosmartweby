@@ -651,28 +651,51 @@ function buildPlaceholderValues_(ld) {
   var segment = String(ld.segment || '').trim();
   var painPoint = String(ld.pain_point || '').trim();
   var previewUrl = String(ld.preview_url || '').trim();
-  var senderName = String(ld.sender_name || '').trim();
-  var senderEmail = String(ld.sender_email || '').trim();
 
-  // Computed convenience placeholders
+  // Sender block — split fields for granular template control
+  var senderName = String(ld.sender_name || '').trim();
+  var senderRole = String(ld.sender_role || '').trim();
+  var senderPhone = String(ld.sender_phone || '').trim();
+  var senderEmail = String(ld.sender_email || '').trim();
+  var senderEmailDisplay = String(ld.sender_email_display || senderEmail).trim();
+  var senderWeb = String(ld.sender_web || '').trim();
+
+  // Computed convenience
   var greeting = contactName ? ('Dobrý den, ' + contactName) : 'Dobrý den';
   var firmRef = businessName || 'vaši firmu';
   var contactNameComma = contactName ? (', ' + contactName) : '';
 
+  // service_type_humanized: "instalatér" → "instalatérské služby"
+  // Defensive: if humanizeServiceType_ helper isn't loaded for any reason,
+  // fall back to raw service_type.
+  var serviceTypeHumanized = serviceType;
+  if (serviceType && typeof humanizeServiceType_ === 'function') {
+    try {
+      serviceTypeHumanized = humanizeServiceType_(serviceType) || serviceType;
+    } catch (e) {
+      serviceTypeHumanized = serviceType;
+    }
+  }
+
   return {
-    business_name:       businessName,
-    contact_name:        contactName,
-    city:                city,
-    area:                area,
-    service_type:        serviceType,
-    segment:             segment,
-    pain_point:          painPoint,
-    preview_url:         previewUrl,
-    sender_name:         senderName,
-    sender_email:        senderEmail,
-    greeting:            greeting,
-    firm_ref:            firmRef,
-    contact_name_comma:  contactNameComma
+    business_name:           businessName,
+    contact_name:            contactName,
+    city:                    city,
+    area:                    area,
+    service_type:            serviceType,
+    service_type_humanized:  serviceTypeHumanized,
+    segment:                 segment,
+    pain_point:              painPoint,
+    preview_url:             previewUrl,
+    sender_name:             senderName,
+    sender_role:             senderRole,
+    sender_phone:            senderPhone,
+    sender_email:            senderEmail,
+    sender_email_display:    senderEmailDisplay,
+    sender_web:              senderWeb,
+    greeting:                greeting,
+    firm_ref:                firmRef,
+    contact_name_comma:      contactNameComma
   };
 }
 
@@ -711,4 +734,172 @@ function chooseEmailTemplate_(leadData) {
   if (state === 'HAS_WEBSITE')  return 'has-website';
   // CONFLICT, UNKNOWN, or anything unexpected → safest default
   return 'no-website';
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   bootstrapNoWebsiteV1 — seed first real template via Drafts+Publish
+   ═══════════════════════════════════════════════════════════════
+   Manual-run migration. Idempotent — checks if no-website already
+   has an active version, no-op if yes.
+
+   Steps:
+     1. If active no-website exists → no-op, alert user
+     2. saveTemplateDraft_ s finálním textem
+     3. publishTemplate_ s commit msg "Initial port from approved
+        copy v1.0 (Phase 2 launch)"
+     4. Alert s confirmaci
+
+   Run from menu after T3+T4 deploy. Once published, composeDraft_
+   stops falling back to composeDraftFallback_ for has_website=false
+   leads.
+   ═══════════════════════════════════════════════════════════════ */
+
+function bootstrapNoWebsiteV1() {
+  // Idempotence check
+  try {
+    var existing = loadActiveTemplate_('no-website');
+    if (existing) {
+      var msg = 'no-website už má aktivní verzi (v' + existing.version + ').\n' +
+        'Pokud chceš nahradit, edituj ji ve frontend UI.\n\n' +
+        'Aktivní template_id: ' + existing.template_id;
+      aswLog_('INFO', 'bootstrapNoWebsiteV1', 'No-op — active version exists');
+      safeAlert_(msg);
+      return;
+    }
+  } catch (e) {
+    // No active — proceed to bootstrap
+  }
+
+  var subject = 'Dotaz k vašemu webu {business_name}';
+
+  // Body — exact text per stakeholder approval (Phase 2 launch v1.0)
+  var body =
+    'Dobrý den,\n' +
+    '\n' +
+    'při hledání {service_type_humanized} v {city} jsem narazil na vaši firmu a zkusil jsem připravit krátký návrh, jak by mohl vypadat jednoduchý web pro {business_name}.\n' +
+    '\n' +
+    'Pracovní náhled otevřete tady:\n' +
+    '{preview_url}\n' +
+    '\n' +
+    'Cílem je, aby zákazník na mobilu rychle viděl vaše služby, lokalitu a mohl vám rovnou zavolat. Takový hotový web stojí 8 900 Kč a běžně je hotový do 3–5 pracovních dní od dodání podkladů.\n' +
+    '\n' +
+    'Dává vám smysl, abych vám poslal celou proklikávací verzi?\n' +
+    '\n' +
+    '{sender_name}\n' +
+    '{sender_role}\n' +
+    'Autosmartweby — kvalitní weby a dlouhodobá péče pro malé firmy\n' +
+    '{sender_web} | {sender_phone}\n' +
+    '\n' +
+    'Pokud to pro vás není aktuální, stačí odepsat „Ne" a nebudu vás dál kontaktovat.';
+
+  var name = 'No website — initial outreach';
+  var description = 'První oslovení firem bez webu. Nabízí preview + cenový anchor 8 900 Kč. Soft opt-out v patičce.';
+
+  saveTemplateDraft_('no-website', subject, body, name, description);
+  var published = publishTemplate_('no-website',
+    'Initial port from approved copy v1.0 (Phase 2 launch)');
+
+  var msg2 = 'no-website v' + published.version + ' published.\n\n' +
+    'template_id: ' + published.template_id + '\n' +
+    'placeholders_used: ' + published.placeholders_used + '\n\n' +
+    'composeDraft_ teď používá tuto šablonu pro has_website=false leady.';
+
+  aswLog_('INFO', 'bootstrapNoWebsiteV1', msg2.replace(/\n/g, ' | '));
+  safeAlert_(msg2);
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   migrateLegacyAssigneeEmails_ — one-shot remap old keys to new
+   ═══════════════════════════════════════════════════════════════
+   Scans LEADS for rows whose assignee_email matches a key in
+   LEGACY_ASSIGNEE_EMAIL_MAP and rewrites it to the canonical
+   replacement.
+
+   Idempotent: re-running after migration is a no-op (no rows
+   match because all previous matches were rewritten).
+
+   Empty / null assignee cells are NEVER touched (unassigned is
+   valid). Only rewrites cells that exactly match a legacy key
+   (case-insensitive, trimmed comparison).
+
+   Returns count of rows updated. Always uses LockService.
+   ═══════════════════════════════════════════════════════════════ */
+
+function migrateLegacyAssigneeEmails_() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) {
+    throw new Error('Could not acquire lock for migrateLegacyAssigneeEmails_');
+  }
+
+  try {
+    var ss = openCrmSpreadsheet_();
+    var sheet = getExternalSheet_(ss);
+    var hr = getHeaderResolver_(sheet);
+    var assigneeCol = hr.colOrNull('assignee_email');
+    if (!assigneeCol) {
+      aswLog_('WARN', 'migrateLegacyAssigneeEmails_',
+        'assignee_email column not found — nothing to migrate');
+      return 0;
+    }
+
+    var lastRow = sheet.getLastRow();
+    if (lastRow < DATA_START_ROW) return 0;
+
+    var numRows = lastRow - DATA_START_ROW + 1;
+    var range = sheet.getRange(DATA_START_ROW, assigneeCol, numRows, 1);
+    var values = range.getValues();
+
+    var migrated = 0;
+    var perMappingCount = {};
+    for (var i = 0; i < values.length; i++) {
+      var raw = values[i][0];
+      if (raw == null) continue;
+      var key = String(raw).trim().toLowerCase();
+      if (!key) continue;
+      if (Object.prototype.hasOwnProperty.call(LEGACY_ASSIGNEE_EMAIL_MAP, key)) {
+        var newKey = LEGACY_ASSIGNEE_EMAIL_MAP[key];
+        values[i][0] = newKey;
+        migrated++;
+        perMappingCount[key] = (perMappingCount[key] || 0) + 1;
+      }
+    }
+
+    if (migrated > 0) {
+      range.setValues(values);
+    }
+
+    var summary = 'Migrated ' + migrated + ' rows. Per-mapping: ' +
+      JSON.stringify(perMappingCount);
+    aswLog_('INFO', 'migrateLegacyAssigneeEmails_', summary);
+    return migrated;
+
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   migrateAndBootstrap — convenience menu wrapper
+   ═══════════════════════════════════════════════════════════════
+   Combines: migrate legacy assignee emails → ensure templates
+   schema → bootstrap no-website v1. Run this single menu item
+   instead of three separate ones for clean cutover.
+   ═══════════════════════════════════════════════════════════════ */
+
+function migrateAndBootstrap() {
+  var migrated = migrateLegacyAssigneeEmails_();
+  setupEmailTemplates();
+  // bootstrapNoWebsiteV1 is idempotent — safe to re-run
+  try {
+    bootstrapNoWebsiteV1();
+  } catch (e) {
+    aswLog_('WARN', 'migrateAndBootstrap',
+      'Bootstrap failed (may already be active): ' + e.message);
+  }
+  safeAlert_('Migrate + bootstrap done.\n' +
+    'Legacy assignees migrated: ' + migrated + '\n' +
+    'See Apps Script logs for details.');
 }

@@ -778,28 +778,45 @@ function composeDraft_(rd) {
   var key = chooseEmailTemplate_(rd);
   var segment = String((rd && rd.segment) || '').trim();
 
-  // Resolve sender identity (mirrors OutboundEmail.gs:resolveSenderIdentity_
-  // but inline-light — at draft generation time the assignee may not be
-  // set yet, so fall back to defaults).
+  // Resolve sender identity from the assignee email (or default).
+  // B-13 T4: full profile lookup — name, role, phone, email_display, web.
+  // getAssigneeProfile_ always returns a valid object (DEFAULT fallback).
   var assigneeEmail = String((rd && rd.assignee_email) || '').toLowerCase().trim();
-  var senderEmail = '';
-  var senderName = '';
-  if (assigneeEmail && typeof ASSIGNEE_NAMES !== 'undefined' && ASSIGNEE_NAMES[assigneeEmail]) {
-    senderEmail = assigneeEmail;
-    senderName = ASSIGNEE_NAMES[assigneeEmail];
+  var profile = (typeof getAssigneeProfile_ === 'function')
+    ? getAssigneeProfile_(assigneeEmail)
+    : null;
+
+  var senderName, senderRole, senderPhone, senderEmailDisplay, senderWeb, senderEmail;
+  if (profile) {
+    senderName = profile.name;
+    senderRole = profile.role;
+    senderPhone = profile.phone;
+    senderEmailDisplay = profile.email_display;
+    senderWeb = profile.web;
+    senderEmail = profile.email_display;  // back-compat with augmented.sender_email
   } else {
-    senderEmail = (typeof DEFAULT_REPLY_TO_EMAIL !== 'undefined') ? DEFAULT_REPLY_TO_EMAIL : '';
-    senderName = (typeof DEFAULT_REPLY_TO_NAME !== 'undefined') ? DEFAULT_REPLY_TO_NAME : '';
+    // Last-resort fallback (Config.gs not loaded — shouldn't happen in prod)
+    senderName = '';
+    senderRole = '';
+    senderPhone = '';
+    senderEmailDisplay = '';
+    senderWeb = '';
+    senderEmail = '';
   }
 
   // Augment rd with sender + preview_url for placeholder substitution
-  // (rd may already have preview_url from buildPreviewBrief_)
+  // (rd may already have preview_url from buildPreviewBrief_ /
+  // computePreviewArtifacts_ T3.5 augmentation)
   var augmented = {};
   for (var k in rd) {
     if (Object.prototype.hasOwnProperty.call(rd, k)) augmented[k] = rd[k];
   }
   augmented.sender_name = senderName;
+  augmented.sender_role = senderRole;
+  augmented.sender_phone = senderPhone;
   augmented.sender_email = senderEmail;
+  augmented.sender_email_display = senderEmailDisplay;
+  augmented.sender_web = senderWeb;
 
   try {
     var template = loadActiveTemplate_(key);
@@ -1900,6 +1917,17 @@ function computePreviewArtifacts_(rd) {
   var brief = buildPreviewBrief_(rd);
   var slug = buildSlug_(rd.business_name, rd.city);
   var family = resolveTemplateFamily_(templateType);
+
+  // B-13 T3.5: ensure rd.preview_url is set BEFORE composeDraft_ so
+  // {preview_url} placeholder renders correctly. In this code path the
+  // LEADS row hasn't been updated yet — preview URL is only in local
+  // scope. rd is a HeaderResolver row snapshot, not the live sheet,
+  // so this in-place augmentation doesn't leak.
+  var previewUrl = slug ? resolvePreviewUrl_(slug, /*allowEmpty=*/false) : '';
+  if (!rd.preview_url && previewUrl) {
+    rd.preview_url = previewUrl;
+  }
+
   var draft = null;
   if (trimLower_(rd.send_allowed) === 'true') {
     draft = composeDraft_(rd);

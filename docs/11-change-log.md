@@ -8,7 +8,7 @@
 
 ## 2026-04-28
 
-### [B/B-13] Email template schema + CRUD + runtime wiring (T1+T2+T3 of 13-task email templating + analytics project) — RUNTIME_WIRED
+### [B/B-13] Email template schema + CRUD + runtime wiring + bootstrap (T1+T2+T3+T3.5+T4 of 13-task email templating + analytics project) — BOOTSTRAP_READY
 - **Scope:** Foundation pro multi-task projekt: nahradit hardcoded `composeDraft_` editovatelnym template systemem s versioning + analytikou per template+segment.
 
 T1 je jen schema migration — zadna business logika, zadne doPost akce, zadny frontend. To prijde v T2-T13.
@@ -45,8 +45,35 @@ T2 stale NEMENI `composeDraft_`, `WebAppEndpoint.gs` ani frontend — to je T3 a
 Caller capture pattern (4× `hr.colOrNull` + `hr.set`) zaveden ve vsech 4 LEADS write-back cestach: `buildEmailDrafts`, `processPreviewQueue` (via `artifacts.draft`), `refreshProcessedPreviewCopy`, `processPreviewForLead_` (writes[] array). Spec zminila jen prvni dva, ale ostatni dva jsou stejnou code-path (composeDraft + LEADS row write), takze stejny princip aplikovan vsude pro consistency v analytics.
 
 T3 NEMENI Config.gs, Menu.gs, OutboundEmail.gs, WebAppEndpoint.gs, frontend. Bez `_email_templates` content (T4 ho bootstrapuje) vsechny drafty jdou pres fallback path — ZADNY behavioural change v pilot az do T4.
+
+**T3.5+T4 update (commits ve stejnem PR):** dokoncena cesta od schematu k publikovane prvni sablone.
+
+T3.5 race fix:
+- `composeDraft_` v `computePreviewArtifacts_` se volal PRED tim, nez byl `preview_url` v `rd`. `{preview_url}` placeholder by tedy renderoval prazdne.
+- Fix: `computePreviewArtifacts_` nyni resolvuje `previewUrl = resolvePreviewUrl_(slug, false)` a in-place zapise do `rd.preview_url` pred `composeDraft_(rd)`. Guarded `if (!rd.preview_url)` aby se neclobberovaly existujici hodnoty.
+- Ostatni 2 LEADS-side call sites (`buildEmailDrafts:712`, `refreshProcessedPreviewCopy:1398`) cetly `hr.row(row)` ktery uz obsahuje LEADS row data vc. preview_url, takze tam fix neni potreba.
+
+T4a — assignee profile extension + legacy migration:
+- `ASSIGNEE_NAMES` zmena ze stareho `email→name` literal mapy na IIFE-derived map z noveho `ASSIGNEE_PROFILES`. Domena konsolidovana na `autosmartweb.cz`: 4 stare emaily (`sfridrich@unipong.cz`, `sebastian@autosmartweb.cz`, `tomas@autosmartweb.cz`, `jan.bezemek@autosmartweb.cz`) → 3 nove (`s.fridrich@autosmartweb.cz`, `t.maixner@autosmartweb.cz`, `j.bezemek@autosmartweb.cz`).
+- `ASSIGNEE_PROFILES` ma `{name, role, phone, email_display, web}` per assignee. `DEFAULT_ASSIGNEE_PROFILE` pro empty/unknown fallback.
+- `getAssigneeProfile_(email)` always returns valid profile object.
+- `LEGACY_ASSIGNEE_EMAIL_MAP` map starych klicu na nove + `migrateLegacyAssigneeEmails_` funkce: scanuje LEADS `assignee_email` column, rewritne legacy keys, prazdne cells nikdy nemodifikuje, LockService 10s, vraci pocet upravenych radku.
+- `composeDraft_` v `PreviewPipeline.gs` swap z inline `ASSIGNEE_NAMES[email]` na `getAssigneeProfile_`. Augmented objekt nese kompletni sender block (`sender_name`, `sender_role`, `sender_phone`, `sender_email`, `sender_email_display`, `sender_web`).
+- `buildPlaceholderValues_` rozsireno z 13 na 18 placeholders: pridany sender_role/phone/email_display/web + `service_type_humanized` (defensive `typeof humanizeServiceType_ === 'function'` guard, try/catch fallback na raw service_type).
+
+T4b — first published template:
+- `bootstrapNoWebsiteV1()`: idempotentni publish prvni `no-website` v1 sablony s aprovovanym textem (Phase 2 launch v1.0). Subject: `Dotaz k vašemu webu {business_name}`. Body obsahuje `{service_type_humanized}` / `{city}` / `{preview_url}` / signaturu se sender_*.
+- `migrateAndBootstrap`: convenience wrapper migrace → `setupEmailTemplates` → `bootstrapNoWebsiteV1`. Single-click cutover z menu.
+
+Po spusteni `migrateAndBootstrap` v Apps Script editoru:
+- 3 rows v TEST sheetu maji `tomas@autosmartweb.cz` -> remapnuto na `t.maixner@autosmartweb.cz` (per-mapping count: tomas: 3).
+- `_email_templates` rozšireno o 4 LEADS sloupce (idempotent, run #2 bude no-op).
+- `no-website` v1 publikovana s template_id `ASW-TPL-...`, status='active'. Empty placeholder `no-website` row smazana per `publishTemplate_` step 4.
+- Od te chvile `composeDraft_` pro NO_WEBSITE leady prestane padat do fallbacku → vsechny novy drafty jsou template-rendered + maji `email_template_*` metadata.
+
+T4 NEMENI `OutboundEmail.gs:resolveSenderIdentity_` (per spec). `DEFAULT_REPLY_TO_*` zustavaji na legacy `sebastian@autosmartweb.cz` — viz Known Limits.
 - **Owner:** Stream B
-- **Code:** apps-script/Config.gs (modified), apps-script/EmailTemplateStore.gs (new (T1)), apps-script/EmailTemplateStore.gs (modified (T2)), apps-script/EmailTemplateStore.gs (modified (T3)), apps-script/PreviewPipeline.gs (modified (T3)), apps-script/Menu.gs (modified)
+- **Code:** apps-script/Config.gs (modified), apps-script/EmailTemplateStore.gs (new (T1)), apps-script/EmailTemplateStore.gs (modified (T2)), apps-script/EmailTemplateStore.gs (modified (T3)), apps-script/PreviewPipeline.gs (modified (T3)), apps-script/Config.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T4)), apps-script/PreviewPipeline.gs (modified (T3.5+T4)), apps-script/Menu.gs (modified (T4)), apps-script/Menu.gs (modified)
 - **Docs:** docs/30-task-records/B-13.md, docs/11-change-log.md, docs/29-task-registry.md
 
 ## 2026-04-27
