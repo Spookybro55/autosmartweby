@@ -42,12 +42,34 @@ const SAMPLE_BRIEFS: Record<string, SampleBriefRecord> = {
   },
 };
 
-export function getPreviewBriefBySlug(slug: string): PreviewBrief | null {
-  // B-04: runtime store (briefs submitted via /api/preview/render) has priority.
-  const runtime = getPreviewRecord(slug);
-  if (runtime) return runtime.brief;
-  // Fallback: B-02 hardcoded dev fixtures.
-  return SAMPLE_BRIEFS[slug]?.brief ?? null;
+/**
+ * Phase 2 KROK 2: only fall back to hardcoded fixtures in development /
+ * mock mode. In production a missing slug must yield notFound() so we
+ * don't accidentally render someone else's mock business as a real
+ * client preview (Q2 decision).
+ */
+function isDevelopmentMode(): boolean {
+  return process.env.NODE_ENV === 'development' || process.env.MOCK_MODE === 'true';
+}
+
+/**
+ * Resolve a preview brief by slug.
+ *
+ * Lookup order:
+ *   1. Apps Script `_previews` (via preview-store cache, TTL 5 min)
+ *   2. (dev only) hardcoded sample fixtures
+ *   3. null → caller calls notFound()
+ *
+ * In production a cache miss + AS down + AS not_found all collapse to
+ * `null`. Frontend logs the reason; client sees a 404.
+ */
+export async function getPreviewBriefBySlug(slug: string): Promise<PreviewBrief | null> {
+  const record = await getPreviewRecord(slug);
+  if (record) return record.brief;
+  if (isDevelopmentMode()) {
+    return SAMPLE_BRIEFS[slug]?.brief ?? null;
+  }
+  return null;
 }
 
 export function getSampleRecordBySlug(slug: string): SampleBriefRecord | null {

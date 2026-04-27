@@ -17,6 +17,10 @@ var MAIN_SHEET_NAME    = 'LEADS';
 var CONTACT_SHEET_NAME = 'Ke kontaktování';
 var LOG_SHEET_NAME     = '_asw_logs';
 var RAW_IMPORT_SHEET_NAME = '_raw_import';
+// Phase 2 KROK 2: Sheets-backed preview storage (replaces in-memory Map
+// in crm-frontend preview-store.ts). Hidden list, accessed by Apps Script
+// only. Schema: see PreviewStore.gs PREVIEW_SHEET_HEADERS.
+var PREVIEW_SHEET_NAME = '_previews';
 var HEADER_ROW      = 1;
 var DATA_START_ROW  = 2;
 
@@ -110,6 +114,10 @@ var EXTENSION_COLUMNS = [
   'email_reply_type',
   'email_mailbox_account',
   'email_subject_last',
+  // Phase 2 KROK 6: snapshot of the body that was actually sent. Mirrors
+  // email_subject_last naming. Idempotent migration via
+  // setupPreviewExtension — the column is added on first run if missing.
+  'email_body_last',
   'email_last_error',
   'source_job_id',
   'source_portal',
@@ -217,7 +225,7 @@ var KNOWN_CHAINS = [
 
 /* ── Mailbox sync (read-only) ─────────────────────────────── */
 var EMAIL_SYNC_ENABLED              = true;
-var EMAIL_MAILBOX_ACCOUNT           = '';     // e.g. 'sales@autosmartweby.cz'
+var EMAIL_MAILBOX_ACCOUNT           = '';     // e.g. 'info@autosmartweb.cz' (centralni obchodni inbox; viz docs/22-technical-architecture.md "Email identity model")
 var EMAIL_SYNC_LOOKBACK_DAYS        = 30;
 var EMAIL_SYNC_MAX_THREADS          = 50;
 var EMAIL_SYNC_REQUIRE_EXACT_MATCH  = true;

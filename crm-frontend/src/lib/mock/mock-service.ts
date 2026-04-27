@@ -60,6 +60,96 @@ export function updateMockLead(id: string, fields: Partial<LeadEditableFields>):
   return true;
 }
 
+// Phase 2 KROK 4: mock implementation of generatePreview. Mirrors the
+// real Apps Script processPreviewForLead_ contract — eligibility checks
+// + slug build + stage transition — without any external IO. Used in
+// dev when MOCK_MODE=true or GOOGLE_* env vars are missing.
+export interface MockGeneratePreviewResult {
+  ok: boolean;
+  slug?: string;
+  previewUrl?: string;
+  stage?: string;
+  error?: string;
+}
+
+function buildMockSlug(name: string, city: string): string {
+  const ascii = (s: string) =>
+    s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const base = ascii(name || 'preview').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const suffix = city ? '-' + ascii(city).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') : '';
+  return (base + suffix).substring(0, 60);
+}
+
+export function generateMockPreview(leadId: string): MockGeneratePreviewResult {
+  const lead = mockState.find(l => l.id === leadId);
+  if (!lead) return { ok: false, error: 'lead_not_found: ' + leadId };
+  if (!lead.qualifiedForPreview) return { ok: false, error: 'not_qualified' };
+
+  const slug = buildMockSlug(lead.businessName, lead.city);
+  const previewUrl = 'https://autosmartweb.cz/preview/' + slug;
+
+  // Mutate the in-memory mock so subsequent /api/leads/[id] reads see
+  // the new preview state — same shape as the real Apps Script write.
+  lead.previewUrl = previewUrl;
+  lead.previewHeadline = lead.businessName + (lead.city ? ' | ' + lead.city : '');
+  lead.previewStage = 'READY_FOR_REVIEW';
+
+  return {
+    ok: true,
+    slug,
+    previewUrl,
+    stage: 'READY_FOR_REVIEW',
+  };
+}
+
+// Phase 2 KROK 6: mock send. Mirrors sendEmailForLead_ contract:
+// validates qualified + READY_FOR_REVIEW + drafts + email, applies
+// overrides into the in-memory mock, and returns { ok, sentAt }. No
+// external IO — strictly dev-mode only.
+export interface MockSendEmailResult {
+  ok: boolean;
+  sentAt?: string;
+  threadId?: string;
+  error?: string;
+}
+
+export function sendMockEmail(
+  leadId: string,
+  opts?: { subjectOverride?: string; bodyOverride?: string },
+): MockSendEmailResult {
+  const lead = mockState.find(l => l.id === leadId);
+  if (!lead) return { ok: false, error: 'lead_not_found: ' + leadId };
+  if (!lead.qualifiedForPreview) return { ok: false, error: 'not_qualified' };
+  if (lead.previewStage !== 'READY_FOR_REVIEW') {
+    return { ok: false, error: 'preview_not_ready: ' + (lead.previewStage || 'EMPTY') };
+  }
+
+  // Apply overrides
+  if (opts?.subjectOverride) lead.emailSubjectDraft = opts.subjectOverride;
+  if (opts?.bodyOverride) lead.emailBodyDraft = opts.bodyOverride;
+
+  const subject = (lead.emailSubjectDraft || '').trim();
+  const body = (lead.emailBodyDraft || '').trim();
+  if (!subject || !body) return { ok: false, error: 'empty_drafts' };
+  if (!lead.email || !lead.email.includes('@')) return { ok: false, error: 'invalid_email' };
+
+  const sentAt = new Date().toISOString();
+  lead.lastEmailSentAt = sentAt;
+  lead.emailSyncStatus = 'SENT';
+  // Mirror persistOutboundMetadata_ outreach_stage transition: only
+  // upgrade from early states (NOT_CONTACTED / DRAFT_READY).
+  if (lead.outreachStage === 'NOT_CONTACTED' || lead.outreachStage === 'DRAFT_READY') {
+    lead.outreachStage = 'CONTACTED';
+  }
+  lead.lastContactAt = sentAt;
+
+  return {
+    ok: true,
+    sentAt,
+    threadId: 'mock-thread-' + leadId,
+  };
+}
+
 export function leadToListItem(lead: Lead): LeadListItem {
   return {
     id: lead.id,

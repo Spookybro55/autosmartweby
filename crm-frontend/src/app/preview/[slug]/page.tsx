@@ -23,7 +23,7 @@ export default async function PreviewPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const brief = getPreviewBriefBySlug(slug);
+  const brief = await getPreviewBriefBySlug(slug);
 
   if (!brief) {
     notFound();

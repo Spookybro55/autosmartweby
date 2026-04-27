@@ -24,6 +24,29 @@ function doPost(e) {
       return handleAssignLead_(payload);
     }
 
+    // Phase 2 KROK 2: Sheets-backed preview store read endpoint.
+    // Frontend /preview/<slug> calls this to fetch the durable brief
+    // instead of relying on the in-memory map (FF-004 fix).
+    if (payload.action === 'getPreview') {
+      return handleGetPreview_(payload);
+    }
+
+    // Phase 2 KROK 4: manual "Generate preview" trigger from CRM lead
+    // detail. Skips the cron + webhook flow and writes a single lead's
+    // brief into _previews + LEADS, lifting preview_stage straight to
+    // READY_FOR_REVIEW because autosmartweb.cz hosts the static template.
+    if (payload.action === 'generatePreview') {
+      return handleGeneratePreview_(payload);
+    }
+
+    // Phase 2 KROK 6: frontend-driven email send. Wraps
+    // sendEmailForLead_ which uses a milder gate than the Sheet path
+    // (no review_decision=APPROVE requirement) — see PR #70 for the
+    // intentional drift discussion.
+    if (payload.action === 'sendEmail') {
+      return handleSendEmail_(payload);
+    }
+
     return jsonResponse_({ success: false, error: 'Unknown action: ' + payload.action });
 
   } catch (err) {
@@ -158,6 +181,114 @@ function assertAssigneeAllowed_(value) {
            ' (allowed: ' + ALLOWED_USERS.join(', ') + ', or empty)'
   };
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   Phase 2 KROK 2 — getPreview action
+   ═══════════════════════════════════════════════════════════════
+   Input:  { action:'getPreview', slug, token }
+   Output: { ok:true, brief, family, templateType, leadId, previewUrl,
+             generatedAt, lastAccessedAt, status }
+        or { ok:false, error:'not_found' | <err msg> }
+
+   Token is validated by doPost() before reaching this handler;
+   we still re-emit ok:false on errors so the frontend gets a uniform
+   shape (it does not need to dispatch on success vs ok flags).
+   ═══════════════════════════════════════════════════════════════ */
+function handleGetPreview_(payload) {
+  var slug = String(payload.slug || '').trim();
+  if (!slug) {
+    return jsonResponse_({ ok: false, error: 'Missing slug' });
+  }
+
+  try {
+    var record = getPreviewRecord_(slug);
+    if (!record) {
+      return jsonResponse_({ ok: false, error: 'not_found' });
+    }
+    return jsonResponse_({
+      ok:             true,
+      slug:           record.slug,
+      brief:          record.brief,
+      family:         record.family,
+      templateType:   record.template_type,
+      leadId:         record.lead_id,
+      previewUrl:     record.preview_url,
+      generatedAt:    record.generated_at,
+      lastAccessedAt: record.last_accessed_at,
+      status:         record.status
+    });
+  } catch (err) {
+    aswLog_('ERROR', 'handleGetPreview_',
+      'slug=' + slug + ' err=' + err.message);
+    return jsonResponse_({ ok: false, error: err.message });
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   Phase 2 KROK 6 — sendEmail action
+   ═══════════════════════════════════════════════════════════════
+   Input:  { action:'sendEmail', leadId, token,
+             subjectOverride?, bodyOverride? }
+   Output (success): { ok:true, leadId, sentAt, threadId? }
+   Output (error):   { ok:false, error: 'not_qualified' |
+                                          'preview_not_ready' |
+                                          'empty_drafts' |
+                                          'invalid_email' |
+                                          'lead_not_found' |
+                                          'send_failed: <msg>' }
+
+   When subjectOverride / bodyOverride are non-empty, sendEmailForLead_
+   persists them into email_subject_draft / email_body_draft BEFORE the
+   send so the LEADS draft columns reflect what was actually sent.
+   ═══════════════════════════════════════════════════════════════ */
+function handleSendEmail_(payload) {
+  var leadId = String(payload.leadId || '').trim();
+  if (!leadId || leadId.length < 3) {
+    return jsonResponse_({ ok: false, error: 'Invalid or missing leadId' });
+  }
+  try {
+    var result = sendEmailForLead_(leadId, {
+      subjectOverride: payload.subjectOverride,
+      bodyOverride:    payload.bodyOverride
+    });
+    return jsonResponse_(result);
+  } catch (err) {
+    aswLog_('ERROR', 'handleSendEmail_',
+      'leadId=' + leadId + ' err=' + err.message);
+    return jsonResponse_({ ok: false, error: err.message });
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   Phase 2 KROK 4 — generatePreview action
+   ═══════════════════════════════════════════════════════════════
+   Input:  { action:'generatePreview', leadId, token }
+   Output (success): { ok:true, slug, previewUrl, leadId, stage }
+   Output (error):   { ok:false, error: 'not_qualified' | 'dedupe_blocked' |
+                                          'lead_not_found' | <msg> }
+
+   processPreviewForLead_ throws on validation/IO failures so we wrap
+   it in try/catch and surface a uniform { ok:false, error } shape.
+   The frontend (lead-detail-drawer) maps known error strings to
+   user-friendly Czech messages.
+   ═══════════════════════════════════════════════════════════════ */
+function handleGeneratePreview_(payload) {
+  var leadId = String(payload.leadId || '').trim();
+  if (!leadId || leadId.length < 3) {
+    return jsonResponse_({ ok: false, error: 'Invalid or missing leadId' });
+  }
+  try {
+    var result = processPreviewForLead_(leadId);
+    return jsonResponse_(result); // already shaped { ok:true, ... }
+  } catch (err) {
+    aswLog_('ERROR', 'handleGeneratePreview_',
+      'leadId=' + leadId + ' err=' + err.message);
+    return jsonResponse_({ ok: false, error: err.message });
+  }
+}
+
 
 /**
  * Dedicated assignment endpoint — thin wrapper that validates the

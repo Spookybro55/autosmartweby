@@ -646,6 +646,8 @@ function buildPreviewBrief_(rd) {
     cta: cta,
     contact_phone: phone,
     contact_email: email,
+    phone: phone,
+    email: email,
     website_status: websiteStatus,
     rating: rating,
     reviews_count: reviewsCnt,
@@ -939,26 +941,36 @@ function processPreviewQueue() {
       var rd = hr.row(row);
       var leadId = rd.lead_id || '';
 
+      // Phase 2 KROK 4 refactor: derive template + brief + slug + draft +
+      // family in a single pure call (computePreviewArtifacts_) so the
+      // batch path here and the per-lead manual path (processPreviewForLead_)
+      // share the same logic. Behavior unchanged for the queue.
+      var artifacts = computePreviewArtifacts_(rd);
+      var templateType = artifacts.templateType;
+      var brief = artifacts.brief;
+
       // Step 1: Template
-      var templateType = chooseTemplateType_(rd);
       hr.set(row, 'template_type', templateType);
 
       // Step 2: Brief
-      var brief = buildPreviewBrief_(rd);
       hr.set(row, 'preview_brief_json', JSON.stringify(brief));
       hr.set(row, 'preview_headline', brief.headline);
       hr.set(row, 'preview_subheadline', brief.subheadline);
       hr.set(row, 'preview_cta', brief.cta);
-      hr.set(row, 'preview_stage', PREVIEW_STAGES.BRIEF_READY);
+      // Phase 2 KROK 5: stage lands at READY_FOR_REVIEW immediately. The
+      // marketing web (autosmartweb.cz) hosts /preview/<slug> as a static
+      // template, so there is no async render to wait for. BRIEF_READY
+      // is now a dead state — kept in `eligibleStages` only so legacy
+      // pre-KROK-5 rows get re-processed and lifted forward.
+      hr.set(row, 'preview_stage', PREVIEW_STAGES.READY_FOR_REVIEW);
 
       // Step 3: Slug
-      hr.set(row, 'preview_slug', buildSlug_(rd.business_name, rd.city));
+      hr.set(row, 'preview_slug', artifacts.slug);
 
       // Step 4: Email draft (if send_allowed and not a dupe)
-      if (trimLower_(hr.get(row, 'send_allowed')) === 'true') {
-        var draft = composeDraft_(rd);
-        hr.set(row, 'email_subject_draft', draft.subject);
-        hr.set(row, 'email_body_draft', draft.body);
+      if (artifacts.draft) {
+        hr.set(row, 'email_subject_draft', artifacts.draft.subject);
+        hr.set(row, 'email_body_draft', artifacts.draft.body);
         // FIX #4 + P0.2: outreach_stage → DRAFT_READY only if not already progressed
         var curOutreach2 = trimLower_(hr.get(row, 'outreach_stage'));
         if (!curOutreach2 || curOutreach2 === 'not_contacted') {
@@ -966,7 +978,41 @@ function processPreviewQueue() {
         }
       }
 
-      // Step 5: Webhook (only when NOT dry run AND webhook enabled)
+      // Phase 2 KROK 2/4: persist into Sheets-backed _previews list. After
+      // KROK 5 this is the durable record — no webhook follows on the
+      // default flow. Stage is already READY_FOR_REVIEW above.
+      try {
+        if (artifacts.slug) {
+          persistPreviewArtifacts_(artifacts, leadId);
+          // Phase 2 KROK 5: stamp preview_url + preview_generated_at on
+          // the LEADS row so the CRM lead detail surfaces them without
+          // a separate read pass. Mirror processPreviewForLead_.
+          hr.set(row, 'preview_url',
+            resolvePreviewUrl_(artifacts.slug, /*allowEmpty=*/false));
+          hr.set(row, 'preview_generated_at', new Date());
+          hr.set(row, 'preview_error', '');
+        } else {
+          aswLog_('WARN', 'processPreviewQueue',
+            'Empty preview_slug for row ' + rowNum + ' — skipping _previews upsert');
+        }
+      } catch (storeErr) {
+        // Persisting to _previews must not block the existing webhook flow.
+        aswLog_('ERROR', 'processPreviewQueue',
+          '_previews upsert failed row ' + rowNum + ': ' + storeErr.message,
+          { row: rowNum, leadId: leadId });
+      }
+
+      // Step 5: Webhook —  DEPRECATED (Phase 2 KROK 5)
+      // ─────────────────────────────────────────────────────────────
+      // Templates are now static on autosmartweb.cz; processPreviewQueue
+      // sets preview_stage = READY_FOR_REVIEW above and writes
+      // preview_url directly. The webhook block below is preserved for
+      // backward compatibility with any deployment that still flips
+      // ENABLE_WEBHOOK=true to feed an external Vercel render endpoint.
+      // Default config (`Config.gs`: DRY_RUN=true, ENABLE_WEBHOOK=false,
+      // WEBHOOK_URL='') keeps it dormant. B-05 unit tests
+      // (`scripts/test-b05-preview-webhook.mjs`) port the block in
+      // isolation and continue to gate transitions.
       if (!DRY_RUN && ENABLE_WEBHOOK && WEBHOOK_URL) {
         // B-05: single GENERATING state covers the whole in-flight window
         // (replaces legacy QUEUED + SENT_TO_WEBHOOK pair).
@@ -1696,4 +1742,204 @@ function runWebhookPilotTest() {
 
   aswLog_('INFO', 'runWebhookPilotTest', report);
   safeAlert_(report);
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   Phase 2 KROK 4 — shared preview artifact helpers
+   ═══════════════════════════════════════════════════════════════
+   computePreviewArtifacts_(rd) is a pure function — given a row
+   record (as returned by hr.row()), it returns all derived preview
+   artifacts WITHOUT touching the sheet. Used by both
+   processPreviewQueue (batch) and processPreviewForLead_ (manual,
+   single lead).
+
+   persistPreviewArtifacts_ writes the artifacts into the
+   _previews hidden sheet via upsertPreviewRecord_ (Phase 2 KROK 2).
+   It honors the PUBLIC_BASE_URL Script Property override; when not
+   set, upsertPreviewRecord_ defaults preview_url to the autosmartweb.cz
+   marketing web (Phase 2 KROK 9 / PR #67).
+
+   Pure refactor — no behavior change for processPreviewQueue.
+   ═══════════════════════════════════════════════════════════════ */
+
+function computePreviewArtifacts_(rd) {
+  var templateType = chooseTemplateType_(rd);
+  var brief = buildPreviewBrief_(rd);
+  var slug = buildSlug_(rd.business_name, rd.city);
+  var family = resolveTemplateFamily_(templateType);
+  var draft = null;
+  if (trimLower_(rd.send_allowed) === 'true') {
+    draft = composeDraft_(rd);
+  }
+  return {
+    templateType: templateType,
+    brief:        brief,
+    slug:         slug,
+    family:       family,
+    draft:        draft
+  };
+}
+
+function persistPreviewArtifacts_(artifacts, leadId) {
+  if (!artifacts || !artifacts.slug) return null;
+  // Pass empty when PUBLIC_BASE_URL is not set so upsertPreviewRecord_'s
+  // built-in default (autosmartweb.cz/preview/<slug>, PR #67) takes over.
+  var presumedPreviewUrl = resolvePreviewUrl_(artifacts.slug, /*allowEmpty=*/true);
+  return upsertPreviewRecord_(
+    artifacts.slug,
+    JSON.stringify(artifacts.brief),
+    artifacts.templateType,
+    artifacts.family,
+    leadId,
+    presumedPreviewUrl
+  );
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   Phase 2 KROK 5 — preview URL resolver
+   ═══════════════════════════════════════════════════════════════
+   Single source of truth for the public preview URL written into
+   LEADS and _previews. Honors `PUBLIC_BASE_URL` Script Property
+   (used by staging deployments to override the marketing web URL),
+   falls back to https://autosmartweb.cz/preview/<slug> otherwise.
+
+   `allowEmpty` controls fallback behavior:
+   - true:  return empty string when PUBLIC_BASE_URL is unset, letting
+            upsertPreviewRecord_ stamp its own default into the
+            _previews sheet (avoids two callers stamping the same URL
+            from different code paths).
+   - false: always return a fully-qualified URL — used when writing
+            preview_url directly into the LEADS row.
+   ═══════════════════════════════════════════════════════════════ */
+
+function resolvePreviewUrl_(slug, allowEmpty) {
+  if (!slug) return '';
+  var publicBaseUrl = '';
+  try {
+    publicBaseUrl = PropertiesService.getScriptProperties()
+      .getProperty('PUBLIC_BASE_URL') || '';
+  } catch (e) { /* Script Properties not readable in some contexts */ }
+  if (publicBaseUrl) {
+    return publicBaseUrl.replace(/\/+$/, '') + '/preview/' + slug;
+  }
+  return allowEmpty ? '' : ('https://autosmartweb.cz/preview/' + slug);
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   Phase 2 KROK 4 — processPreviewForLead_ (manual generate)
+   ═══════════════════════════════════════════════════════════════
+   Per-lead variant of processPreviewQueue. Operator clicks
+   "Vygenerovat preview" in the CRM lead detail; the frontend hits
+   /api/leads/<id>/generate-preview which calls this via doPost
+   action 'generatePreview' (see WebAppEndpoint.gs).
+
+   Differences from processPreviewQueue:
+   - operates on a single lead resolved by lead_id (not batch)
+   - skips the webhook entirely — autosmartweb.cz marketing web
+     hosts the preview templates, no Vercel render call needed
+   - jumps straight to preview_stage = READY_FOR_REVIEW (skipping
+     BRIEF_READY → GENERATING transitions that the cron pipeline
+     uses)
+   - throws on validation failure so the caller (handleGeneratePreview_)
+     can surface a structured error to the frontend
+
+   Returns: { ok: true, slug, previewUrl, leadId, stage: 'READY_FOR_REVIEW' }
+   Throws:  Error('not_qualified' | 'dedupe_blocked' | 'lead_not_found' | …)
+   ═══════════════════════════════════════════════════════════════ */
+
+function processPreviewForLead_(leadId) {
+  var s = String(leadId || '').trim();
+  if (!s || s.length < 3) throw new Error('Invalid leadId');
+
+  var ss = openCrmSpreadsheet_();
+  var sheet = getExternalSheet_(ss);
+
+  if (!ensurePreviewExtensionReady_(sheet)) {
+    throw new Error('Preview extension columns missing — run "Setup preview extension"');
+  }
+
+  var hr = getHeaderResolver_(sheet);
+  var leadIdCol = hr.colOrNull('lead_id');
+  if (!leadIdCol) throw new Error('lead_id column not found');
+
+  var rowNum = findRowByLeadId_(sheet, leadIdCol, s);
+  if (!rowNum) throw new Error('lead_not_found: ' + s);
+
+  var rowValues = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var rd = hr.row(rowValues);
+
+  // --- Eligibility checks (mirror processPreviewQueue:918-929) ---
+  if (trimLower_(rd.qualified_for_preview) !== 'true') {
+    throw new Error('not_qualified');
+  }
+  if (trimLower_(rd.dedupe_flag) === 'true') {
+    throw new Error('dedupe_blocked');
+  }
+
+  // --- Compute artifacts (pure) ---
+  var artifacts = computePreviewArtifacts_(rd);
+
+  // --- Persist into _previews (Phase 2 KROK 2 storage) ---
+  var stored = persistPreviewArtifacts_(artifacts, s);
+  if (!stored) {
+    throw new Error('persist_failed: empty slug for lead ' + s);
+  }
+
+  // --- Single-row write back into LEADS ---
+  // Mirror the column updates that processPreviewQueue performs in batch,
+  // but write the cell values directly. preview_stage skips BRIEF_READY
+  // → GENERATING and lands at READY_FOR_REVIEW immediately because the
+  // marketing web serves /preview/<slug> as a static template (no
+  // webhook, no async generation step).
+  var nowDate = new Date();
+  var previewUrl = resolvePreviewUrl_(artifacts.slug, /*allowEmpty=*/false);
+
+  var writes = [
+    ['template_type',          artifacts.templateType],
+    ['preview_brief_json',     JSON.stringify(artifacts.brief)],
+    ['preview_headline',       artifacts.brief.headline],
+    ['preview_subheadline',    artifacts.brief.subheadline],
+    ['preview_cta',            artifacts.brief.cta],
+    ['preview_slug',           artifacts.slug],
+    ['preview_url',            previewUrl],
+    ['preview_stage',          PREVIEW_STAGES.READY_FOR_REVIEW],
+    ['preview_generated_at',   nowDate],
+    ['preview_error',          ''],
+    ['last_processed_at',      nowDate]
+  ];
+  if (artifacts.draft) {
+    writes.push(['email_subject_draft', artifacts.draft.subject]);
+    writes.push(['email_body_draft',    artifacts.draft.body]);
+    var curOutreach = trimLower_(rd.outreach_stage);
+    if (!curOutreach || curOutreach === 'not_contacted') {
+      writes.push(['outreach_stage', 'DRAFT_READY']);
+    }
+  }
+  // lead_stage upgrade only if currently QUALIFIED (don't downgrade
+  // CONTACTED / RESPONDED leads back to IN_PIPELINE)
+  if (trimLower_(rd.lead_stage) === trimLower_(LEAD_STAGES.QUALIFIED)) {
+    writes.push(['lead_stage', LEAD_STAGES.IN_PIPELINE]);
+  }
+
+  for (var i = 0; i < writes.length; i++) {
+    var col = hr.colOrNull(writes[i][0]);
+    if (col) {
+      sheet.getRange(rowNum, col).setValue(writes[i][1]);
+    }
+  }
+
+  aswLog_('INFO', 'processPreviewForLead_',
+    'OK leadId=' + s + ' slug=' + artifacts.slug + ' row=' + rowNum,
+    { row: rowNum, leadId: s });
+
+  return {
+    ok:         true,
+    leadId:     s,
+    slug:       artifacts.slug,
+    previewUrl: previewUrl,
+    stage:      PREVIEW_STAGES.READY_FOR_REVIEW
+  };
 }

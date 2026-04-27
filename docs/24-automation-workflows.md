@@ -5,6 +5,91 @@
 
 ---
 
+## Pilot email identity — doporucene Script Properties / ENV
+
+> Tato sekce dokumentuje hodnoty pro **outbound pilot** podle decisions z email identity auditu (Sebastian + Tomas + Honza, hybrid model). Vsechny hodnoty jsou **navrh / SPEC** — runtime aplikace je future task. Aktivni runtime kod (`apps-script/OutboundEmail.gs`) vyzaduje pred nasazenim Gmail "Send mail as" alias setup (viz `docs/22-technical-architecture.md` sekce "Apps Script outbound prerequisite").
+>
+> **Cross-reference:** C-06 (Provider abstraction) v sekci nize zavadi `EMAIL_PROVIDER` Script Property. C-11 (Config / secrets) formalizuje 6-plane orthogonal model. Tyto pilot hodnoty jsou konkretni instance pro pilot ramec.
+
+### Apps Script Script Properties (interni repo)
+
+| Property | Doporucena pilot hodnota | Plane (per C-11) | Secret | Poznamka |
+|----------|--------------------------|------------------|--------|----------|
+| `ASW_ENV` | `TEST` (pilot) → `PROD` po validaci | CONFIG | NE | Existuje, pres `EnvConfig.gs` |
+| `ASW_SPREADSHEET_ID` | `14U9CC0q5gpFr2p7CD1s4rf3i0lCettIVYIqrO8lsj9c` (TEST) / `1RBcLZkn3AruiqaQdJ7PHIxvCcoO5SC9Qnlw_NiLnpYc` (PROD) | CONFIG (TENANT_ID) | NE | Existuje |
+| `EMAIL_PROVIDER` | `GMAIL` | CONFIG | NE | C-06 PROPOSED |
+| `EMAIL_DRY_RUN` | `true` (pilot start) → `false` po deliverability + alias verify | KILL_SWITCH (per C-11 reklasifikace) | NE | Aktualne `var DRY_RUN=true` v `Config.gs:24` (literal const, ne Script Property) — migrace na Script Property je C-11 PROPOSED |
+| `OUTBOUND_FROM_EMAIL` | `s.fridrich@autosmartweb.cz` (default) | CONFIG | NE | Per-task override z LEADS field `sender_key` (post-pilot) |
+| `OUTBOUND_FROM_NAME` | `Sebastián z Autosmartweby` | CONFIG | NE | Display name v `From:` headeru |
+| `OUTBOUND_REPLY_TO` | `info@autosmartweb.cz` | CONFIG | NE | Centralni Reply-To pro vsechny outbound |
+| `OUTBOUND_DEFAULT_SENDER_KEY` | `sebastian` | CONFIG | NE | Default key do `SENDER_MAP_JSON` (sender keys jsou friendly slugy, nikoliv login id) |
+| `OUTBOUND_MAILBOX_ACCOUNT` | `info@autosmartweb.cz` | CONFIG | NE | Pro mailbox sync zdroj — migrace z `var EMAIL_MAILBOX_ACCOUNT` v `Config.gs:217` na Script Property |
+| `SENDER_MAP_JSON` | viz JSON nize | CONFIG | NE | JSON-encoded sender map (3 osoby × 2 fields) |
+| `FRONTEND_API_SECRET` | `<random 32+ chars>` | SECRET | **ANO** | Existuje, pres `WebAppEndpoint.gs:14` |
+| `PREVIEW_WEBHOOK_SECRET` | `<random 32+ chars>` | SECRET | **ANO** | Existuje, pres `EnvConfig.gs:105` |
+| `SERPER_API_KEY` | `<existing>` | SECRET | **ANO** | Existuje, pres `LegacyWebCheck.gs:134` |
+
+### `SENDER_MAP_JSON` (Script Property hodnota)
+
+```json
+{
+  "sebastian": {
+    "email": "s.fridrich@autosmartweb.cz",
+    "name": "Sebastián z Autosmartweby"
+  },
+  "tomas": {
+    "email": "t.maixner@autosmartweb.cz",
+    "name": "Tomáš z Autosmartweby"
+  },
+  "honza": {
+    "email": "j.bezemek@autosmartweb.cz",
+    "name": "Honza z Autosmartweby"
+  }
+}
+```
+
+> Pozn.: Klíče v `SENDER_MAP_JSON` (`sebastian` / `tomas` / `honza`) jsou **friendly slugy** pro CRM operátory (per-lead `sender_key` field). Skutečné mailbox local-party jsou `s.fridrich` / `t.maixner` / `j.bezemek`. Display name v `From:` headeru je friendly forma (`Sebastián z Autosmartweby` atd.). Tato 3-vrstvová separace (slug ≠ local-part ≠ display name) je záměrná: umožňuje budoucí změnu mailbox local-partu bez breakage CRM dat.
+
+### Marketing web ENV (`Spookybro55/ASW-MARKETING-WEB`, Vercel)
+
+| Property | Doporucena hodnota | Secret | Poznamka |
+|----------|--------------------|--------|----------|
+| `RESEND_API_KEY` | `<from Resend dashboard>` | **ANO** | Pokud `/api/contact` posila pres Resend |
+| `CONTACT_FROM_EMAIL` | `Autosmartweb <web@send.autosmartweb.cz>` (preferred, vyzaduje Resend domain `send.autosmartweb.cz` verified) NEBO `Autosmartweb <info@autosmartweb.cz>` | NE | Sender pro web kontaktni formular |
+| `CONTACT_TO_EMAIL` | `info@autosmartweb.cz` | NE | Recipient — centralni inbox |
+| `CONTACT_REPLY_TO_MODE` | `customer_email` | NE | Reply-To = email zakaznika z formulare, ne firemni adresa |
+| `NEXT_PUBLIC_SITE_URL` | `https://autosmartweb.cz` | NE | Public URL |
+
+### CRM frontend ENV (interni repo, Vercel)
+
+| Property | Doporucena hodnota | Secret | Poznamka |
+|----------|--------------------|--------|----------|
+| `ALLOWED_EMAILS` | `info@autosmartweb.cz,s.fridrich@autosmartweb.cz,t.maixner@autosmartweb.cz,j.bezemek@autosmartweb.cz,jan.bezemek8@gmail.com` | NE | **Sirsi allowlist pro interni login** — muze obsahovat osobni Gmail accounts pro Apps Script editor pristup. NE outbound sender identity. |
+| `AUTH_PASSWORD` | `<shared password>` | **ANO** | Login password (one for all users) |
+| `NEXTAUTH_SECRET` | `<random 32+ chars>` | **ANO** | HMAC session signing |
+| `APPS_SCRIPT_WEB_APP_URL` | `https://script.google.com/macros/s/<DEPLOYMENT_ID>/exec` | NE | Po manual deploy |
+| `APPS_SCRIPT_SECRET` | identical s AS Script Property `FRONTEND_API_SECRET` | **ANO** | Sdileny token |
+| `PREVIEW_WEBHOOK_SECRET` | identical s AS Script Property `PREVIEW_WEBHOOK_SECRET` | **ANO** | Sdileny token pro `/api/preview/render` |
+
+### Zakazane hodnoty
+
+- `OUTBOUND_FROM_EMAIL` / `OUTBOUND_REPLY_TO` / `CONTACT_FROM_EMAIL` / `CONTACT_TO_EMAIL` **NIKDY** `*@unipong.cz`
+- `OUTBOUND_FROM_EMAIL` / `OUTBOUND_REPLY_TO` / `CONTACT_FROM_EMAIL` **NIKDY** `*@gmail.com` (osobni Gmail)
+- Schema.org `LocalBusiness.email` na live webu **NIKDY** `*@unipong.cz` ani `*@gmail.com`
+
+### Pre-flight checklist pro outbound aktivaci
+
+| # | Krok | Vlastnik | Status |
+|---|------|----------|--------|
+| 1 | Gmail "Send mail as" alias pro vsechny 3 sendery v Apps Script editor uctu | Honza (AS owner) | NOT VERIFIED |
+| 2 | DKIM verifikace test mailem (header `Authentication-Results`) | Sebastian | NOT VERIFIED |
+| 3 | Mail-tester baseline ≥ 9/10 z kazdeho senderu | Sebastian/Tomas/Honza | NOT VERIFIED |
+| 4 | DRY_RUN guard v `OutboundEmail.gs` pred prvnim realnym sendem (Phase 3 AS-003) | Stream B | NOT VERIFIED |
+| 5 | DMARC `p=none` → `p=quarantine` migrace (po 2-4 tydnech sberu reports) | DNS admin | NOT VERIFIED |
+| 6 | GDPR cold outreach legitimni zajem dokumentace | Owner | NOT VERIFIED |
+
+---
+
 ## Triggery v Apps Script
 
 | Trigger | Typ | Frekvence | Funkce | Stav |
