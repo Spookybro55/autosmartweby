@@ -6,6 +6,46 @@
 
 ---
 
+## 2026-04-29
+
+### [B/cleanup-and-sec-016] Cleanup junk files + audit-doc reconciliation for SEC-016 (already fixed in `24e3d65`) — CODE-COMPLETE
+- **Scope:** Two unrelated cleanups bundled per the spec:
+
+**Part 1 — Junk file cleanup.** Repo accumulated 9 stray 0-byte files
+from broken codegen (shell redirect typos like `> 0)` instead of
+`> "0)"`). Per audit finding M-1. All untracked, none load-bearing.
+
+**Part 2 — SEC-016 NEXTAUTH_SECRET fail-fast.** The spec instructed
+me to implement this fix (audit's #1 P1 blocker per `12-summary.md`).
+On exploration I discovered **the fix already shipped in commit
+`24e3d65`** ("fix(pilot): NEXTAUTH_SECRET fail-fast (KROK 3, SEC-016)"):
+- `crm-frontend/src/lib/auth/session-secret.ts` exists. Validates
+  min 32 chars, throws on missing/short with a clear remediation
+  message.
+- `SESSION_SECRET` is exported as a module-level const, so the throw
+  fires at app init — not lazily on first auth request.
+- Three callsites already import it: `middleware.ts`,
+  `app/api/auth/me/route.ts`, `app/api/auth/login/route.ts`. No
+  remaining `process.env.NEXTAUTH_SECRET || ''` fallback in the repo.
+
+The audit docs (`docs/audits/FINDINGS.md`, `docs/audits/12-summary.md`)
+were stale — still listed SEC-016 as Open and as the #1 P1 blocker.
+This task reconciles the audit with reality so future readers don't
+chase a fixed problem. The status column now shows **Resolved** with
+the commit reference. The summary's P1 ranking, Wave 0 plan, and
+attacker-persona table all annotate SEC-016 as ✅ closed.
+
+Manual fail-fast verification was performed end-to-end (logic test
+6/6, build with `NEXTAUTH_SECRET=` fails loud, build with valid 48-char
+secret succeeds in 28.9 s) — concrete proof that the existing fix
+works in practice, not just by code inspection. The verification date
+is captured in the FINDINGS.md status note.
+
+**No code change.** This PR is exclusively cleanup + docs reconciliation.
+- **Owner:** Stream B
+- **Code:** `0)`, `1)`, `5`, `crm-frontend/100)`, `crm-frontend/500)`, `crm-frontend/void`, `limit)`, `maxVersion)`, ``setupPreviewExtension` `` (deleted), docs/audits/FINDINGS.md (modified), docs/audits/12-summary.md (modified)
+- **Docs:** docs/30-task-records/cleanup-and-sec-016.md, docs/audits/FINDINGS.md, docs/audits/12-summary.md, docs/11-change-log.md, docs/29-task-registry.md
+
 ## 2026-04-28
 
 ### [A/A-11-followup-rate-limit] Rate limit on scrape job dispatch — hourly per-user + daily global caps — CODE-COMPLETE
