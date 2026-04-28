@@ -1,12 +1,35 @@
 /**
  * ============================================================
  *  _OutboundDiag.gs — Outbound sender diagnostic + safe TEST send
- *  TEMPORARY FILE. Delete after verification.
  *
- *  Why: investigates the actual From address used by Gmail.sendEmail
- *  in this Apps Script project, to verify outbound flow does not
- *  leak personal/legacy account (e.g. sfridrich@unipong.cz) as
- *  the From header for client communication.
+ *  ⚠️ TEMPORARY FILE — DELETE AFTER TEST RUNTIME VERIFICATION
+ *  ⚠️ MUST BE REMOVED IN A SEPARATE CLEANUP COMMIT BEFORE FINAL MERGE
+ *  ⚠️ DO NOT KEEP THIS IN PROD — diagOutboundSafeTestSend issues real
+ *     Gmail send and the entry points have no auth check.
+ *
+ *  Lifecycle:
+ *    1. Stays in repo while owner verifies fix/outbound-sender-guard
+ *       in TEST runtime (clasp push to TEST + run from editor).
+ *    2. After TEST RUNTIME VERIFIED evidence (delivered From: header
+ *       confirmed = company alias, not @unipong.cz), file is removed
+ *       in a separate cleanup commit:
+ *         git rm apps-script/_OutboundDiag.gs
+ *       AND deleted from Apps Script project via editor UI
+ *       (clasp 3.x does not sync server-side file deletes).
+ *    3. PR #79 merges to main only after both repo-side and AS-side
+ *       deletes are confirmed. The hard guard in OutboundEmail.gs
+ *       (assertOutboundFromUsable_) remains as the permanent
+ *       protection.
+ *
+ *  Why this file exists at all (justification for being in PR #79):
+ *    The outbound From: leak was hidden behind correct Reply-To
+ *    headers (assignee per ASSIGNEE_PROFILES). Without a runtime-side
+ *    diagnostic that can read GmailApp.getAliases() and let the team
+ *    inspect the actual delivered From: header, the owner cannot
+ *    verify the fix end-to-end before flipping pilot to PROD. Local
+ *    Node tests (scripts/test-outbound-from-guard.mjs) cover the
+ *    pure resolver/guard logic; this file covers the runtime/Gmail
+ *    integration the tests cannot.
  *
  *  Two functions:
  *    diagOutboundSender()        — READ-ONLY. Logs aliases, account,
@@ -15,18 +38,24 @@
  *                                   info@autosmartweb.cz so the team
  *                                   can inspect the actual delivered
  *                                   From header. Hard-coded recipient.
+ *                                   Now uses assertOutboundFromUsable_
+ *                                   so it CANNOT send from runtime
+ *                                   account by accident — same hard
+ *                                   guard as production send path.
  *
  *  Usage (Apps Script editor):
  *    1. Run diagOutboundSender    → check log output in _asw_logs
  *                                    or in editor execution transcript
  *    2. Run diagOutboundSafeTestSend → check info@autosmartweb.cz inbox
- *    3. Delete this file after verification
+ *    3. Delete this file via editor UI (server-side) AND via cleanup
+ *       commit in repo (client-side).
  *
  *  Constraints respected:
- *    - No external recipient
+ *    - No external recipient (recipient hard-coded to info@autosmartweb.cz)
  *    - No bulk send
  *    - No mutation of LEADS / Ke kontaktování
  *    - Logs all relevant identity fields separately
+ *    - Test send goes through the same guard as production
  * ============================================================
  */
 
@@ -211,19 +240,25 @@ function diagOutboundSafeTestSend() {
 
   var body = bodyLines.join('\n');
 
-  // Build options. Try options.from if OUTBOUND_FROM_EMAIL is set AND
-  // is a registered alias; otherwise omit (Gmail will use runtime
-  // account, which is exactly what we want to detect).
+  // Use the same hard guard as production send. If From is not usable,
+  // the test refuses to send rather than leaking the runtime account.
+  var fromInfo;
+  try {
+    fromInfo = assertOutboundFromUsable_();
+  } catch (guardErr) {
+    var blockMsg = 'TEST send blocked by guard: ' + guardErr.message;
+    Logger.log(blockMsg);
+    try {
+      aswLog_('ERROR', 'diagOutboundSafeTestSend', blockMsg);
+    } catch (e) {}
+    return { ok: false, error: blockMsg };
+  }
+
   var options = {
+    from: fromInfo.from,
     replyTo: diag.config_default_reply_to_email,
     name: diag.config_default_reply_to_name
   };
-
-  var outboundFrom = diag.script_prop_outbound_from_email;
-  if (outboundFrom && outboundFrom !== '(not set)' &&
-      diag.gmail_aliases && diag.gmail_aliases.indexOf(outboundFrom) !== -1) {
-    options.from = outboundFrom;
-  }
 
   Logger.log('=== diagOutboundSafeTestSend ===');
   Logger.log('recipient: ' + INTERNAL_RECIPIENT);
@@ -235,12 +270,12 @@ function diagOutboundSafeTestSend() {
 
     var msg = 'TEST sent to ' + INTERNAL_RECIPIENT +
       '. Open inbox and inspect From: header. ' +
-      'Used options.from=' + (options.from || '(not set — runtime account)');
+      'Used options.from=' + options.from;
     Logger.log(msg);
     try {
       aswLog_('INFO', 'diagOutboundSafeTestSend', msg, {
         recipient: INTERNAL_RECIPIENT,
-        used_from: options.from || '(none)'
+        used_from: options.from
       });
     } catch (e) {}
 
