@@ -8,6 +8,7 @@
 
 | Task ID | Stream | Title | Owner | Status | Date | Affected Docs | Code Areas |
 |---------|--------|-------|-------|--------|------|---------------|------------|
+| A-11 | A | Frontend scraping trigger + history + cross-por... | Stream A | code-complete | 2026-04-28 | docs/30-task-records/A-11.md, docs/11-change-log.md, docs/29-task-registry.md | apps-script, crm-frontend, .github |
 | A1 | A | Scraping Job Input Contract | Stream A | done | 2026-04-06 | docs/23-data-model.md, docs/20-current-state.md, docs/24-automation-workflows.md, docs/30-task-records/A1.md | docs, crm-frontend |
 | A10 | A | Ingest runtime bridge — LEADS append + segment ... | Stream A | done | 2026-04-17 | docs/20-current-state.md, docs/24-automation-workflows.md, docs/30-task-records/A10.md | apps-script |
 | A2 | A | RAW_IMPORT Staging Layer | Stream A | done | 2026-04-06 | docs/20-current-state.md, docs/23-data-model.md, docs/24-automation-workflows.md, docs/30-task-records/A2.md | docs, crm-frontend |
@@ -46,4 +47,4 @@
 | CS2 | C | Navrhnout workflow orchestrator — co spousti co... | Claude | done | 2026-04-05 | docs/24-automation-workflows.md, docs/20-current-state.md | *(zadne code changes)* |
 | CS3 | C | Definovat idempotency keys, retry politiku a de... | Claude | done | 2026-04-05 | docs/24-automation-workflows.md, docs/20-current-state.md | *(zadne code changes)* |
 
-*37 tasks total.*
+*38 tasks total.*
