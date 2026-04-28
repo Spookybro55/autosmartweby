@@ -26,6 +26,138 @@
 /* ── Config ──────────────────────────────────────────────────── */
 var OUTBOUND_DOUBLE_SEND_MINUTES = 5;
 
+/* ── Sender guard ────────────────────────────────────────────── */
+// Allowed From: domain for outbound CRM email. Any other domain is
+// treated as a violation and outbound is aborted before reaching Gmail.
+// This prevents accidental leak of personal/legacy accounts (e.g.
+// sfridrich@unipong.cz) as the visible From: header to clients.
+var OUTBOUND_ALLOWED_FROM_DOMAIN_ = 'autosmartweb.cz';
+
+/**
+ * Resolve the From address that GmailApp.sendEmail should use.
+ *
+ * Pure resolver — does NOT throw. Callers (createGmailDraft_,
+ * sendGmailMessage_) must check `result.from` and refuse to proceed
+ * if it is null. The hard guard helper below (assertOutboundFromUsable_)
+ * provides the canonical refusal message.
+ *
+ * Returns: { from: string|null, registered: boolean, allowed: boolean,
+ *            configured: string, reason: string }
+ *
+ *   from        — the address to pass to options.from, or null to omit
+ *   registered  — whether `from` is in GmailApp.getAliases()
+ *   allowed     — whether `from` is on the autosmartweb.cz domain
+ *   configured  — raw value of OUTBOUND_FROM_EMAIL Script Property
+ *                 (for diagnostic / error messages)
+ *   reason      — human-readable status for logs / errors
+ *
+ * Test injection: optional `deps` argument lets tests inject
+ *   { getProperty(key), getAliases() } so the same logic can be
+ *   exercised under Node without GmailApp / PropertiesService.
+ */
+function resolveOutboundFromAddress_(deps) {
+  var d = deps || {
+    getProperty: function (key) {
+      return PropertiesService.getScriptProperties().getProperty(key);
+    },
+    getAliases: function () {
+      return GmailApp.getAliases() || [];
+    }
+  };
+
+  var configured = String(d.getProperty('OUTBOUND_FROM_EMAIL') || '').trim();
+
+  if (!configured) {
+    return {
+      from: null,
+      registered: false,
+      allowed: false,
+      configured: '',
+      reason: 'OUTBOUND_FROM_EMAIL Script Property not set'
+    };
+  }
+
+  var allowed = new RegExp('@' + OUTBOUND_ALLOWED_FROM_DOMAIN_.replace(/\./g, '\\.') + '$', 'i')
+    .test(configured);
+
+  if (!allowed) {
+    return {
+      from: null,
+      registered: false,
+      allowed: false,
+      configured: configured,
+      reason: 'OUTBOUND_FROM_EMAIL=' + configured +
+        ' is not on allowed domain @' + OUTBOUND_ALLOWED_FROM_DOMAIN_
+    };
+  }
+
+  var aliases = [];
+  try {
+    aliases = d.getAliases() || [];
+  } catch (e) {
+    return {
+      from: null,
+      registered: false,
+      allowed: true,
+      configured: configured,
+      reason: 'GmailApp.getAliases() failed: ' + e.message
+    };
+  }
+
+  var registered = aliases.indexOf(configured) !== -1;
+  if (!registered) {
+    return {
+      from: null,
+      registered: false,
+      allowed: true,
+      configured: configured,
+      reason: 'OUTBOUND_FROM_EMAIL=' + configured +
+        ' is not registered as Gmail "Send mail as" alias for runtime account'
+    };
+  }
+
+  return {
+    from: configured,
+    registered: true,
+    allowed: true,
+    configured: configured,
+    reason: 'OK'
+  };
+}
+
+/**
+ * Hard guard: throws an Error with a human-friendly Czech-EN bilingual
+ * message unless a valid, alias-registered, company-domain From address
+ * is available. Used by BOTH createGmailDraft_ AND sendGmailMessage_ so
+ * that a draft created today cannot be silently sent tomorrow with the
+ * runtime account in the From header.
+ *
+ * Throws: Error with message that the operator can act on directly
+ *         (no need to dig into logs).
+ *
+ * Test injection: same pattern as resolveOutboundFromAddress_.
+ */
+function assertOutboundFromUsable_(deps) {
+  var info = resolveOutboundFromAddress_(deps);
+  if (info.from) {
+    return info; // OK — caller can pass options.from = info.from
+  }
+
+  // Build operator-facing error message. Always names the problem,
+  // names the configured value (if any), and names the next action.
+  var msg =
+    'Outbound blocked: OUTBOUND_FROM_EMAIL is missing or not a verified ' +
+    'Gmail alias. Refusing to send from runtime account. ' +
+    'Detail: ' + info.reason + '. ' +
+    'Fix: (1) set Script Property OUTBOUND_FROM_EMAIL to a company ' +
+    '@' + OUTBOUND_ALLOWED_FROM_DOMAIN_ + ' address, ' +
+    '(2) register that address as a Gmail "Send mail as" alias for ' +
+    'the runtime account (Gmail Settings → Accounts → Send mail as → ' +
+    'Add another email address), (3) re-run the action.';
+
+  throw new Error(msg);
+}
+
 
 /* ═══════════════════════════════════════════════════════════════
    PUBLIC — Menu entry points
@@ -309,16 +441,38 @@ function createGmailDraft_(payload) {
   try {
     var sender = payload.sender || resolveSenderIdentity_(payload.assigneeEmail);
 
+    // Hard guard: same rule as send. A draft created today can be sent
+    // tomorrow by the operator from Gmail UI; if From is not pinned to
+    // a verified company alias here, the draft would still leak the
+    // runtime account in From: at send time. So refuse to even create
+    // the draft unless From is usable.
+    var fromInfo;
+    try {
+      fromInfo = assertOutboundFromUsable_();
+    } catch (guardErr) {
+      aswLog_('ERROR', 'createGmailDraft_', guardErr.message,
+        { row: payload.crmRowNum });
+      return { ok: false, error: guardErr.message };
+    }
+
+    var options = {
+      from: fromInfo.from,
+      replyTo: sender.email,
+      name: sender.name
+    };
+
     aswLog_('INFO', 'createGmailDraft_',
       'Creating draft for ' + payload.recipientEmail + ' [' + payload.subject + ']' +
-      ' replyTo=' + sender.email,
+      ' from=' + fromInfo.from +
+      ' replyTo=' + sender.email +
+      ' from_status=' + fromInfo.reason,
       { row: payload.crmRowNum });
 
     var draft = GmailApp.createDraft(
       payload.recipientEmail,
       payload.subject,
       payload.body,
-      { replyTo: sender.email, name: sender.name }
+      options
     );
 
     var draftMsg = draft.getMessage();
@@ -361,16 +515,38 @@ function sendGmailMessage_(payload) {
   try {
     var sender = payload.sender || resolveSenderIdentity_(payload.assigneeEmail);
 
+    // Hard guard: refuse to send unless OUTBOUND_FROM_EMAIL is set,
+    // points at @autosmartweb.cz domain, AND is a registered Gmail
+    // "Send mail as" alias for the runtime account. NEVER falls back
+    // to runtime account (e.g. sfridrich@unipong.cz) — this is the
+    // entire point of this guard.
+    var fromInfo;
+    try {
+      fromInfo = assertOutboundFromUsable_();
+    } catch (guardErr) {
+      aswLog_('ERROR', 'sendGmailMessage_', guardErr.message,
+        { row: payload.crmRowNum });
+      return { ok: false, error: guardErr.message };
+    }
+
+    var options = {
+      from: fromInfo.from,
+      replyTo: sender.email,
+      name: sender.name
+    };
+
     aswLog_('INFO', 'sendGmailMessage_',
       'Sending to ' + payload.recipientEmail + ' [' + payload.subject + ']' +
-      ' replyTo=' + sender.email,
+      ' from=' + fromInfo.from +
+      ' replyTo=' + sender.email +
+      ' from_status=' + fromInfo.reason,
       { row: payload.crmRowNum });
 
     GmailApp.sendEmail(
       payload.recipientEmail,
       payload.subject,
       payload.body,
-      { replyTo: sender.email, name: sender.name }
+      options
     );
 
     // Find the sent thread — search by recipient + subject
