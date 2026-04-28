@@ -238,6 +238,11 @@ var DEDUPE_BUCKET = {
 var DEDUPE_REASON = {
   HARD_DUP_ICO:              'HARD_DUP_ICO',
   HARD_DUP_DOMAIN:           'HARD_DUP_DOMAIN',
+  // A-11: cross-portal contact-based dedupe — phone + exact email
+  HARD_DUP_EMAIL:            'HARD_DUP_EMAIL',           // exact email, owned domain
+  SOFT_DUP_EMAIL_FREE:       'SOFT_DUP_EMAIL_FREE',      // exact email, free domain (gmail/seznam) — could be different person
+  REVIEW_PHONE_NAME_OK:      'REVIEW_PHONE_NAME_OK',     // phone match + name token overlap (likely same firm, but cross-portal warrants human eyes)
+  REVIEW_PHONE_NAME_DIVERGE: 'REVIEW_PHONE_NAME_DIVERGE',// phone match but very different names (franchise? call center? same firm rebranded?)
   SOFT_DUP_EMAIL_DOMAIN:     'SOFT_DUP_EMAIL_DOMAIN',
   SOFT_DUP_NAME_CITY:        'SOFT_DUP_NAME_CITY',
   REVIEW_CONFLICTING_ICO_DOMAIN: 'REVIEW_CONFLICTING_ICO_DOMAIN',
@@ -245,6 +250,80 @@ var DEDUPE_REASON = {
   REVIEW_INTRA_BATCH_T4:     'REVIEW_INTRA_BATCH_T4',
   NEW_LEAD_NO_MATCH:         'NEW_LEAD_NO_MATCH',
   NEW_LEAD_NO_KEY:           'NEW_LEAD_NO_KEY'
+};
+
+/* ── A-11: Scrape history store (hidden sheet) ──────────────
+ * Tracks every scrape job dispatched via the CRM frontend:
+ *   - request metadata (portal, query, requester)
+ *   - dispatch state (pending/dispatched/completed/failed)
+ *   - results (raw rows, imported, duplicates, review-pending)
+ *   - jobToken (per-job secret for GH Actions callback authentication)
+ *
+ * findRecentMatchingJob_ surfaces "už hledáno" alerts to the operator
+ * before a scrape is dispatched, preventing accidental duplicate spending
+ * of GH Actions minutes.
+ * ──────────────────────────────────────────────────────────── */
+var SCRAPE_HISTORY_SHEET_NAME = '_scrape_history';
+
+var SCRAPE_HISTORY_SHEET_HEADERS = [
+  'job_id',            // ASW-SCRAPE-{ts_base36}-{rand4}
+  'job_token',         // Utilities.getUuid() — per-job secret for ingest auth
+  'portal',            // 'firmy.cz' (extensible — see SUPPORTED_SCRAPE_PORTALS)
+  'segment',           // e.g. 'instalatér', 'elektrikář' — free text from operator
+  'city',              // e.g. 'Praha'
+  'district',          // e.g. 'Praha 9' or '' — optional
+  'max_results',       // integer 10..200
+  'requested_at',      // ISO timestamp
+  'requested_by',      // operator email
+  'status',            // 'pending' | 'dispatched' | 'completed' | 'failed'
+  'dispatched_at',     // ISO when GH Actions accepted the dispatch
+  'completed_at',      // ISO when ingest callback received output
+  'raw_rows_count',    // total rows scraper returned
+  'imported_count',    // NEW_LEAD rows successfully appended to LEADS
+  'duplicate_count',   // HARD_DUP* rows skipped at ingest
+  'review_count',      // SOFT_DUP* / REVIEW_* rows held in _raw_import for operator
+  'error_message'      // populated on status='failed'
+];
+
+/* ── A-11: Supported scrape portals ─────────────────────────
+ * Portal enum drives:
+ *   - frontend dropdown (crm-frontend/src/types/scrape.ts mirrors this)
+ *   - WebAppEndpoint validation (rejects unknown portals)
+ *   - GH Actions workflow_dispatch input enum
+ *
+ * Adding a new portal requires:
+ *   1. Append here
+ *   2. Mirror in crm-frontend/src/types/scrape.ts SUPPORTED_SCRAPE_PORTALS
+ *   3. Add parser in scripts/scraper/lib/{portal}-parser.mjs
+ *   4. Update scrape.yml workflow to dispatch to the new portal's CLI
+ *      OR add `--portal` arg dispatch in firmy-cz.mjs (rename to scraper.mjs)
+ *
+ * 'firmy.cz' is the only fully-implemented portal as of A-11.
+ * 'zivefirmy.cz' is reserved for the next portal expansion.
+ * ──────────────────────────────────────────────────────────── */
+var SUPPORTED_SCRAPE_PORTALS = ['firmy.cz'];
+
+var SCRAPE_JOB_STATUS = {
+  PENDING:     'pending',
+  DISPATCHED:  'dispatched',
+  COMPLETED:   'completed',
+  FAILED:      'failed'
+};
+
+/* ── A-11: Extension column for review queue tracking on _raw_import ─
+ * processRawImportBatch_ sets these on rows that need operator review
+ * (SOFT_DUPLICATE / REVIEW). The frontend /scrape/review page reads
+ * status='pending_review' rows, surfaces side-by-side comparison with
+ * the matched LEAD row, captures the operator's decision (import/merge/skip).
+ *
+ * 'pending_review' is a new value added to the existing _raw_import
+ * `normalized_status` column lifecycle. See A-02 schema.
+ * ──────────────────────────────────────────────────────────── */
+var RAW_IMPORT_REVIEW_STATUS = {
+  PENDING_REVIEW: 'pending_review',  // dedupe flagged it, awaiting human
+  REVIEW_IMPORT:  'review_import',   // operator decided "import as new"
+  REVIEW_MERGE:   'review_merge',    // operator decided "merge into existing lead"
+  REVIEW_SKIP:    'review_skip'      // operator decided "skip, it's a duplicate"
 };
 
 /* ── Qualification keywords ───────────────────────────────── */

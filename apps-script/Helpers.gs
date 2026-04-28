@@ -335,6 +335,88 @@ function normalizePhone_(phone) {
   return String(phone || '').replace(/[^\d+]/g, '').trim();
 }
 
+/**
+ * A-11: Normalize a phone number to canonical E.164-compatible form for
+ * exact-match dedupe. Handles common Czech variants:
+ *   '+420 601 557 018' → '+420601557018'
+ *   '00420 601 557 018' → '+420601557018'
+ *   '601 557 018'       → '+420601557018'  (CZ default)
+ *   '601-557-018'       → '+420601557018'
+ *   '(00420) 601557018' → '+420601557018'
+ * Returns '' if input doesn't normalize to a plausible phone (< 9 digits
+ * after country code, or non-digit chars remaining).
+ *
+ * Two same-input strings → identical output. Two different formats of the
+ * same number → identical output. Dedupe uses this as hash key.
+ */
+function normalizePhoneE164_(phone) {
+  var digits = String(phone || '').replace(/[^\d+]/g, '').trim();
+  if (!digits) return '';
+
+  // 00420… → +420…
+  if (digits.indexOf('00') === 0) digits = '+' + digits.substring(2);
+
+  if (digits.charAt(0) === '+') {
+    // Already has country code
+    var bare = digits.substring(1);
+    if (bare.length < 11 || bare.length > 15) return '';  // E.164 length bounds
+    return '+' + bare;
+  }
+
+  // No prefix — assume CZ if 9 digits (typical CZ mobile/landline)
+  if (digits.length === 9) return '+420' + digits;
+
+  // 12-digit form '420601557018' (no plus, no zeros)
+  if (digits.length === 12 && digits.indexOf('420') === 0) return '+' + digits;
+
+  // Anything else: too short or too long without prefix — ambiguous, skip
+  return '';
+}
+
+/**
+ * A-11: Normalize an email for exact-match dedupe.
+ *   - lowercase
+ *   - strip leading/trailing whitespace
+ *   - strip plus-aliases ('info+leads@firma.cz' → 'info@firma.cz')
+ *
+ * Returns '' if input is not a syntactically plausible email (no '@',
+ * empty localpart, empty domain).
+ *
+ * Note: gmail-style dot-stripping in localpart NOT implemented — would
+ * over-collapse legitimately distinct accounts in non-gmail providers.
+ */
+function normalizeEmail_(email) {
+  var s = String(email || '').trim().toLowerCase();
+  if (!s || s.indexOf('@') === -1) return '';
+  var parts = s.split('@');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return '';
+  var local = parts[0];
+  var domain = parts[1];
+  // Strip plus-aliases
+  var plusIdx = local.indexOf('+');
+  if (plusIdx > 0) local = local.substring(0, plusIdx);
+  if (!local) return '';
+  // Domain sanity — must have at least one dot
+  if (domain.indexOf('.') === -1) return '';
+  return local + '@' + domain;
+}
+
+/**
+ * A-11: Check whether an email's domain is in FREE_EMAIL_DOMAINS
+ * (gmail.com, seznam.cz, …). Used by dedupe to decide whether an
+ * exact email match is HARD (owned domain) or SOFT (free domain —
+ * gmail addresses can belong to anyone, soft signal only).
+ */
+function isFreeEmailDomain_(email) {
+  var normalized = normalizeEmail_(email);
+  if (!normalized) return false;
+  var domain = normalized.split('@')[1];
+  for (var i = 0; i < FREE_EMAIL_DOMAINS.length; i++) {
+    if (domain === FREE_EMAIL_DOMAINS[i]) return true;
+  }
+  return false;
+}
+
 function trimLower_(val) {
   return String(val == null ? '' : val).trim().toLowerCase();
 }
