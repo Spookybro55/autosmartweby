@@ -8,6 +8,7 @@
 
 | Task ID | Stream | Title | Owner | Status | Date | Affected Docs | Code Areas |
 |---------|--------|-------|-------|--------|------|---------------|------------|
+| A-11-followup-failed-visibility-and-docs | A | Failed jobs visibility in /scrape table + apps-... | Stream A | code-complete | 2026-04-29 | docs/30-task-records/A-11-followup-failed-visibility-and-docs.md, docs/11-change-log.md, docs/29-task-registry.md | crm-frontend |
 | A-11-followup-rate-limit | A | Rate limit on scrape job dispatch — hourly per-... | Stream A | code-complete | 2026-04-28 | docs/30-task-records/A-11-followup-rate-limit.md, docs/11-change-log.md, docs/29-task-registry.md | apps-script, crm-frontend, scripts |
 | A-11-followup-resolve-review-idempotence | A | handleResolveReview_ idempotence guard — block ... | Stream A | code-complete | 2026-04-28 | docs/30-task-records/A-11-followup-resolve-review-idempotence.md, docs/11-change-log.md, docs/29-task-registry.md | apps-script, crm-frontend, scripts |
 | A-11-followup-stale-job-reaper | A | Stale scrape job reaper — flip stuck pending/di... | Stream A | code-complete | 2026-04-28 | docs/30-task-records/A-11-followup-stale-job-reaper.md, docs/11-change-log.md, docs/29-task-registry.md | apps-script, scripts |
@@ -50,4 +51,4 @@
 | CS2 | C | Navrhnout workflow orchestrator — co spousti co... | Claude | done | 2026-04-05 | docs/24-automation-workflows.md, docs/20-current-state.md | *(zadne code changes)* |
 | CS3 | C | Definovat idempotency keys, retry politiku a de... | Claude | done | 2026-04-05 | docs/24-automation-workflows.md, docs/20-current-state.md | *(zadne code changes)* |
 
-*41 tasks total.*
+*42 tasks total.*

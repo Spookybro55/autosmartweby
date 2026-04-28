@@ -6,6 +6,46 @@
 
 ---
 
+## 2026-04-29
+
+### [A/A-11-followup-failed-visibility-and-docs] Failed jobs visibility in /scrape table + apps-script-endpoint.gs.example refresh — CODE-COMPLETE
+- **Scope:** A-11 has been hardened by three followup PRs (#77 reaper, #78 idempotence,
+#80 rate limit). The reaper writes `error_message='timeout_no_callback'`
+into `_scrape_history` rows it flips, and ingest callbacks write upstream
+error strings on genuine failures. Frontend `/scrape` history table had
+inline status colors but rendered the error indicator as a separate
+`⚠ chyba` element with a native `title` attribute — inconsistent with
+the rest of the codebase, no styling, no centralized state-color logic.
+
+This PR does two things:
+
+1. **Failed jobs visibility** — extracts the inline status pill into
+   a reusable `ScrapeStatusBadge` component using the project's
+   `@base-ui/react/tooltip` primitive (consistent with
+   `lead-detail-drawer.tsx` pattern). On `failed` rows with a non-empty
+   `error_message`, the badge becomes its own tooltip trigger;
+   the redundant `⚠ chyba` adornment is removed.
+2. **`apps-script-endpoint.gs.example` refresh** — onboarding sketch
+   had drifted to a single stale action (`updateLead`) while
+   `WebAppEndpoint.gs` grew to 19 actions across B-13 + Phase 2 + A-11.
+   Refreshed with banner pointing to canonical source + sync commit
+   SHA, full action list grouped by feature, request/response contract,
+   HTTP status mapping documentation (mirrors PRs #76, #78, #80), and
+   one representative handler stub commented as scaffolding only.
+
+Both fixes share the visibility/onboarding theme so they bundle
+cleanly under one task record + one changelog entry.
+
+**Backend untouched.** Verified during exploration: `stripJobInternal_`
+spreads all fields except `_rowNum` + `job_token`, so `error_message`
+already reaches the frontend without any AS change. `ScrapeJob` type
+already declares `error_message: string`. Writer wrapper passes
+`data.history` through without per-field destructure. Only frontend
++ docs in this PR.
+- **Owner:** Stream A
+- **Code:** crm-frontend/src/components/scrape/scrape-status-badge.tsx (new), crm-frontend/src/components/scrape/scrape-history-table.tsx (modified), crm-frontend/src/lib/google/apps-script-endpoint.gs.example (rewritten)
+- **Docs:** docs/30-task-records/A-11-followup-failed-visibility-and-docs.md, docs/11-change-log.md, docs/29-task-registry.md
+
 ## 2026-04-28
 
 ### [A/A-11-followup-rate-limit] Rate limit on scrape job dispatch — hourly per-user + daily global caps — CODE-COMPLETE

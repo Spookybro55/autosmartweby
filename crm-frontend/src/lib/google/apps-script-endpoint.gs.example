@@ -1,10 +1,70 @@
 /**
- * Apps Script Web App endpoint for CRM Frontend write-back.
+ * ⚠️ This is a SKETCH for onboarding only — NOT a maintained copy.
  *
- * Deploy as: Web App → Execute as: Me → Access: Anyone (with token verification)
+ * Canonical source: apps-script/WebAppEndpoint.gs (19 actions, see list below)
+ * Last synced with WebAppEndpoint.gs at: 1eacdb9
  *
- * Add this to your existing Apps Script project alongside the current code.
- * It reuses the existing write-back logic from ContactSheet.gs.
+ * If you're implementing a NEW doPost action, READ THE CANONICAL FILE FIRST.
+ * This example shows the routing pattern + token check, not all branches.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ *  Action contract (request/response shape)
+ * ─────────────────────────────────────────────────────────────────────────
+ *   Request:  { action: <string>, token: <FRONTEND_API_SECRET>, ...payload }
+ *   Response: { ok: <bool>, error?: <string>, details?: <object>, ...result }
+ *
+ *   Error codes (canonical Czech-labeled set):
+ *     - crm-frontend/src/types/scrape.ts:
+ *         TRIGGER_SCRAPE_ERROR_CODES, RESOLVE_REVIEW_ERROR_CODES
+ *     - Per-handler validation strings ('missing_*', 'invalid_*', '*_not_found')
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ *  HTTP status mapping (handled by Vercel routes, not by Apps Script)
+ * ─────────────────────────────────────────────────────────────────────────
+ *   AS returns                              Vercel route returns
+ *   ─────────────────                       ────────────────────
+ *   { ok: true, ... }                    →  200
+ *   { ok: false, error: 'raw_import_not_found' }
+ *                                        →  404
+ *   { ok: false, error: 'already_resolved' }
+ *                                        →  409  (PR #78)
+ *   { ok: true, duplicate: true }        →  409  (PR #76 duplicate query)
+ *   { ok: false, error: 'rate_limit_exceeded', details: {...} }
+ *                                        →  429 + Retry-After header (PR #80)
+ *   { ok: false, error: <other> }        →  502 (AS reachable, returned error)
+ *   AS unreachable / network error       →  500 / 502
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ *  Full action list (snapshot at sync commit above)
+ * ─────────────────────────────────────────────────────────────────────────
+ *  Lead management:
+ *    updateLead, assignLead
+ *
+ *  Preview pipeline (Phase 2):
+ *    getPreview, generatePreview, sendEmail
+ *
+ *  Email templates (B-13):
+ *    listTemplates, getTemplate, getTemplateDraft, getTemplateHistory,
+ *    saveTemplateDraft, discardTemplateDraft, publishTemplate,
+ *    getTemplateAnalytics, regenerateDraft
+ *
+ *  Scraping pipeline (A-11 + followups):
+ *    triggerScrape, ingestScrapedRows, listScrapeHistory,
+ *    listPendingReview, resolveReview
+ *
+ *  Total: 19 actions. Add new ones to apps-script/WebAppEndpoint.gs and
+ *  update this comment + the sync commit hash above.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ *  Deployment
+ * ─────────────────────────────────────────────────────────────────────────
+ *  Apps Script editor → Deploy → New deployment → Web App
+ *    Execute as:  Me (the deploying account)
+ *    Access:      Anyone   (token verification gates real auth)
+ *
+ *  Required Script Property: FRONTEND_API_SECRET
+ *    apps-script/.clasp.json scriptId is TEST by default; do clasp push
+ *    only after merge to main, then manually swap scriptId for PROD.
  */
 
 var FRONTEND_SECRET = PropertiesService.getScriptProperties().getProperty('FRONTEND_API_SECRET');
@@ -13,86 +73,68 @@ function doPost(e) {
   try {
     var payload = JSON.parse(e.postData.contents);
 
-    // Verify token
-    if (payload.token !== FRONTEND_SECRET) {
-      return ContentService.createTextOutput(JSON.stringify({
-        success: false, error: 'Unauthorized'
-      })).setMimeType(ContentService.MimeType.JSON);
+    // ── Token check (first; rejects unauthenticated calls) ──
+    if (!FRONTEND_SECRET || payload.token !== FRONTEND_SECRET) {
+      return jsonResponse_({ ok: false, error: 'Unauthorized' });
     }
 
-    if (payload.action === 'updateLead') {
-      return handleUpdateLead_(payload);
-    }
+    // ── Lead management ──
+    if (payload.action === 'updateLead')   return handleUpdateLead_(payload);
+    if (payload.action === 'assignLead')   return handleAssignLead_(payload);
 
-    return ContentService.createTextOutput(JSON.stringify({
-      success: false, error: 'Unknown action'
-    })).setMimeType(ContentService.MimeType.JSON);
+    // ── Preview pipeline (Phase 2) ──
+    if (payload.action === 'getPreview')      return handleGetPreview_(payload);
+    if (payload.action === 'generatePreview') return handleGeneratePreview_(payload);
+    if (payload.action === 'sendEmail')       return handleSendEmail_(payload);
+
+    // ── Email templates (B-13) ──
+    if (payload.action === 'listTemplates')        return handleListTemplates_(payload);
+    if (payload.action === 'getTemplate')          return handleGetTemplate_(payload);
+    if (payload.action === 'getTemplateDraft')     return handleGetTemplateDraft_(payload);
+    if (payload.action === 'getTemplateHistory')   return handleGetTemplateHistory_(payload);
+    if (payload.action === 'saveTemplateDraft')    return handleSaveTemplateDraft_(payload);
+    if (payload.action === 'discardTemplateDraft') return handleDiscardTemplateDraft_(payload);
+    if (payload.action === 'publishTemplate')      return handlePublishTemplate_(payload);
+    if (payload.action === 'getTemplateAnalytics') return handleGetTemplateAnalytics_(payload);
+    if (payload.action === 'regenerateDraft')      return handleRegenerateDraft_(payload);
+
+    // ── Scraping pipeline (A-11) ──
+    if (payload.action === 'triggerScrape')      return handleTriggerScrape_(payload);
+    if (payload.action === 'ingestScrapedRows')  return handleIngestScrapedRows_(payload);
+    if (payload.action === 'listScrapeHistory')  return handleListScrapeHistory_(payload);
+    if (payload.action === 'listPendingReview')  return handleListPendingReview_(payload);
+    if (payload.action === 'resolveReview')      return handleResolveReview_(payload);
+
+    return jsonResponse_({ ok: false, error: 'Unknown action: ' + payload.action });
 
   } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({
-      success: false, error: err.message
-    })).setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-function handleUpdateLead_(payload) {
-  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  var leadsSheet = ss.getSheetByName(MAIN_SHEET_NAME);
-  var rowNumber = payload.rowNumber;
-  var fields = payload.fields;
-
-  // Validate row number
-  if (!rowNumber || rowNumber < 2) {
-    return jsonResponse_({ success: false, error: 'Invalid row number' });
-  }
-
-  // Identity verification — same as onContactSheetEdit
-  var headers = leadsSheet.getRange(1, 1, 1, leadsSheet.getLastColumn()).getValues()[0];
-  var rowData = leadsSheet.getRange(rowNumber, 1, 1, leadsSheet.getLastColumn()).getValues()[0];
-
-  var nameIdx = headers.indexOf('business_name');
-  var cityIdx = headers.indexOf('city');
-
-  if (rowData[nameIdx] !== payload.businessName || rowData[cityIdx] !== payload.city) {
-    return jsonResponse_({ success: false, error: 'Identity verification failed' });
-  }
-
-  // Lock to prevent concurrent writes
-  var lock = LockService.getScriptLock();
-  if (!lock.tryLock(5000)) {
-    return jsonResponse_({ success: false, error: 'Could not acquire lock' });
-  }
-
-  try {
-    // Write each field to its corresponding LEADS column
-    var fieldMap = {
-      'outreach_stage': 'outreach_stage',
-      'next_action': 'next_action',
-      'last_contact_at': 'last_contact_at',
-      'next_followup_at': 'next_followup_at',
-      'sales_note': 'sales_note'
-    };
-
-    for (var fieldKey in fields) {
-      if (!fieldMap[fieldKey]) continue;
-
-      var colHeader = fieldMap[fieldKey];
-      var colIdx = headers.indexOf(colHeader);
-      if (colIdx === -1) continue;
-
-      var value = fields[fieldKey];
-      leadsSheet.getRange(rowNumber, colIdx + 1).setValue(value);
-    }
-
-    aswLog_('FRONTEND_WRITE', 'Updated row ' + rowNumber + ': ' + JSON.stringify(Object.keys(fields)));
-
-    return jsonResponse_({ success: true });
-  } finally {
-    lock.releaseLock();
+    return jsonResponse_({ ok: false, error: err.message });
   }
 }
 
 function jsonResponse_(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj))
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+//  Representative handler example — REAL implementation lives in
+//  apps-script/WebAppEndpoint.gs:handleUpdateLead_. Do NOT copy from here.
+// ─────────────────────────────────────────────────────────────────────────
+//
+// function handleUpdateLead_(payload) {
+//   // 1. Validate identifying fields (leadId, fields object).
+//   // 2. Acquire LockService.getScriptLock() — concurrent-write protection.
+//   // 3. Lookup row by lead_id (linear scan; LEADS sheet is small).
+//   // 4. Verify identity (business_name + city must match payload to detect
+//   //    out-of-date row references — same gate as onContactSheetEdit).
+//   // 5. Whitelist-update only mergeable fields (outreach_stage, sales_note,
+//   //    next_action, next_followup_at, last_contact_at). Reject others.
+//   // 6. aswLog_('FRONTEND_WRITE', ...).
+//   // 7. Return jsonResponse_({ ok: true, ... }).
+//   //
+//   // Errors: { ok: false, error: <code>, details?: {...} }
+//   //   missing_leadId / invalid_fields / lead_not_found / identity_mismatch /
+//   //   lock_timeout / write_failed
+// }
