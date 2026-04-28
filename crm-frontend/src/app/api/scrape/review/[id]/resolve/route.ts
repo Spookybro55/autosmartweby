@@ -8,6 +8,7 @@ import type { ReviewDecision } from '@/types/scrape';
  *
  * 400 — invalid decision or body shape
  * 404 — raw_import row not found
+ * 409 — already_resolved (A-11 followup idempotence guard); body forwards `details`
  * 502 — AS upstream failure
  */
 export async function POST(
@@ -39,6 +40,12 @@ export async function POST(
       const code = String(result.error ?? '');
       if (code === 'raw_import_not_found') {
         return NextResponse.json({ error: code }, { status: 404 });
+      }
+      if (code === 'already_resolved') {
+        return NextResponse.json(
+          { error: code, details: result.details ?? null },
+          { status: 409 },
+        );
       }
       return NextResponse.json({ error: code || 'resolve_failed' }, { status: 502 });
     }

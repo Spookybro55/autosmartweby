@@ -655,6 +655,8 @@ export interface ResolveReviewWriterResult {
   success: boolean;
   data?: ResolveReviewResponse;
   error?: string;
+  /** Present alongside error='already_resolved' (A-11 followup idempotence guard). */
+  details?: Record<string, unknown>;
 }
 
 export async function resolveReview(input: ResolveReviewInput): Promise<ResolveReviewWriterResult> {
@@ -689,7 +691,11 @@ export async function resolveReview(input: ResolveReviewInput): Promise<ResolveR
         },
       };
     }
-    return { success: false, error: data.error ?? 'Apps Script returned ok=false' };
+    return {
+      success: false,
+      error: data.error ?? 'Apps Script returned ok=false',
+      details: data.details,
+    };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
   }

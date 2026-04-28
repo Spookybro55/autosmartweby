@@ -16,6 +16,8 @@ import {
   type DedupeReviewItem,
   type ReviewDecision,
   dedupeReasonLabel,
+  RESOLVE_REVIEW_ERROR_CODES,
+  RESOLVE_REVIEW_ERROR_LABELS,
 } from '@/types/scrape';
 
 interface Props {
@@ -23,6 +25,10 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   item: DedupeReviewItem | null;
   onResolved: (rawImportId: string, decision: ReviewDecision) => void;
+  /** A-11 followup: invoked when server returns `already_resolved`. Parent
+   * should refetch the queue to reconcile any other rows resolved by another
+   * operator since last fetch. Optional — falls back to onResolved-only. */
+  onAlreadyResolved?: () => void | Promise<void>;
 }
 
 /** Field display order for side-by-side. Same order on both sides. */
@@ -49,7 +55,13 @@ function fmtVal(v: unknown): string {
   return String(v);
 }
 
-export function DedupeReviewDialog({ open, onOpenChange, item, onResolved }: Props) {
+export function DedupeReviewDialog({
+  open,
+  onOpenChange,
+  item,
+  onResolved,
+  onAlreadyResolved,
+}: Props) {
   const [decision, setDecision] = useState<ReviewDecision | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [confirmDifferent, setConfirmDifferent] = useState(false);
@@ -82,7 +94,22 @@ export function DedupeReviewDialog({ open, onOpenChange, item, onResolved }: Pro
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(data.error ?? 'Operace selhala');
+        const code = String(data.error ?? '');
+        // A-11 followup: idempotence guard — another operator (or a stale
+        // double-submit from this client) already resolved this row. The
+        // server short-circuited; reconcile local UI by removing the row
+        // from the queue and asking the parent to refetch in case other
+        // rows are also stale.
+        if (code === RESOLVE_REVIEW_ERROR_CODES.ALREADY_RESOLVED) {
+          toast.error(RESOLVE_REVIEW_ERROR_LABELS.already_resolved + ' Obnovuji frontu…');
+          onResolved(item.raw_import_id, d);
+          if (onAlreadyResolved) {
+            try { await onAlreadyResolved(); } catch { /* surfaced by parent */ }
+          }
+          onOpenChange(false);
+          return;
+        }
+        toast.error(RESOLVE_REVIEW_ERROR_LABELS[code] ?? data.error ?? 'Operace selhala');
         return;
       }
       const msg =

@@ -8,6 +8,43 @@
 
 ## 2026-04-28
 
+### [A/A-11-followup-resolve-review-idempotence] handleResolveReview_ idempotence guard — block double-submit before LEADS duplication — CODE-COMPLETE
+- **Scope:** A-11 (PR #76) shipped the `/scrape/review` queue and the
+`POST /api/scrape/review/[id]/resolve` route, backed by
+`handleResolveReview_` in Apps Script. The frontend dialog uses
+`disabled={submitting}` to suppress accidental double-clicks, but **the
+server has no idempotence guard** — it is the contract boundary and must
+enforce.
+
+The real failure mode is `decision='import'`: the second call would re-run
+`appendLeadRow_` and create a **duplicate row in LEADS** (data integrity
+violation). `decision='skip'` and `decision='merge'` second-calls are
+benign in practice (skip is a no-op overwrite of `updated_at`; merge has
+an existing no-clobber whitelist), but inconsistent — they should also be
+rejected so the API has uniform semantics.
+
+This task adds a single guard at the top of `handleResolveReview_` (after
+input validation + row lookup, before decision-specific branches) that
+mirrors the `listPendingReview` filter exactly: a row is resolvable iff
+both `normalized_status === 'duplicate_candidate'` AND
+`import_decision === 'pending_review'`. After any of the three resolutions,
+both fields flip to terminal values, so the second call short-circuits
+with `error: 'already_resolved'` + structured `details` (current_status,
+current_decision, resolved_at).
+
+Frontend mirrors the new error code: route returns 409 Conflict, writer
+forwards `details`, dialog shows a Czech toast ("Tento záznam už byl
+vyřešen jiným operátorem. Obnovuji frontu…"), removes the stale row
+locally, triggers a full refetch via a new optional `onAlreadyResolved`
+prop wired from the page component, and closes the dialog.
+
+Production has not hit this yet (no review queue activity to date). This
+is a preventive fix before the queue is used at scale or by multiple
+operators.
+- **Owner:** Stream A
+- **Code:** apps-script/WebAppEndpoint.gs (modified), crm-frontend/src/types/scrape.ts (modified), crm-frontend/src/lib/google/apps-script-writer.ts (modified), crm-frontend/src/app/api/scrape/review/[id]/resolve/route.ts (modified), crm-frontend/src/components/scrape/dedupe-review-dialog.tsx (modified), crm-frontend/src/app/scrape/review/page.tsx (modified), scripts/test-resolve-review-idempotence.mjs (new)
+- **Docs:** docs/30-task-records/A-11-followup-resolve-review-idempotence.md, docs/11-change-log.md, docs/29-task-registry.md
+
 ### [A/A-11-followup-stale-job-reaper] Stale scrape job reaper — flip stuck pending/dispatched jobs to failed — CODE-COMPLETE
 - **Scope:** A-11 (PR #76) shipped the scraping pipeline; first successful production run on
 2026-04-27 19:06 imported 14 leads from Turnov correctly. However, a second job

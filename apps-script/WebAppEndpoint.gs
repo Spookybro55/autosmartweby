@@ -849,6 +849,35 @@ function handleResolveReview_(payload) {
     }
     if (foundRow < 0) return jsonResponse_({ ok: false, error: 'raw_import_not_found' });
 
+    // A-11 followup: idempotence guard. Frontend has disabled={submitting},
+    // but server is the contract boundary — must enforce. Without this,
+    // a double-submit on decision='import' would call appendLeadRow_ twice
+    // and create a duplicate LEADS row.
+    //
+    // Gate mirrors listPendingReview filter exactly (lines 771-772): a row
+    // is resolvable iff it is still surfaced in the queue. After any of the
+    // three decisions, normalized_status flips to review_{skip,merge,import}
+    // and import_decision flips to {rejected_review_skip, merged_into_existing,
+    // imported_after_review} — neither of which matches the gate, so a second
+    // call short-circuits here.
+    var currentNormStatus = String(data[foundRow][colIdx['normalized_status']] || '').trim();
+    var currentDecision = String(data[foundRow][colIdx['import_decision']] || '').trim();
+    if (currentNormStatus !== 'duplicate_candidate' || currentDecision !== 'pending_review') {
+      var currentUpdatedAt = String(data[foundRow][colIdx['updated_at']] || '').trim();
+      aswLog_('WARN', 'handleResolveReview_',
+        'already_resolved ' + rawImportId +
+        ' status=' + currentNormStatus + ' decision=' + currentDecision);
+      return jsonResponse_({
+        ok: false,
+        error: 'already_resolved',
+        details: {
+          current_status: currentNormStatus,
+          current_decision: currentDecision || null,
+          resolved_at: currentUpdatedAt || null
+        }
+      });
+    }
+
     var sheetRowNum = foundRow + 1;
     var nowIso = new Date().toISOString();
     var actor = (Session.getActiveUser().getEmail() || 'system').toLowerCase();
