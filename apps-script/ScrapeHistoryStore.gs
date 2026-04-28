@@ -360,3 +360,140 @@ function setupScrapeHistory() {
   aswLog_('INFO', 'setupScrapeHistory', msg.replace(/\n/g, ' | '));
   safeAlert_(msg);
 }
+
+
+/* ═══════════════════════════════════════════════════════════════
+   reapStaleScrapeJobs_ — flip stuck pending/dispatched jobs to failed
+   ═══════════════════════════════════════════════════════════════
+   Production observed scrape job ASW-SCRAPE-mohz79iu-08zq registered
+   as pending at 2026-04-28T01:57:16Z but never dispatched and never
+   received its failure callback. With no cleanup mechanism, such rows
+   stay 'pending' forever and pollute findRecentMatchingJob_ matches.
+
+   This reaper finds rows where:
+     status ∈ {pending, dispatched}  AND  requested_at < now - STALE_JOB_TIMEOUT_MIN
+   and flips them to:
+     status = failed
+     error_message = 'timeout_no_callback'
+     completed_at = now
+
+   Idempotent: a second run produces no further changes (stale rows
+   are now 'failed' and no longer match the predicate).
+
+   Defensive: rows with missing/unparseable requested_at are SKIPPED
+   (logged as warning, not flipped) — could be schema mismatch from
+   an older row, safer to leave alone than to corrupt audit trail.
+
+   Lock-protected against concurrent updateScrapeJobStatus_ calls
+   from ingestScrapedRows callbacks (same lock pattern as recordScrapeJob_).
+
+   Registered as hourly trigger in installProjectTriggers and exposed
+   via Menu (manualReapStuckJob) for operator-initiated cleanup.
+
+   @returns {{reaped: number, ids: string[], skipped: number}}
+   ═══════════════════════════════════════════════════════════════ */
+
+function reapStaleScrapeJobs_() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) {
+    throw new Error('Could not acquire lock for reapStaleScrapeJobs_');
+  }
+
+  try {
+    var cutoffMs = Date.now() - (STALE_JOB_TIMEOUT_MIN * 60 * 1000);
+    var nowIso = new Date().toISOString();
+
+    var sheet = ensureScrapeHistorySheet_();
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) {
+      return { reaped: 0, ids: [], skipped: 0 };
+    }
+
+    var values = sheet.getRange(2, 1, lastRow - 1, SCRAPE_HISTORY_SHEET_HEADERS.length)
+      .getValues();
+
+    var reapedIds = [];
+    var skipped = 0;
+
+    for (var i = 0; i < values.length; i++) {
+      try {
+        var job = rowToScrapeJob_(values[i], i + 2);
+        if (!job) continue;
+
+        // Only pending/dispatched are candidates for reaping; completed/failed
+        // are terminal states and must never be touched (idempotence guarantee).
+        if (job.status !== SCRAPE_JOB_STATUS.PENDING &&
+            job.status !== SCRAPE_JOB_STATUS.DISPATCHED) {
+          continue;
+        }
+
+        // Defensive parse — bail on this row if requested_at is unusable.
+        if (!job.requested_at) {
+          aswLog_('WARN', 'reapStaleScrapeJobs_',
+            'Skipped row ' + (i + 2) + ' (' + job.job_id + '): empty requested_at');
+          skipped++;
+          continue;
+        }
+        var requestedMs = new Date(job.requested_at).getTime();
+        if (isNaN(requestedMs)) {
+          aswLog_('WARN', 'reapStaleScrapeJobs_',
+            'Skipped row ' + (i + 2) + ' (' + job.job_id + '): unparseable requested_at="' +
+            job.requested_at + '"');
+          skipped++;
+          continue;
+        }
+
+        if (requestedMs >= cutoffMs) continue;  // not stale yet
+
+        // Route through the same path as other status changes so headers/columns
+        // stay consistent with recordScrapeJob_ and ingestScrapedRows callbacks.
+        updateScrapeJobStatus_(job.job_id, {
+          status:        SCRAPE_JOB_STATUS.FAILED,
+          error_message: 'timeout_no_callback',
+          completed_at:  nowIso
+        });
+        reapedIds.push(job.job_id);
+      } catch (rowErr) {
+        // One bad row must not stop the reaper.
+        aswLog_('WARN', 'reapStaleScrapeJobs_',
+          'Row ' + (i + 2) + ' raised — skipping: ' + (rowErr && rowErr.message ? rowErr.message : rowErr));
+        skipped++;
+      }
+    }
+
+    aswLog_('INFO', 'reapStaleScrapeJobs_',
+      'Reaped ' + reapedIds.length + ' stale jobs' +
+      (reapedIds.length ? (' [' + reapedIds.join(', ') + ']') : '') +
+      (skipped ? (' | skipped=' + skipped) : ''));
+
+    return { reaped: reapedIds.length, ids: reapedIds, skipped: skipped };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   manualReapStuckJob — Menu companion for reapStaleScrapeJobs_
+   ═══════════════════════════════════════════════════════════════
+   Operator escape hatch: run the reaper immediately instead of
+   waiting up to an hour for the time-driven trigger to fire.
+   Shows a UI alert with the result.
+   ═══════════════════════════════════════════════════════════════ */
+
+function manualReapStuckJob() {
+  var ui = SpreadsheetApp.getUi();
+  var result = reapStaleScrapeJobs_();
+  if (result.reaped === 0) {
+    var msg = 'Žádné zaseknuté scrape joby nenalezeny.';
+    if (result.skipped) {
+      msg += '\n\n(Přeskočeno ' + result.skipped + ' řádků s nečitelným requested_at — viz _asw_logs.)';
+    }
+    ui.alert(msg);
+  } else {
+    ui.alert(
+      'Označeno ' + result.reaped + ' zaseknutých jobů jako failed.\n\n' +
+      'Job IDs:\n' + result.ids.join('\n')
+    );
+  }
+}
