@@ -8,6 +8,35 @@
 
 ## 2026-04-28
 
+### [A/A-11-followup-stale-job-reaper] Stale scrape job reaper — flip stuck pending/dispatched jobs to failed — CODE-COMPLETE
+- **Scope:** A-11 (PR #76) shipped the scraping pipeline; first successful production run on
+2026-04-27 19:06 imported 14 leads from Turnov correctly. However, a second job
+`ASW-SCRAPE-mohz79iu-08zq` registered at 2026-04-28T01:57:16Z (UTC) by
+`recordScrapeJob_` was never dispatched and never received a callback. Status
+stayed `pending` forever, polluting `findRecentMatchingJob_` matches and the
+history UI. Same pattern observed earlier with the initial-deploy "Malformed URL"
+failure — when the failure callback itself fails, the row becomes terminal junk
+with no cleanup mechanism.
+
+This task adds the missing reaper: a time-driven function that finds rows with
+status ∈ {pending, dispatched} older than `STALE_JOB_TIMEOUT_MIN` (30 min) and
+flips them to `failed` with `error_message='timeout_no_callback'` and a
+`completed_at` timestamp. Idempotent (terminal states are never touched).
+Lock-protected against concurrent ingest callbacks. Defensive — rows with
+malformed `requested_at` are skipped with a WARN log instead of crashing the
+batch.
+
+Operator gets two paths to invocation:
+1. **Hourly trigger** registered in `installProjectTriggers` for hands-off cleanup.
+2. **Menu item** "Reap stuck scrape jobs" → `manualReapStuckJob` for immediate
+   cleanup when the operator sees a stuck job and doesn't want to wait up to an hour.
+
+The known stuck production job will be reaped by either path after deploy — that
+is the live integration test for the new code.
+- **Owner:** Stream A
+- **Code:** apps-script/Config.gs (modified), apps-script/ScrapeHistoryStore.gs (modified), apps-script/PreviewPipeline.gs (modified), apps-script/Menu.gs (modified), scripts/test-stale-job-reaper.mjs (new)
+- **Docs:** docs/30-task-records/A-11-followup-stale-job-reaper.md, docs/11-change-log.md, docs/29-task-registry.md
+
 ### [A/A-11] Frontend scraping trigger + history + cross-portal dedupe + side-by-side review UI — CODE-COMPLETE
 - **Scope:** Connects the existing-but-dormant A-04 scraper pipeline (firmy.cz Node.js scraper +
 A-02 _raw_import staging + A-03 normalizer + A-05 dedupe + A-10 batch orchestrator)

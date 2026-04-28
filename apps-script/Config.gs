@@ -310,6 +310,17 @@ var SCRAPE_JOB_STATUS = {
   FAILED:      'failed'
 };
 
+/* ── A-11 followup: stale-job reaper threshold ──────────────
+ * Jobs in pending/dispatched older than this many minutes are
+ * flipped to status=failed by reapStaleScrapeJobs_ (hourly trigger
+ * + manual menu). Production observed a job stuck at pending for
+ * >hours after the failure callback also failed — there was no
+ * cleanup mechanism. 30 min is generous given normal end-to-end
+ * scrape runtime (dispatch → GH Actions cold start → scrape →
+ * ingest callback) is well under 10 min.
+ * ──────────────────────────────────────────────────────────── */
+var STALE_JOB_TIMEOUT_MIN = 30;
+
 /* ── A-11: Extension column for review queue tracking on _raw_import ─
  * processRawImportBatch_ sets these on rows that need operator review
  * (SOFT_DUPLICATE / REVIEW). The frontend /scrape/review page reads

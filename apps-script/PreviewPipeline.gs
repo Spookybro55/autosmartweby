@@ -1546,6 +1546,7 @@ function installProjectTriggers() {
   var hasOnEdit = false;
   var hasWebCheck = false;
   var hasAutoQualify = false;
+  var hasStaleJobReaper = false;
 
   // KROK 4 (FF-002 + FF-008): force-recreate these so interval/handler
   // changes between deploys are picked up. Pattern: delete every existing
@@ -1575,6 +1576,9 @@ function installProjectTriggers() {
     }
     if (fn === 'autoQualifyTrigger' && evType === ScriptApp.EventType.CLOCK) {
       hasAutoQualify = true;
+    }
+    if (fn === 'reapStaleScrapeJobs_' && evType === ScriptApp.EventType.CLOCK) {
+      hasStaleJobReaper = true;
     }
   }
 
@@ -1622,6 +1626,18 @@ function installProjectTriggers() {
     .everyHours(1)
     .create();
   installed.push('Timer: syncMailboxMetadata (1 hour) — FF-008');
+
+  // A-11 followup: reaper for stuck pending/dispatched scrape jobs
+  // whose dispatch or callback never landed. Hourly is enough — the
+  // STALE_JOB_TIMEOUT_MIN gate (30 min) is the real freshness boundary;
+  // the trigger interval just bounds detection latency.
+  if (!hasStaleJobReaper) {
+    ScriptApp.newTrigger('reapStaleScrapeJobs_')
+      .timeBased()
+      .everyHours(1)
+      .create();
+    installed.push('Timer: reapStaleScrapeJobs_ (1 hour) — A-11 followup');
+  }
 
   if (!hasOnOpen) {
     ScriptApp.newTrigger('onOpen')
