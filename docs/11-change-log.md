@@ -8,6 +8,23 @@
 
 ## 2026-04-29
 
+### [B/audit-reconciliation-2026-04] Audit reconciliation pass — verify all FINDINGS against current code — CODE-COMPLETE
+- **Scope:** PR #83 revealed audit drift (SEC-016 marked Open but actually fixed in `24e3d65`).
+This pass systematically verifies every Open finding in `docs/audits/FINDINGS.md`
+against current main HEAD and updates the Status column accordingly.
+
+**Repo-only verification.** No code change. No fixes during the pass — every
+finding either flips to `**Resolved** in <commit>` (with verification timestamp),
+moves to `**In Progress**` (partially addressed), or stays Open. Findings whose
+evidence requires Vercel/GitHub/external system inspection are flagged for
+operator action.
+
+CC-* persona findings (CC-NB, CC-OPS, CC-SEC, CC-QA) were not re-verified per
+spec scope — most need manual operator review.
+- **Owner:** Stream B
+- **Code:** docs/audits/FINDINGS.md (modified), docs/audits/12-summary.md (modified)
+- **Docs:** docs/30-task-records/audit-reconciliation-2026-04.md, docs/audits/FINDINGS.md, docs/audits/12-summary.md, docs/11-change-log.md, docs/29-task-registry.md
+
 ### [B/cleanup-and-sec-016] Cleanup junk files + audit-doc reconciliation for SEC-016 (already fixed in `24e3d65`) — CODE-COMPLETE
 - **Scope:** Two unrelated cleanups bundled per the spec:
 

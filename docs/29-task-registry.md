@@ -49,6 +49,7 @@
 | CS1 | C | Definovat end-to-end lifecycle leadu jako state... | Claude | done | 2026-04-05 | docs/21-business-process.md, docs/23-data-model.md, docs/20-current-state.md, docs/11-change-log.md, docs/29-task-registry.md | *(zadne code changes)* |
 | CS2 | C | Navrhnout workflow orchestrator — co spousti co... | Claude | done | 2026-04-05 | docs/24-automation-workflows.md, docs/20-current-state.md | *(zadne code changes)* |
 | CS3 | C | Definovat idempotency keys, retry politiku a de... | Claude | done | 2026-04-05 | docs/24-automation-workflows.md, docs/20-current-state.md | *(zadne code changes)* |
+| audit-reconciliation-2026-04 | B | Audit reconciliation pass — verify all FINDINGS... | Stream B | code-complete | 2026-04-29 | docs/30-task-records/audit-reconciliation-2026-04.md, docs/audits/FINDINGS.md, docs/audits/12-summary.md, docs/11-change-log.md, docs/29-task-registry.md | docs |
 | cleanup-and-sec-016 | B | Cleanup junk files + audit-doc reconciliation f... | Stream B | code-complete | 2026-04-29 | docs/30-task-records/cleanup-and-sec-016.md, docs/audits/FINDINGS.md, docs/audits/12-summary.md, docs/11-change-log.md, docs/29-task-registry.md | `0)`, `1)`, `5`, `crm-frontend, docs |
 
-*42 tasks total.*
+*43 tasks total.*
