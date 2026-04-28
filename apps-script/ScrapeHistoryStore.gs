@@ -609,3 +609,26 @@ function manualReapStuckJob() {
     );
   }
 }
+
+
+/* ═══════════════════════════════════════════════════════════════
+   runReaperNow — public wrapper for Apps Script editor "Run"
+   ═══════════════════════════════════════════════════════════════
+   The internal reapStaleScrapeJobs_ has a trailing underscore
+   (private convention) so the editor's function dropdown HIDES it.
+   manualReapStuckJob calls SpreadsheetApp.getUi() which throws when
+   invoked outside a Sheet context (i.e. directly from the editor's
+   ▶ Run button). This wrapper has neither problem:
+     - public name (no _)        → appears in editor dropdown
+     - no UI dependency          → safe to ▶ Run from editor
+     - returns the structured result so it lands in Execution Log
+   Use case: ad-hoc reaper run + visibility into result during
+   incident response or testing, without going through the menu.
+   ═══════════════════════════════════════════════════════════════ */
+
+function runReaperNow() {
+  var result = reapStaleScrapeJobs_();
+  Logger.log('Reaped: ' + result.reaped + ' | Skipped: ' + result.skipped +
+    (result.ids.length ? ' | IDs: ' + result.ids.join(', ') : ''));
+  return result;
+}
