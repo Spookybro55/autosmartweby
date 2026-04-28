@@ -26,6 +26,17 @@
  * @returns {Object} { bucket, reason, duplicate_of_lead_id, company_key, tier }
  */
 function dedupeAgainstLeads_(record, leadsIndex) {
+  // A-11: try contact-based matches BEFORE name/key match. Cross-portal
+  // duplicates often have different business names but identical phone
+  // or owned-domain email. We catch those here so they don't sneak
+  // through as NEW_LEAD just because their company_key differs.
+  //
+  // Order matters: most-confident → least-confident. The first match
+  // wins. If contact-based matching fails, fall back to the original
+  // company_key flow (T1 IČO → T2 domain → T3 emaildomain → T4 name+city).
+  var contactMatch = checkContactBasedMatch_(record, leadsIndex);
+  if (contactMatch) return contactMatch;
+
   var key = computeCompanyKeyFromRecord_(record);
 
   if (!key) {
@@ -146,19 +157,176 @@ function buildLeadsDedupeIndex_() {
   var sheet = getExternalSheet_(ss);
   var hr = getHeaderResolver_(sheet);
   var bulk = readAllData_(sheet);
-  var index = {};
+
+  // Three parallel hash maps — O(1) lookup at dedupe time.
+  // For 100K LEADS rows this is ~3 MB of memory in the index, fine.
+  var index = {};       // company_key → { lead_id, ico }
+  var phoneIndex = {};  // normalized E.164 phone → { lead_id, business_name }
+  var emailIndex = {};  // normalized email → { lead_id, business_name, free_domain: bool }
 
   for (var i = 0; i < bulk.data.length; i++) {
     var row = bulk.data[i];
+    var leadId = hr.get(row, 'lead_id') || '';
+    var businessName = hr.get(row, 'business_name') || '';
+
     var key = computeCompanyKey_(hr, row);
     if (key && !index[key]) {
       index[key] = {
-        lead_id: hr.get(row, 'lead_id') || '',
+        lead_id: leadId,
         ico: normalizeIco_(hr.get(row, 'ičo'))
       };
     }
+
+    // A-11: phone index — exact E.164 match for cross-portal dedupe.
+    // If phone normalizes to '', skip (don't match all empty phones together).
+    var phone = normalizePhoneE164_(hr.get(row, 'phone'));
+    if (phone && !phoneIndex[phone]) {
+      phoneIndex[phone] = { lead_id: leadId, business_name: businessName };
+    }
+
+    // A-11: email index — exact match. Free-domain emails get a flag so
+    // downstream matching can treat them as soft instead of hard
+    // (info@gmail.com from two leads is meaningful but not conclusive).
+    var email = normalizeEmail_(hr.get(row, 'email'));
+    if (email && !emailIndex[email]) {
+      emailIndex[email] = {
+        lead_id: leadId,
+        business_name: businessName,
+        free_domain: isFreeEmailDomain_(email)
+      };
+    }
   }
+
+  // Attach contact maps to the returned index — dedupeAgainstLeads_
+  // accesses them via the magic _phoneIndex / _emailIndex keys.
+  // Using underscore prefix to avoid colliding with real company_key
+  // values (which are 'tier:value' format).
+  index._phoneIndex = phoneIndex;
+  index._emailIndex = emailIndex;
   return index;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   A-11: Contact-based matching — phone + exact email
+   ═══════════════════════════════════════════════════════════════
+   Catches cross-portal duplicates where business name diverges but
+   contact info (phone, owned-domain email) is identical.
+   Called BEFORE company_key matching in dedupeAgainstLeads_.
+   ═══════════════════════════════════════════════════════════════ */
+
+function checkContactBasedMatch_(record, leadsIndex) {
+  // Phone match — strongest signal for cross-portal. Same phone on two
+  // different portals is almost always the same business; only edge
+  // cases are call centers and franchise networks.
+  var phone = normalizePhoneE164_(record.phone);
+  if (phone && leadsIndex._phoneIndex && leadsIndex._phoneIndex[phone]) {
+    var phoneMatch = leadsIndex._phoneIndex[phone];
+    var nameOverlap = computeNameTokenOverlap_(record.business_name, phoneMatch.business_name);
+
+    if (nameOverlap >= 0.5) {
+      // High name overlap: very likely same firm with slightly different listing
+      // ('Novák Instalatérství' vs 'Novák Instalater Praha') — REVIEW so operator
+      // can confirm, but it's a soft "this is fine" review.
+      return {
+        bucket: DEDUPE_BUCKET.REVIEW,
+        reason: DEDUPE_REASON.REVIEW_PHONE_NAME_OK,
+        duplicate_of_lead_id: phoneMatch.lead_id,
+        company_key: 'phone:' + phone,
+        tier: 'phone'
+      };
+    }
+    // Low overlap: same phone, very different names. Could be franchise,
+    // shared call center, name rebrand, or one-portal data error.
+    // Always REVIEW — never auto-decide.
+    return {
+      bucket: DEDUPE_BUCKET.REVIEW,
+      reason: DEDUPE_REASON.REVIEW_PHONE_NAME_DIVERGE,
+      duplicate_of_lead_id: phoneMatch.lead_id,
+      company_key: 'phone:' + phone,
+      tier: 'phone'
+    };
+  }
+
+  // Email exact match — second-strongest signal. Owned-domain → HARD,
+  // free-domain (gmail/seznam) → SOFT (gmail addresses can belong to
+  // different people; we don't want to merge "info@gmail.com" leads).
+  var email = normalizeEmail_(record.email);
+  if (email && leadsIndex._emailIndex && leadsIndex._emailIndex[email]) {
+    var emailMatch = leadsIndex._emailIndex[email];
+    if (emailMatch.free_domain) {
+      // Free-domain coincidence: REVIEW (operator decides if same person)
+      return {
+        bucket: DEDUPE_BUCKET.REVIEW,
+        reason: DEDUPE_REASON.SOFT_DUP_EMAIL_FREE,
+        duplicate_of_lead_id: emailMatch.lead_id,
+        company_key: 'email:' + email,
+        tier: 'email_free'
+      };
+    }
+    // Owned-domain exact email match: HARD — same business
+    return {
+      bucket: DEDUPE_BUCKET.HARD_DUPLICATE,
+      reason: DEDUPE_REASON.HARD_DUP_EMAIL,
+      duplicate_of_lead_id: emailMatch.lead_id,
+      company_key: 'email:' + email,
+      tier: 'email_owned'
+    };
+  }
+
+  return null;  // No contact-based match — fall through to company_key flow
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   computeNameTokenOverlap_(a, b) — Jaccard-like token similarity
+   ═══════════════════════════════════════════════════════════════
+   Returns ratio in [0, 1]. Tokens are diacritic-stripped, lowercased,
+   alphanumeric-only words ≥ 2 chars. Stop-words filtered (legal-form
+   abbreviations like 's.r.o.', 'a.s.', plus 'cz', 'praha', single
+   chars). Common-word inflation is countered by token-set Jaccard:
+   |intersection| / |union|.
+   ═══════════════════════════════════════════════════════════════ */
+
+var DEDUPE_NAME_STOPWORDS_ = {
+  'sro': 1, 'spol': 1, 'as': 1, 'a': 1, 'cz': 1, 'czech': 1,
+  'firma': 1, 'firm': 1, 'company': 1, 'group': 1, 'praha': 1, 'brno': 1
+};
+
+function tokenizeName_(name) {
+  var s = removeDiacritics_(String(name || ''))
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!s) return {};
+  var tokens = {};
+  var words = s.split(' ');
+  for (var i = 0; i < words.length; i++) {
+    var w = words[i];
+    if (w.length < 2) continue;
+    if (DEDUPE_NAME_STOPWORDS_[w]) continue;
+    tokens[w] = 1;
+  }
+  return tokens;
+}
+
+function computeNameTokenOverlap_(a, b) {
+  var ta = tokenizeName_(a);
+  var tb = tokenizeName_(b);
+  var keysA = Object.keys(ta);
+  var keysB = Object.keys(tb);
+  if (keysA.length === 0 || keysB.length === 0) return 0;
+
+  var intersection = 0;
+  var union = {};
+  for (var i = 0; i < keysA.length; i++) union[keysA[i]] = 1;
+  for (var j = 0; j < keysB.length; j++) {
+    if (union[keysB[j]]) intersection++;
+    else union[keysB[j]] = 1;
+  }
+  var unionSize = Object.keys(union).length;
+  return unionSize > 0 ? intersection / unionSize : 0;
 }
 
 

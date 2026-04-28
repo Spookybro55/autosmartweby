@@ -8,6 +8,33 @@
 
 ## 2026-04-28
 
+### [A/A-11] Frontend scraping trigger + history + cross-portal dedupe + side-by-side review UI — CODE-COMPLETE
+- **Scope:** Connects the existing-but-dormant A-04 scraper pipeline (firmy.cz Node.js scraper +
+A-02 _raw_import staging + A-03 normalizer + A-05 dedupe + A-10 batch orchestrator)
+to a CRM frontend UI. Operator can dispatch scrape jobs from `/scrape` page, sees
+duplicate-query alert before re-running the same search, and resolves cross-portal
+dedupe candidates via side-by-side comparison in `/scrape/review`.
+
+Cross-portal dedupe extension (Stream A primary value): existing dedupe matched on
+IČO + website domain + email domain + name+city. New layer adds **phone exact match**
+and **owned-domain email exact match** as primary signals — catches cases where the
+same firm appears on different portals under slightly different names with
+identical contact info.
+
+Multi-portal extensibility designed in: portal name flows through types → trigger
+payload → AS validation → GH workflow input → scraper CLI dispatch. Adding
+`zivefirmy.cz` etc. requires only:
+1. Append to `SUPPORTED_SCRAPE_PORTALS` (Config.gs + types/scrape.ts)
+2. Add parser in `scripts/scraper/lib/{portal}-parser.mjs`
+3. Add portal case in `scripts/scraper/{name}.mjs` dispatch (or unify into single `scraper.mjs`)
+
+Auto-import: NEW_LEAD → LEADS, HARD_DUP → skip with log, SOFT/REVIEW → held in
+`_raw_import` for operator review queue. Operator decides per-row: skip / merge
+(fill-only-empty fields) / import-as-new (with explicit confirm).
+- **Owner:** Stream A
+- **Code:** apps-script/Helpers.gs (modified), apps-script/Config.gs (modified), apps-script/ScrapeHistoryStore.gs (new), apps-script/DedupeEngine.gs (modified), apps-script/WebAppEndpoint.gs (modified), apps-script/Menu.gs (modified), crm-frontend/src/types/scrape.ts (new), crm-frontend/src/lib/google/apps-script-writer.ts (modified), crm-frontend/src/app/api/scrape/trigger/route.ts (new), crm-frontend/src/app/api/scrape/history/route.ts (new), crm-frontend/src/app/api/scrape/review/route.ts (new), crm-frontend/src/app/api/scrape/review/[id]/resolve/route.ts (new), crm-frontend/src/components/scrape/scrape-form.tsx (new), crm-frontend/src/components/scrape/scrape-duplicate-modal.tsx (new), crm-frontend/src/components/scrape/scrape-history-table.tsx (new), crm-frontend/src/components/scrape/dedupe-review-dialog.tsx (new), crm-frontend/src/app/scrape/page.tsx (new), crm-frontend/src/app/scrape/review/page.tsx (new), crm-frontend/src/components/layout/sidebar.tsx (modified), .github/workflows/scrape.yml (new)
+- **Docs:** docs/30-task-records/A-11.md, docs/11-change-log.md, docs/29-task-registry.md
+
 ### [B/B-13] Email template schema + CRUD + runtime wiring + bootstrap + backend + API layer + UI listing + editor + consumer integration + analytics dashboard + testing layer (T1-T9 + T11 + T12 of 13-task email templating + analytics project; T10 deferred to backlog) — READY_FOR_DEPLOY
 - **Scope:** Foundation pro multi-task projekt: nahradit hardcoded `composeDraft_` editovatelnym template systemem s versioning + analytikou per template+segment.
 

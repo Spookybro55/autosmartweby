@@ -6,6 +6,14 @@ import type {
   TemplateAnalyticsEntry,
   RegenerateDraftResult,
 } from '@/types/templates';
+import type {
+  ScrapeJob,
+  ScrapeJobInput,
+  ScrapeTriggerResponse,
+  DedupeReviewItem,
+  ResolveReviewInput,
+  ResolveReviewResponse,
+} from '@/types/scrape';
 
 interface WriteResult {
   success: boolean;
@@ -518,6 +526,169 @@ export async function regenerateDraft(
     }
     const data = await res.json();
     if (data.ok === true) return { success: true, draft: data.draft };
+    return { success: false, error: data.error ?? 'Apps Script returned ok=false' };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
+
+// ───── A-11: Scrape orchestration ─────
+
+export interface TriggerScrapeWriterResult {
+  success: boolean;
+  /** When AS returns { ok:true }, this carries the trigger response.
+   * job_token is included here (Vercel route uses it to dispatch GH
+   * Actions, but it must NOT be forwarded to the browser). */
+  data?: ScrapeTriggerResponse & { job_token?: string };
+  error?: string;
+}
+
+export async function triggerScrape(input: ScrapeJobInput): Promise<TriggerScrapeWriterResult> {
+  const url = SHEET_CONFIG.APPS_SCRIPT_URL;
+  if (!url) return { success: false, error: 'Apps Script URL not configured' };
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'triggerScrape',
+        portal: input.portal,
+        segment: input.segment,
+        city: input.city,
+        district: input.district ?? '',
+        max_results: input.max_results ?? 30,
+        force: input.force === true,
+        token: process.env.APPS_SCRIPT_SECRET,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return { success: false, error: `HTTP ${res.status}: ${text}` };
+    }
+    const data = await res.json();
+    if (data.ok === true) {
+      return {
+        success: true,
+        data: {
+          duplicate: data.duplicate === true,
+          previousJob: data.previousJob,
+          job_id: data.job_id,
+          job_token: data.job_token,
+        },
+      };
+    }
+    return { success: false, error: data.error ?? 'Apps Script returned ok=false' };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
+
+export interface ListScrapeHistoryResult {
+  success: boolean;
+  history?: ScrapeJob[];
+  error?: string;
+}
+
+export async function listScrapeHistory(limit = 50): Promise<ListScrapeHistoryResult> {
+  const url = SHEET_CONFIG.APPS_SCRIPT_URL;
+  if (!url) return { success: false, error: 'Apps Script URL not configured' };
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'listScrapeHistory',
+        limit,
+        token: process.env.APPS_SCRIPT_SECRET,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return { success: false, error: `HTTP ${res.status}: ${text}` };
+    }
+    const data = await res.json();
+    if (data.ok === true) return { success: true, history: data.history };
+    return { success: false, error: data.error ?? 'Apps Script returned ok=false' };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
+
+export interface ListPendingReviewResult {
+  success: boolean;
+  items?: DedupeReviewItem[];
+  error?: string;
+}
+
+export async function listPendingReview(): Promise<ListPendingReviewResult> {
+  const url = SHEET_CONFIG.APPS_SCRIPT_URL;
+  if (!url) return { success: false, error: 'Apps Script URL not configured' };
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'listPendingReview',
+        token: process.env.APPS_SCRIPT_SECRET,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return { success: false, error: `HTTP ${res.status}: ${text}` };
+    }
+    const data = await res.json();
+    if (data.ok === true) return { success: true, items: data.items };
+    return { success: false, error: data.error ?? 'Apps Script returned ok=false' };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
+
+export interface ResolveReviewWriterResult {
+  success: boolean;
+  data?: ResolveReviewResponse;
+  error?: string;
+}
+
+export async function resolveReview(input: ResolveReviewInput): Promise<ResolveReviewWriterResult> {
+  const url = SHEET_CONFIG.APPS_SCRIPT_URL;
+  if (!url) return { success: false, error: 'Apps Script URL not configured' };
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'resolveReview',
+        rawImportId: input.rawImportId,
+        decision: input.decision,
+        mergeFields: input.mergeFields ?? {},
+        token: process.env.APPS_SCRIPT_SECRET,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return { success: false, error: `HTTP ${res.status}: ${text}` };
+    }
+    const data = await res.json();
+    if (data.ok === true) {
+      return {
+        success: true,
+        data: {
+          decision: data.decision,
+          raw_import_id: data.raw_import_id,
+          lead_id: data.lead_id,
+          merged_fields: data.merged_fields,
+        },
+      };
+    }
     return { success: false, error: data.error ?? 'Apps Script returned ok=false' };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
