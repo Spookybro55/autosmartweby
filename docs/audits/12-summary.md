@@ -28,7 +28,7 @@ Dva nejvážnější problémy: (1) **hardcoded production Sheet ID napříč re
 
 Co funguje: B-stream/A-stream tests všechny PASS, frontend build + typecheck + lint PASS, B-06 review writeback je TEST-runtime verified, docs governance pipeline funguje (43 pass). Tj. **kódová kvalita lokálně OK; integrace, security a operations nezralé**.
 
-Cestovní mapa: před PROD je nutný **Wave 0** containment (SEC-001/2 ID hygiene + SEC-016 NEXTAUTH_SECRET fail-fast + .env.example fixes), pak **Wave 1** security stabilization, **Wave 2** deploy/build/onboarding docs, **Wave 3** funnel runtime completion (scraper link + sendability + lifecycle), **Wave 4** QA/observability. Odhadem **~10–14 týdnů** do production-ready stavu.
+Cestovní mapa: před PROD je nutný **Wave 0** containment (SEC-001/2 ID hygiene + ~~SEC-016 NEXTAUTH_SECRET fail-fast~~ ✅ resolved in `24e3d65` + .env.example fixes), pak **Wave 1** security stabilization, **Wave 2** deploy/build/onboarding docs, **Wave 3** funnel runtime completion (scraper link + sendability + lifecycle), **Wave 4** QA/observability. Odhadem **~10–14 týdnů** do production-ready stavu.
 
 ---
 
@@ -109,9 +109,15 @@ Celkový počet findings: **161** (counts vycházejí z `docs/audits/FINDINGS.md
 
 ## E. Top P1 blockers (top 15 ranked by impact)
 
+> **Update 2026-04-29:** SEC-016 (Rank 1 below) is **resolved** in commit `24e3d65` —
+> `crm-frontend/src/lib/auth/session-secret.ts` validates min 32 chars + throws on
+> missing/short. Verified: `NEXTAUTH_SECRET= npm run build` fails loud. BLD-011
+> (Rank 5+) resolved transitively. Snapshot below preserved for audit history;
+> see FINDINGS.md status column for current state.
+
 | Rank | ID | Category | Stručně |
 |------|-----|----------|---------|
-| 1 | **SEC-016** | security | NEXTAUTH_SECRET fallback `''` → silent auth bypass v PROD pokud env chybí |
+| 1 | ~~**SEC-016**~~ ✅ RESOLVED | security | ~~NEXTAUTH_SECRET fallback `''` → silent auth bypass v PROD pokud env chybí~~ — fixed in `24e3d65`, see FINDINGS.md |
 | 2 | **SEC-007** | security | Žádný rate limit / lockout / 2FA na `/api/auth/login` ani write endpointy |
 | 3 | **SEC-009** | security/PII | Public `/preview/<slug>` route s deterministic slugs vystavuje PII bez consent |
 | 4 | **SEC-014** | security/GDPR | Žádný GDPR/PII inventory, erasure path, privacy policy, retention policy |
@@ -128,7 +134,7 @@ Celkový počet findings: **161** (counts vycházejí z `docs/audits/FINDINGS.md
 | 15 | **FF-015** | lifecycle | CS1 `lifecycle_state` SPEC-ONLY — runtime má 4 separate state machines bez canonical orchestrator |
 
 P1 priority axes (ranking rule):
-1. Security/data leakage (SEC-016, SEC-007, SEC-009, SEC-014, SEC-012, SEC-003)
+1. Security/data leakage (~~SEC-016~~, SEC-007, SEC-009, SEC-014, SEC-012, SEC-003)
 2. Production safety (DP-018, DP-019, SEC-017, DP-021/SEC-011)
 3. E2E functionality (FF-001/2 jsou P0; FF-003/19, FF-006, FF-008, FF-013, FF-015 jsou P1)
 4. Onboarding/buildability (BLD-002/3 jsou P0; BLD-007/8/15, DP-016, DOC-007/8/9/10, DOC-018/19/20/21/22 jsou P1)
@@ -196,7 +202,7 @@ P1 priority axes (ranking rule):
 |---------|---------|----------------------------|
 | **Newbie** (new dev/team member) | ⛔ NO-GO | Onboarding je broken pro každého novou roli. Týmová scaling = blocked. Každý new hire = senior dev musí věnovat 1+ den walkthrough. |
 | **DevOps** (deploy owner) | ⛔ NO-GO | Production deploy by byl nezodpovědný. Při incident = no playbook = panic. Rotation/rollback = ad-hoc. CI nechrání proti broken merges. |
-| **Attacker** (red team) | ⚠️ GO | Útočník má 5 quick-win paths. Sheet sharing exploit (binary risk) + login chain + public preview enum + NEXTAUTH_SECRET bypass + log harvest. **Negativní indikátor — útočník má cesty.** |
+| **Attacker** (red team) | ⚠️ GO | Útočník má 5 quick-win paths. Sheet sharing exploit (binary risk) + login chain + public preview enum + ~~NEXTAUTH_SECRET bypass~~ ✅ closed in `24e3d65` + log harvest. **Negativní indikátor — útočník má cesty.** |
 | **QA** (acceptance tester) | ⚠️ PARTIAL GO | Unit/integration tests OK lokálně. Full E2E impossible (FF-001/2). Bottom-half of funnel (send→reply→follow-up) SPEC-only — nelze acceptance-testnout. |
 
 **Souhrn:** 3 ze 4 personas = NO-GO. 1 (Attacker) = GO ale to znamená, že systém je atakovatelný. Tj. **0 personas dává good-to-go**.
