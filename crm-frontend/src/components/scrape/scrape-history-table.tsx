@@ -1,17 +1,11 @@
 'use client';
 
-import type { ScrapeJob, ScrapeJobStatus } from '@/types/scrape';
+import type { ScrapeJob } from '@/types/scrape';
+import { ScrapeStatusBadge } from './scrape-status-badge';
 
 interface Props {
   history: ScrapeJob[];
 }
-
-const STATUS_LABELS: Record<ScrapeJobStatus, { text: string; cn: string }> = {
-  pending:    { text: 'čeká',     cn: 'bg-muted text-muted-foreground' },
-  dispatched: { text: 'běží',     cn: 'bg-blue-500/10 text-blue-700 dark:text-blue-400' },
-  completed:  { text: 'hotovo',   cn: 'bg-green-500/10 text-green-700 dark:text-green-400' },
-  failed:     { text: 'selhalo',  cn: 'bg-destructive/10 text-destructive' },
-};
 
 export function ScrapeHistoryTable({ history }: Props) {
   if (history.length === 0) {
@@ -37,7 +31,6 @@ export function ScrapeHistoryTable({ history }: Props) {
         </thead>
         <tbody>
           {history.map((j) => {
-            const status = STATUS_LABELS[j.status] ?? STATUS_LABELS.pending;
             const date = j.requested_at
               ? new Date(j.requested_at).toLocaleString('cs-CZ', {
                   day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -55,14 +48,7 @@ export function ScrapeHistoryTable({ history }: Props) {
                   {j.district && <span className="text-muted-foreground"> · {j.district}</span>}
                 </td>
                 <td className="px-3 py-2">
-                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs ${status.cn}`}>
-                    {status.text}
-                  </span>
-                  {j.error_message && (
-                    <span className="ml-2 text-xs text-destructive" title={j.error_message}>
-                      ⚠ chyba
-                    </span>
-                  )}
+                  <ScrapeStatusBadge status={j.status} errorMessage={j.error_message} />
                 </td>
                 <td className="px-3 py-2 text-right text-xs tabular-nums text-muted-foreground">
                   {j.status === 'completed' ? (
