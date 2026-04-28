@@ -16,16 +16,31 @@
  *   B13_test_chooseTemplate()       — auto-select for has_website states
  *   B13_test_fallbackPath()         — composeDraft with no active template
  *
- * Each test is self-contained — uses unique template_key like
- * '_test_b13_<timestamp>' to avoid stomping on real data. Cleans up
- * after run.
+ * All tests share the canonical default key `B13_TEST_KEY_` (= 'follow-up-2')
+ * and tag every published version with `B13_TEST_COMMIT_MARKER_` in the
+ * commit_message. Cleanup walks `_email_templates`, archives any active
+ * row whose commit_message starts with the marker, and deletes any
+ * draft rows. Pre-existing real versions on the same key are preserved.
  *
  * NOT for production deploy. .claspignore excludes apps-script/tests/**
  * so this file isn't pushed via clasp.
  */
 
 var B13_TEST_RESULTS_ = [];
-var B13_TEST_KEY_PREFIX_ = '_test_b13_';
+
+// Use a real default template key (one of EMAIL_TEMPLATE_DEFAULT_KEYS).
+// Tests that exercise saveTemplateDraft_ → publishTemplate_ cycles will
+// temporarily promote/archive versions on this key, then cleanup restores
+// it to its pre-test state by archiving any test-created active versions.
+//
+// Picked 'follow-up-2' because it's least likely to have meaningful content
+// (no-website is bootstrapped with approved copy and we don't want to disturb).
+var B13_TEST_KEY_ = 'follow-up-2';
+
+// Marker so cleanup can identify versions created BY this test run vs
+// pre-existing real versions. Stored in commit_message field of the
+// test-created versions.
+var B13_TEST_COMMIT_MARKER_ = '__B13_TEST_RUN__';
 
 function B13_runAll() {
   B13_TEST_RESULTS_ = [];
@@ -79,19 +94,17 @@ function B13_test_bootstrapIdempotence() {
     // Don't actually run bootstrapNoWebsiteV1 — it would publish a real
     // template. Instead test the underlying invariant: publishing twice
     // for the same key requires a fresh draft each time.
-    var key = B13_TEST_KEY_PREFIX_ + 'boot_' + Date.now();
-
-    saveTemplateDraft_(key, 'subj', 'body', 'name', 'desc');
-    publishTemplate_(key, 'first publish');
+    var key = B13_TEST_KEY_;
+    saveTemplateDraft_(key, 'subj', 'body', 'test name', 'test desc');
+    publishTemplate_(key, B13_TEST_COMMIT_MARKER_ + ' first publish');
 
     // Second publish without draft should fail
     var threwOnNoDraft = false;
     try {
-      publishTemplate_(key, 'second publish');
+      publishTemplate_(key, B13_TEST_COMMIT_MARKER_ + ' second publish');
     } catch (e) {
       threwOnNoDraft = (e.message.indexOf('No draft to publish') >= 0);
     }
-
     B13_assert_('bootstrap idempotence — second publish requires new draft', threwOnNoDraft);
   } catch (e) {
     B13_assert_('bootstrap idempotence', false, e.message);
@@ -100,7 +113,7 @@ function B13_test_bootstrapIdempotence() {
 
 function B13_test_draftLifecycle() {
   try {
-    var key = B13_TEST_KEY_PREFIX_ + 'cycle_' + Date.now();
+    var key = B13_TEST_KEY_;
 
     // Save draft
     var d1 = saveTemplateDraft_(key, 'Subj v1', 'Body v1', 'Name', 'Desc');
@@ -112,10 +125,11 @@ function B13_test_draftLifecycle() {
     B13_assert_('draft overwrite preserves template_id', d2.template_id === d1.template_id);
 
     // Publish v1
-    var p1 = publishTemplate_(key, 'first version commit');
-    B13_assert_('publish promotes to v1', p1.version === 1);
-    B13_assert_('publish status=active', p1.status === 'active');
-    B13_assert_('publish records commit_message', p1.commit_message === 'first version commit');
+    var firstCommit = B13_TEST_COMMIT_MARKER_ + ' first version commit';
+    var p1 = publishTemplate_(key, firstCommit);
+    B13_assert_('publish promotes to active', p1.status === 'active');
+    B13_assert_('publish records commit_message', p1.commit_message === firstCommit);
+    var v1Version = p1.version;
 
     // Save another draft (over published v1)
     var d3 = saveTemplateDraft_(key, 'Subj v2', 'Body v2', 'Name', 'Desc');
@@ -123,16 +137,16 @@ function B13_test_draftLifecycle() {
     B13_assert_('new draft references parent', d3.parent_template_id === p1.template_id);
 
     // Publish v2
-    var p2 = publishTemplate_(key, 'second version commit');
-    B13_assert_('publish v2', p2.version === 2);
+    var p2 = publishTemplate_(key, B13_TEST_COMMIT_MARKER_ + ' second version commit');
+    B13_assert_('publish v2 increments version', p2.version === v1Version + 1);
 
-    // Verify v1 is now archived
+    // Verify previous active is now archived
     var hist = listTemplateHistory_(key);
-    var v1archived = false;
+    var prevArchived = false;
     for (var i = 0; i < hist.length; i++) {
-      if (hist[i].version === 1 && hist[i].status === 'archived') v1archived = true;
+      if (hist[i].version === v1Version && hist[i].status === 'archived') prevArchived = true;
     }
-    B13_assert_('previous active flipped to archived', v1archived);
+    B13_assert_('previous active flipped to archived', prevArchived);
 
   } catch (e) {
     B13_assert_('draft lifecycle', false, e.message);
@@ -141,12 +155,12 @@ function B13_test_draftLifecycle() {
 
 function B13_test_emptyDraftPublish() {
   try {
-    var key = B13_TEST_KEY_PREFIX_ + 'empty_' + Date.now();
+    var key = B13_TEST_KEY_;
     saveTemplateDraft_(key, '', '', 'Name', 'Desc');
 
     var threw = false;
     try {
-      publishTemplate_(key, 'this should fail');
+      publishTemplate_(key, B13_TEST_COMMIT_MARKER_ + ' should fail');
     } catch (e) {
       threw = (e.message.indexOf('empty subject or body') >= 0);
     }
@@ -158,12 +172,12 @@ function B13_test_emptyDraftPublish() {
 
 function B13_test_commitMessage() {
   try {
-    var key = B13_TEST_KEY_PREFIX_ + 'commit_' + Date.now();
+    var key = B13_TEST_KEY_;
     saveTemplateDraft_(key, 'subj', 'body', 'Name', 'Desc');
 
     var threw = false;
     try {
-      publishTemplate_(key, 'x');  // 1 char, < 5
+      publishTemplate_(key, 'x');  // 1 char, < 5 — testing rejection, no marker
     } catch (e) {
       threw = (e.message.indexOf('Commit message required') >= 0);
     }
@@ -258,22 +272,58 @@ function B13_cleanup_() {
   try {
     var sheet = ensureEmailTemplatesSheet_();
     var lastRow = sheet.getLastRow();
-    if (lastRow < 2) return;
+    if (lastRow < 2) {
+      Logger.log('B13_cleanup_: no rows to clean');
+      return;
+    }
 
-    var keys = sheet.getRange(2, 2, lastRow - 1, 1).getValues();
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var commitCol = -1;
+    var statusCol = -1;
+    var archivedAtCol = -1;
+    for (var i = 0; i < headers.length; i++) {
+      if (headers[i] === 'commit_message') commitCol = i;
+      if (headers[i] === 'status') statusCol = i;
+      if (headers[i] === 'archived_at') archivedAtCol = i;
+    }
+    if (commitCol < 0 || statusCol < 0) {
+      Logger.log('B13_cleanup_: required columns not found');
+      return;
+    }
+
+    var data = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getValues();
+    var draftsDeleted = 0;
+    var versionsArchived = 0;
     var rowsToDelete = [];
-    for (var i = 0; i < keys.length; i++) {
-      var k = String(keys[i][0] || '');
-      if (k.indexOf(B13_TEST_KEY_PREFIX_) === 0) {
-        rowsToDelete.push(i + 2);  // sheet row number
+
+    for (var j = 0; j < data.length; j++) {
+      var row = data[j];
+      var commit = String(row[commitCol] || '');
+      if (commit.indexOf(B13_TEST_COMMIT_MARKER_) !== 0) continue;
+
+      var status = String(row[statusCol] || '');
+      var sheetRow = j + 2; // 1-indexed + header
+
+      if (status === 'draft') {
+        rowsToDelete.push(sheetRow);
+        draftsDeleted++;
+      } else if (status === 'active') {
+        sheet.getRange(sheetRow, statusCol + 1).setValue('archived');
+        if (archivedAtCol >= 0) {
+          sheet.getRange(sheetRow, archivedAtCol + 1).setValue(new Date().toISOString());
+        }
+        versionsArchived++;
       }
+      // archived: skip (already inert)
     }
-    // Delete from bottom to top so indices don't shift
+
+    // Delete drafts bottom-up so indices don't shift
     rowsToDelete.sort(function(a, b) { return b - a; });
-    for (var i = 0; i < rowsToDelete.length; i++) {
-      sheet.deleteRow(rowsToDelete[i]);
+    for (var k = 0; k < rowsToDelete.length; k++) {
+      sheet.deleteRow(rowsToDelete[k]);
     }
-    Logger.log('B13_cleanup_: deleted ' + rowsToDelete.length + ' test rows');
+
+    Logger.log('B13_cleanup_: archived ' + versionsArchived + ' active version(s), deleted ' + draftsDeleted + ' draft(s)');
   } catch (e) {
     Logger.log('B13_cleanup_ error: ' + e.message);
   }
