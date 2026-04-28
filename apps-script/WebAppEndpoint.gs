@@ -47,6 +47,37 @@ function doPost(e) {
       return handleSendEmail_(payload);
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // B-13 T5: Email template management endpoints
+    // ═══════════════════════════════════════════════════════════
+    if (payload.action === 'listTemplates') {
+      return handleListTemplates_(payload);
+    }
+    if (payload.action === 'getTemplate') {
+      return handleGetTemplate_(payload);
+    }
+    if (payload.action === 'getTemplateDraft') {
+      return handleGetTemplateDraft_(payload);
+    }
+    if (payload.action === 'getTemplateHistory') {
+      return handleGetTemplateHistory_(payload);
+    }
+    if (payload.action === 'saveTemplateDraft') {
+      return handleSaveTemplateDraft_(payload);
+    }
+    if (payload.action === 'discardTemplateDraft') {
+      return handleDiscardTemplateDraft_(payload);
+    }
+    if (payload.action === 'publishTemplate') {
+      return handlePublishTemplate_(payload);
+    }
+    if (payload.action === 'getTemplateAnalytics') {
+      return handleGetTemplateAnalytics_(payload);
+    }
+    if (payload.action === 'regenerateDraft') {
+      return handleRegenerateDraft_(payload);
+    }
+
     return jsonResponse_({ success: false, error: 'Unknown action: ' + payload.action });
 
   } catch (err) {
@@ -314,4 +345,200 @@ function handleAssignLead_(payload) {
     city: payload.city,
     fields: { 'assignee_email': check.normalized }
   });
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   B-13 T5 — Email template handlers
+   ═══════════════════════════════════════════════════════════════
+   Convention: all return jsonResponse_ with { ok: true, ... } on
+   success or { ok: false, error: '<reason>' } on failure. Frontend
+   maps known error strings to Czech UI messages.
+
+   All actions require token verification (already done in doPost).
+   ═══════════════════════════════════════════════════════════════ */
+
+function handleListTemplates_(payload) {
+  try {
+    var all = listAllTemplates_();
+    // Strip _rowNum (internal-only field, leaks sheet position)
+    var clean = all.map(function(t) {
+      var c = {};
+      for (var k in t) {
+        if (k !== '_rowNum') c[k] = t[k];
+      }
+      return c;
+    });
+    return jsonResponse_({ ok: true, templates: clean });
+  } catch (err) {
+    aswLog_('ERROR', 'handleListTemplates_', err.message);
+    return jsonResponse_({ ok: false, error: err.message });
+  }
+}
+
+
+function handleGetTemplate_(payload) {
+  var key = String(payload.key || '').trim();
+  if (!key) return jsonResponse_({ ok: false, error: 'missing_key' });
+
+  try {
+    var t = loadActiveTemplate_(key);
+    var clean = {};
+    for (var k in t) { if (k !== '_rowNum') clean[k] = t[k]; }
+    return jsonResponse_({ ok: true, template: clean });
+  } catch (err) {
+    var msg = err.message;
+    if (msg.indexOf('No active template') >= 0) {
+      return jsonResponse_({ ok: false, error: 'no_active_template' });
+    }
+    aswLog_('ERROR', 'handleGetTemplate_', 'key=' + key + ' err=' + msg);
+    return jsonResponse_({ ok: false, error: msg });
+  }
+}
+
+
+function handleGetTemplateDraft_(payload) {
+  var key = String(payload.key || '').trim();
+  if (!key) return jsonResponse_({ ok: false, error: 'missing_key' });
+
+  try {
+    var d = getTemplateDraft_(key);
+    if (!d) return jsonResponse_({ ok: true, draft: null });
+    var clean = {};
+    for (var k in d) { if (k !== '_rowNum') clean[k] = d[k]; }
+    return jsonResponse_({ ok: true, draft: clean });
+  } catch (err) {
+    aswLog_('ERROR', 'handleGetTemplateDraft_', 'key=' + key + ' err=' + err.message);
+    return jsonResponse_({ ok: false, error: err.message });
+  }
+}
+
+
+function handleGetTemplateHistory_(payload) {
+  var key = String(payload.key || '').trim();
+  if (!key) return jsonResponse_({ ok: false, error: 'missing_key' });
+
+  try {
+    var hist = listTemplateHistory_(key);
+    var clean = hist.map(function(t) {
+      var c = {};
+      for (var k in t) { if (k !== '_rowNum') c[k] = t[k]; }
+      return c;
+    });
+    return jsonResponse_({ ok: true, history: clean });
+  } catch (err) {
+    aswLog_('ERROR', 'handleGetTemplateHistory_', 'key=' + key + ' err=' + err.message);
+    return jsonResponse_({ ok: false, error: err.message });
+  }
+}
+
+
+function handleSaveTemplateDraft_(payload) {
+  var key = String(payload.key || '').trim();
+  if (!key) return jsonResponse_({ ok: false, error: 'missing_key' });
+
+  // Permissive: allow empty subject/body for in-progress drafts.
+  // Publish gate enforces non-empty (see publishTemplate_).
+  var subject = String(payload.subject == null ? '' : payload.subject);
+  var body    = String(payload.body    == null ? '' : payload.body);
+  var name    = String(payload.name    == null ? '' : payload.name);
+  var description = String(payload.description == null ? '' : payload.description);
+
+  // Length sanity
+  if (subject.length > 500) {
+    return jsonResponse_({ ok: false, error: 'subject_too_long' });
+  }
+  if (body.length > 50000) {
+    return jsonResponse_({ ok: false, error: 'body_too_long' });
+  }
+
+  try {
+    var draft = saveTemplateDraft_(key, subject, body, name, description);
+    var clean = {};
+    for (var k in draft) { if (k !== '_rowNum') clean[k] = draft[k]; }
+    return jsonResponse_({ ok: true, draft: clean });
+  } catch (err) {
+    var msg = err.message;
+    if (msg.indexOf('Unknown template key') >= 0) {
+      return jsonResponse_({ ok: false, error: 'unknown_key: ' + key });
+    }
+    aswLog_('ERROR', 'handleSaveTemplateDraft_',
+      'key=' + key + ' err=' + msg);
+    return jsonResponse_({ ok: false, error: msg });
+  }
+}
+
+
+function handleDiscardTemplateDraft_(payload) {
+  var key = String(payload.key || '').trim();
+  if (!key) return jsonResponse_({ ok: false, error: 'missing_key' });
+
+  try {
+    var deleted = discardTemplateDraft_(key);
+    return jsonResponse_({ ok: true, deleted: deleted });
+  } catch (err) {
+    aswLog_('ERROR', 'handleDiscardTemplateDraft_',
+      'key=' + key + ' err=' + err.message);
+    return jsonResponse_({ ok: false, error: err.message });
+  }
+}
+
+
+function handlePublishTemplate_(payload) {
+  var key = String(payload.key || '').trim();
+  if (!key) return jsonResponse_({ ok: false, error: 'missing_key' });
+  var commitMsg = String(payload.commitMessage == null ? '' : payload.commitMessage).trim();
+
+  try {
+    var published = publishTemplate_(key, commitMsg);
+    var clean = {};
+    for (var k in published) { if (k !== '_rowNum') clean[k] = published[k]; }
+    return jsonResponse_({ ok: true, template: clean });
+  } catch (err) {
+    var msg = err.message;
+    if (msg.indexOf('Commit message required') >= 0) {
+      return jsonResponse_({ ok: false, error: 'commit_message_too_short' });
+    }
+    if (msg.indexOf('No draft to publish') >= 0) {
+      return jsonResponse_({ ok: false, error: 'no_draft' });
+    }
+    if (msg.indexOf('Draft has empty subject or body') >= 0) {
+      return jsonResponse_({ ok: false, error: 'empty_draft_content' });
+    }
+    aswLog_('ERROR', 'handlePublishTemplate_',
+      'key=' + key + ' err=' + msg);
+    return jsonResponse_({ ok: false, error: msg });
+  }
+}
+
+
+function handleGetTemplateAnalytics_(payload) {
+  try {
+    var stats = getTemplateAnalytics_();
+    return jsonResponse_({ ok: true, analytics: stats });
+  } catch (err) {
+    aswLog_('ERROR', 'handleGetTemplateAnalytics_', err.message);
+    return jsonResponse_({ ok: false, error: err.message });
+  }
+}
+
+
+function handleRegenerateDraft_(payload) {
+  var leadId = String(payload.leadId || '').trim();
+  if (!leadId) return jsonResponse_({ ok: false, error: 'missing_leadId' });
+  // T5 accepts templateKeyOverride but doesn't honor it — see helper docstring
+  var templateKey = String(payload.templateKey || '').trim();
+
+  try {
+    var draft = regenerateDraftForLead_(leadId, templateKey);
+    return jsonResponse_({ ok: true, draft: draft });
+  } catch (err) {
+    var msg = err.message;
+    if (msg === 'lead_not_found') {
+      return jsonResponse_({ ok: false, error: 'lead_not_found' });
+    }
+    aswLog_('ERROR', 'handleRegenerateDraft_',
+      'leadId=' + leadId + ' err=' + msg);
+    return jsonResponse_({ ok: false, error: msg });
+  }
 }

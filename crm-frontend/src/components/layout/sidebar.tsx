@@ -9,6 +9,8 @@ import {
   Calendar,
   ChevronLeft,
   Menu,
+  Settings,
+  BarChart3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
@@ -18,6 +20,8 @@ const navigation = [
   { label: "Leady", href: "/leads", icon: Users },
   { label: "Pipeline", href: "/pipeline", icon: Kanban },
   { label: "Follow-upy", href: "/follow-ups", icon: Calendar },
+  { label: "Nastavení", href: "/settings", icon: Settings },
+  { label: "Analýza", href: "/analytics", icon: BarChart3 },
 ] as const;
 
 export function Sidebar() {

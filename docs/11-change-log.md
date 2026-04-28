@@ -6,6 +6,242 @@
 
 ---
 
+## 2026-04-28
+
+### [B/B-13] Email template schema + CRUD + runtime wiring + bootstrap + backend + API layer + UI listing + editor + consumer integration + analytics dashboard + testing layer (T1-T9 + T11 + T12 of 13-task email templating + analytics project; T10 deferred to backlog) — READY_FOR_DEPLOY
+- **Scope:** Foundation pro multi-task projekt: nahradit hardcoded `composeDraft_` editovatelnym template systemem s versioning + analytikou per template+segment.
+
+T1 je jen schema migration — zadna business logika, zadne doPost akce, zadny frontend. To prijde v T2-T13.
+
+Co T1 dodava:
+- Novy hidden sheet `_email_templates` (16 sloupcu) s 5 placeholder radky pro default template keys: `no-website`, `weak-website`, `has-website`, `follow-up-1`, `follow-up-2` (status='empty', version=0).
+- 4 nove `EXTENSION_COLUMNS` v LEADS pro per-lead template tracking: `email_template_key`, `email_template_version`, `email_template_id`, `email_segment_at_send`.
+- Idempotentni setup funkce `setupEmailTemplates()` volana z menu — wrapper, ktery (1) zavola `setupPreviewExtension` aby pribyly 4 LEADS sloupce, (2) zavola `ensureEmailTemplatesSheet_` pro vytvoreni hidden listu, (3) zavola `bootstrapEmptyTemplates_` pro nasem 5 placeholder radku.
+
+T1 NEMENI `composeDraft_`, `buildEmailDrafts`, `OutboundEmail.gs`, `WebAppEndpoint.gs`, `PreviewStore.gs` ani frontend. Po clasp push + spusteni `setupEmailTemplates` v editoru je sheet pripraveny pro CRUD operace v T2.
+
+**T2 update (commit pridany ve stejnem PR):** CRUD vrstva nad `_email_templates` sheetem. 10 novych funkci v `EmailTemplateStore.gs` (file: 195 -> 585 radku). Drafts + Publish flow:
+- `saveTemplateDraft_(key, subject, body, name, description)` — upsert draft (1-per-key invariant, overwrite-on-update, parent_template_id zachycen z aktualniho active).
+- `publishTemplate_(key, commitMessage)` — promotuje draft na novy active (povinny commit message ≥ 5 znaku, blokuje publish prazdneho subject/body, archivuje predchozi active, maze empty placeholder, version+1).
+- `discardTemplateDraft_(key)` — smaze draft row (no-op kdyz neexistuje).
+- Read API: `loadActiveTemplate_`, `getTemplateDraft_`, `listAllTemplates_`, `listTemplateHistory_`.
+- Helpers: `buildTemplateRowMap_`, `rowToTemplate_`, `extractPlaceholders_`.
+- Mutace chranene `LockService.getScriptLock()` (5s timeout, try/finally release).
+- Zadny in-memory cache — vse ze Sheet.
+
+T2 stale NEMENI `composeDraft_`, `WebAppEndpoint.gs` ani frontend — to je T3 a T5.
+
+**T3 update (commit pridany ve stejnem PR):** runtime wiring. `composeDraft_` v `PreviewPipeline.gs` ted dispatchuje pres template store. 3 nove funkce v `EmailTemplateStore.gs`:
+- `renderTemplate_(template, leadData)` — placeholder substitution `{name}` → value, unknown → empty, case-insensitive. Computed convenience tokens: `{greeting}` (`Dobrý den[, jméno]`), `{firm_ref}` (`{business_name}` nebo `vaši firmu`), `{contact_name_comma}` (`, {contact_name}` nebo `''`).
+- `buildPlaceholderValues_(ld)` — interni helper, mapuje rd na placeholder dict. Skupiny: LEAD (business_name, contact_name, city, area, service_type, segment, pain_point), PREVIEW (preview_url), SENDER (sender_name, sender_email), COMPUTED (greeting, firm_ref, contact_name_comma).
+- `chooseEmailTemplate_(rd)` — auto-route via `resolveWebsiteState_`: NO_WEBSITE → `no-website`, WEAK_WEBSITE → `weak-website`, HAS_WEBSITE → `has-website`. CONFLICT/UNKNOWN/jakekoliv jine → `no-website` (safest default). Nikdy nethrowuje.
+
+`composeDraft_(rd)` v `PreviewPipeline.gs`:
+- Stary kod prejmenovan na `composeDraftFallback_` (pure rename, telo nezmeneno).
+- Novy `composeDraft_` (~73 radku) volá `chooseEmailTemplate_` → `loadActiveTemplate_` → `renderTemplate_` v try/catch. Pri chybe (vc. `No active template for key:`) fallback na `composeDraftFallback_` + `aswLog INFO`.
+- Vraci 6-field shape `{subject, body, template_key, template_version, template_id, segment_at_send}`. Pri fallback path jsou template_*  prazdne (analytics oznaci jako "untemplated").
+- Sender identity resolvovana inline z `rd.assignee_email` přes `ASSIGNEE_NAMES` map (s defensive `typeof !== 'undefined'` checky pro test contexty), fallback na `DEFAULT_REPLY_TO_*`.
+
+Caller capture pattern (4× `hr.colOrNull` + `hr.set`) zaveden ve vsech 4 LEADS write-back cestach: `buildEmailDrafts`, `processPreviewQueue` (via `artifacts.draft`), `refreshProcessedPreviewCopy`, `processPreviewForLead_` (writes[] array). Spec zminila jen prvni dva, ale ostatni dva jsou stejnou code-path (composeDraft + LEADS row write), takze stejny princip aplikovan vsude pro consistency v analytics.
+
+T3 NEMENI Config.gs, Menu.gs, OutboundEmail.gs, WebAppEndpoint.gs, frontend. Bez `_email_templates` content (T4 ho bootstrapuje) vsechny drafty jdou pres fallback path — ZADNY behavioural change v pilot az do T4.
+
+**T3.5+T4 update (commits ve stejnem PR):** dokoncena cesta od schematu k publikovane prvni sablone.
+
+T3.5 race fix:
+- `composeDraft_` v `computePreviewArtifacts_` se volal PRED tim, nez byl `preview_url` v `rd`. `{preview_url}` placeholder by tedy renderoval prazdne.
+- Fix: `computePreviewArtifacts_` nyni resolvuje `previewUrl = resolvePreviewUrl_(slug, false)` a in-place zapise do `rd.preview_url` pred `composeDraft_(rd)`. Guarded `if (!rd.preview_url)` aby se neclobberovaly existujici hodnoty.
+- Ostatni 2 LEADS-side call sites (`buildEmailDrafts:712`, `refreshProcessedPreviewCopy:1398`) cetly `hr.row(row)` ktery uz obsahuje LEADS row data vc. preview_url, takze tam fix neni potreba.
+
+T4a — assignee profile extension + legacy migration:
+- `ASSIGNEE_NAMES` zmena ze stareho `email→name` literal mapy na IIFE-derived map z noveho `ASSIGNEE_PROFILES`. Domena konsolidovana na `autosmartweb.cz`: 4 stare emaily (`sfridrich@unipong.cz`, `sebastian@autosmartweb.cz`, `tomas@autosmartweb.cz`, `jan.bezemek@autosmartweb.cz`) → 3 nove (`s.fridrich@autosmartweb.cz`, `t.maixner@autosmartweb.cz`, `j.bezemek@autosmartweb.cz`).
+- `ASSIGNEE_PROFILES` ma `{name, role, phone, email_display, web}` per assignee. `DEFAULT_ASSIGNEE_PROFILE` pro empty/unknown fallback.
+- `getAssigneeProfile_(email)` always returns valid profile object.
+- `LEGACY_ASSIGNEE_EMAIL_MAP` map starych klicu na nove + `migrateLegacyAssigneeEmails_` funkce: scanuje LEADS `assignee_email` column, rewritne legacy keys, prazdne cells nikdy nemodifikuje, LockService 10s, vraci pocet upravenych radku.
+- `composeDraft_` v `PreviewPipeline.gs` swap z inline `ASSIGNEE_NAMES[email]` na `getAssigneeProfile_`. Augmented objekt nese kompletni sender block (`sender_name`, `sender_role`, `sender_phone`, `sender_email`, `sender_email_display`, `sender_web`).
+- `buildPlaceholderValues_` rozsireno z 13 na 18 placeholders: pridany sender_role/phone/email_display/web + `service_type_humanized` (defensive `typeof humanizeServiceType_ === 'function'` guard, try/catch fallback na raw service_type).
+
+T4b — first published template:
+- `bootstrapNoWebsiteV1()`: idempotentni publish prvni `no-website` v1 sablony s aprovovanym textem (Phase 2 launch v1.0). Subject: `Dotaz k vašemu webu {business_name}`. Body obsahuje `{service_type_humanized}` / `{city}` / `{preview_url}` / signaturu se sender_*.
+- `migrateAndBootstrap`: convenience wrapper migrace → `setupEmailTemplates` → `bootstrapNoWebsiteV1`. Single-click cutover z menu.
+
+Po spusteni `migrateAndBootstrap` v Apps Script editoru:
+- 3 rows v TEST sheetu maji `tomas@autosmartweb.cz` -> remapnuto na `t.maixner@autosmartweb.cz` (per-mapping count: tomas: 3).
+- `_email_templates` rozšireno o 4 LEADS sloupce (idempotent, run #2 bude no-op).
+- `no-website` v1 publikovana s template_id `ASW-TPL-...`, status='active'. Empty placeholder `no-website` row smazana per `publishTemplate_` step 4.
+- Od te chvile `composeDraft_` pro NO_WEBSITE leady prestane padat do fallbacku → vsechny novy drafty jsou template-rendered + maji `email_template_*` metadata.
+
+T4 NEMENI `OutboundEmail.gs:resolveSenderIdentity_` (per spec). `DEFAULT_REPLY_TO_*` zustavaji na legacy `sebastian@autosmartweb.cz` — viz Known Limits.
+
+**T5 update (commit ve stejnem PR):** backend doPost endpoints + live analytics aggregation. ZADNY behavioural change v existujicim flow — pure additive surface area pro frontend (T6+).
+
+3 nove funkce v `EmailTemplateStore.gs`:
+- `getTemplateAnalytics_()` — single-pass LEADS scan, groupuje podle `(template_key, version)` + per-segment breakdown. Counts: `sent` (rows kde `email_sync_status` ∈ {SENT, REPLIED, LINKED} a non-empty `email_template_id` — fallback drafts excluded), `replied` (subset s `email_reply_type === 'REPLY'`), `won` (subset s `status === 'WON'`). Vraci aktivni-template zero-state entries i kdyz 0 sends, aby UI ukazalo 0/0/0 misto skryti. Stable sort: key ASC, version DESC. Range fetch optimalizovan na min/max needed columns (~50ms / 800 rows ocekavano).
+- `_emptyAnalyticsForAllActiveTemplates_()` — interni helper pro pre-migration pripad.
+- `regenerateDraftForLead_(leadId, templateKeyOverride)` — LockService 5s, lookup row pres existing `findRowByLeadId_`, primy `getRange()` row read (`readSingleRow_` neexistuje v codebase), spusti `composeDraft_(rd)`, zapise 6 cells. Required cells (`email_subject_draft`, `email_body_draft`) pres `hr.col` (throws on missing), metadata cells pres `hr.colOrNull` guard. `templateKeyOverride` param prijima ale ignoruje — placeholder pro T9 manual override path (vyzaduje composeDraft_ refactor s template injection).
+
+9 novych doPost handlers v `WebAppEndpoint.gs`:
+- Read: `listTemplates`, `getTemplate`, `getTemplateDraft`, `getTemplateHistory` (vsechny strip `_rowNum` z return objektu).
+- Write: `saveTemplateDraft` (subject ≤ 500, body ≤ 50000 chars validation, returns `subject_too_long` / `body_too_long`), `discardTemplateDraft`, `publishTemplate` (mapuje 3 publish-gate failures: `commit_message_too_short`, `no_draft`, `empty_draft_content` — frontend mapuje na localized cz hlasky).
+- Analytics: `getTemplateAnalytics`.
+- Operator: `regenerateDraft` (T9 dependency — frontend zatim posila `templateKey` ale handler ho ignoruje az do T9 wiring).
+
+`{ ok: true/false, error: '<reason>' }` shape matches Phase 2 KROK 4-6 (`getPreview`, `sendEmail`, `generatePreview`). Token verification handled upstream v `doPost` `FRONTEND_API_SECRET` check — handlers don't repeat. Existing 5 actions (`updateLead`, `assignLead`, `getPreview`, `generatePreview`, `sendEmail`) untouched.
+
+T5 NEMENI Config.gs, Menu.gs, PreviewPipeline.gs, OutboundEmail.gs, frontend.
+
+**T6 update (commit ve stejnem PR):** Next.js API layer + writer wrappers. Pure proxy vrstva — zadna business logika, jen request validation, AS dispatch, error mapping. Po T6 mohou frontend pages (T7-T11) volat tyto routy primo bez znalosti AS payload shape.
+
+Novy soubor `crm-frontend/src/types/templates.ts`:
+- 4 main interfaces: `EmailTemplate` (16 fields mirror AS sheet schema), `TemplateAnalyticsTotals`, `TemplateAnalyticsEntry`, `RegenerateDraftResult`.
+- `TemplateStatus` union type.
+- `DEFAULT_TEMPLATE_KEYS` const tuple — sync s `EMAIL_TEMPLATE_DEFAULT_KEYS` v `apps-script/Config.gs`.
+- `TEMPLATE_KEY_LABELS` map ('Bez webu', 'Slabý web', 'Má web', 'Follow-up 1/2') pro UI fallback display jmena kdyz template je empty.
+
+`crm-frontend/src/lib/google/apps-script-writer.ts` (+317 radku):
+- 9 new exported async wrappers s Result interfaces — same pattern jako existing `generatePreview` / `sendEmail`: `SHEET_CONFIG.APPS_SCRIPT_URL` POST s `process.env.APPS_SCRIPT_SECRET` token, AS `{ ok }` response shape mapped to `{ success }`.
+- Existujici wrappers (`updateLeadFields`, `generatePreview`, `sendEmail`) untouched.
+
+7 new Next.js API routes (vsechny pouzivaji Next 16 async `params: Promise<...>` pattern dle docs in `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/dynamic-routes.md`):
+
+| Route | Methods | Notes |
+|-------|---------|-------|
+| `/api/templates` | GET | List all templates. 502 on AS upstream failure. |
+| `/api/templates/[key]` | GET | Active template. 404 on `no_active_template`. |
+| `/api/templates/[key]/draft` | GET / PUT / DELETE | Per-key draft CRUD. PUT validates `subject ≤ 500`, `body ≤ 50000`. |
+| `/api/templates/[key]/history` | GET | All versions for key. |
+| `/api/templates/[key]/publish` | POST | Body `{ commitMessage }`. Front-loads `commit_message_too_short` validation. AS publish-gate failures (`no_draft`, `empty_draft_content`) → 400. |
+| `/api/analytics/templates` | GET | Live aggregation per (key, version) + by_segment. |
+| `/api/leads/[id]/regenerate-draft` | POST | Optional `{ templateKey }` (T9 placeholder). 404 on `lead_not_found`. |
+
+Error mapping konvence: 400 = validation (chybi key, JSON parse fail, length over limit), 404 = not found (`no_active_template`, `lead_not_found`), 502 = AS upstream `{ ok: false }`, 500 = unexpected catch.
+
+T6 NEMENI Apps Script files, frontend pages, ostatni komponenty.
+
+**T7 update (commit ve stejnem PR):** prvni UI stranka — landing pro spravu sablon. URL `/settings/templates`. Listing only — editor je T8.
+
+Novy soubor `crm-frontend/src/app/settings/page.tsx` (server component, prerendered):
+- Top-level `/settings` landing s 2 cards: "Šablony emailů" -> `/settings/templates`, "Analýza šablon" -> `/analytics/templates`.
+- Lucide icons (Mail, BarChart3). `metadata.title` set.
+
+Novy soubor `crm-frontend/src/app/settings/templates/page.tsx` (client component):
+- Fetch z `/api/templates` v `useEffect`. Loading state -> `TemplatesPageSkeleton`. Error state -> destruktivni rounded box s "Zkusit znovu" retry tlacitkem + `sonner` toast.
+- `groupByKey` helper — buckets pres `template_key` na `{ active, draft, empty }`. Filtruje `archived` (patri do history view T8).
+- Pre-bootstrap state: pred prvnim spustenim `bootstrapEmptyTemplates_` `/api/templates` muze vratit `[]`. Page presto renderuje 5 placeholder cards (po jedne za kazdy klic v `DEFAULT_TEMPLATE_KEYS`) se statusom `empty`. Klik vede na `/settings/templates/[key]` (T8 — zatim 404).
+- Stable sort: `DEFAULT_TEMPLATE_KEYS` order first (no-website, weak-website, has-website, follow-up-1, follow-up-2), pak custom keys alphabetical.
+
+Novy soubor `crm-frontend/src/components/templates/template-card.tsx`:
+- `StatusBadge` 3 variants: active (green pill `aktivní · v{n}`), draft (amber pill s ✎ icon), empty (gray pill s outline circle). Archived varianta neni — archivovane verze se v listingu nezobrazuji.
+- Shows `name` v uvozovkach kdyz active. Italic "— připraveno k vytvoření —" kdyz empty.
+- "Rozpracovaná verze" amber pill below name kdyz oba `active` + `draft` existuji (operator je v polovine editovani v2).
+- Activated_at byline format: "{authorShort}, {day}. {month}." (e.g. `s.fridrich, 28. 4.`).
+- CTA: "Upravit" (kdyz je active) nebo "Vytvořit" (kdyz empty/no active), oba s ArrowRight icon ktery se posune na hover.
+
+Novy soubor `crm-frontend/src/components/templates/templates-page-skeleton.tsx`:
+- 5 skeleton cards mimicking actual layout (used existing `<Skeleton>` shadcn primitive z `src/components/ui/skeleton.tsx`).
+
+`crm-frontend/src/components/layout/sidebar.tsx` modified (+2 radky): pridana navigation entry "Nastavení" -> `/settings` (Settings lucide icon) na konec `navigation` array. Nav infrastruktura uz existuje — pridani je trivial.
+
+T7 NEMENI: API routes (T6), apps-script-writer (T6), AS files, lead drawer, ostatni komponenty. Editor (T8 sub-task) zatim neni — klik na card v T7 vede na neexistujici cestu, planovane.
+
+**T8 update (commit ve stejnem PR):** plne funkcni editor `/settings/templates/[key]`. Largest frontend task v projektu.
+
+Novy klient renderer `crm-frontend/src/lib/templates/render-preview.ts`:
+- Mirror of AS `EmailTemplateStore.gs:renderTemplate_` + `buildPlaceholderValues_`. Sync requirement — drift mezi tymto a AS = visible bug.
+- 18 known placeholders (LEAD/PREVIEW/SENDER/COMPUTED). Unknown → renderuje prázdné, vrací jejich seznam pro warning UI.
+- `humanizeServiceType` ma 12-entry Czech approximation map (instalatér → instalatérské služby etc.). Best-effort — AS-side puvodni `humanizeServiceType_` v `PreviewPipeline.gs` je canonical, frontend je informativni preview.
+
+`SAMPLE_LEADS` fixture (`sample-leads.ts`): 3 leady s ruznymi profily (s/bez contact_name, s/bez area, s/bez pain_point) aby editor preview umel ukazat vsechny code paths. Sender block hard-coded na Sebastiana — T9 swap na real leads dropdown.
+
+5 novych komponent v `crm-frontend/src/components/templates/`:
+
+| Komponenta | Role |
+|------------|------|
+| `template-editor.tsx` | Hlavni client komponenta, ~280 LOC. Split-pane editor + preview, dirty tracking proti baseline snapshotu, beforeunload warning, paralelni fetch active+draft, AS error code → cz toast mapping. |
+| `template-preview-pane.tsx` | Lead dropdown + email-style preview card (Komu/Předmět/Tělo). useMemo na render. |
+| `placeholder-legend.tsx` | Collapsible panel s 18 placeholdery, click-to-copy `{name}`, warning ribbon kdyz template pouziva unknown tokens. |
+| `publish-dialog.tsx` | shadcn Dialog s commit message Textarea (≥ 5 chars required), AS error code mapping, Loader2 spinner. |
+| `history-drawer.tsx` | shadcn Sheet (right, max-w-xl) s GET `/api/templates/[key]/history`, expandable rows pro detail subject + body, status badges. Refactored na `useCallback`+`useEffect` pattern aby uspokojil React 19 lint rule (`react-you-might-not-need-an-effect`). |
+
+Page route `crm-frontend/src/app/settings/templates/[key]/page.tsx` (server component, dynamic) — async params unwrap, `generateMetadata` for cz title, renders `<TemplateEditor>`.
+
+User flow:
+1. `/settings/templates` (T7) — operator klikne card -> `/settings/templates/no-website` (T8).
+2. Editor nacita active + draft paralelne. Pokud draft existuje, zacina v editoru s draftem (rozpracovano), jinak s active content.
+3. Operator edituje. `dirty` flag se vypocita realtime, "Neuložené změny" badge svítí, beforeunload guard aktivni.
+4. "Uložit draft" -> PUT (`saveTemplateDraft_`). Baseline se posune na nove ulozeny stav.
+5. "Zahodit změny" -> kdyz draft existuje, confirm() + DELETE (`discardTemplateDraft_`); jinak jen reset na active.
+6. "Publikovat..." -> Dialog s commit message ≥ 5 chars -> POST (`publishTemplate_`). Po success: baseline reset na new active, draft cleared.
+7. "Historie" -> Sheet s GET history. Expand row pro inline preview (read-only).
+
+Live preview: na kazdou zmenu editoru se subject + body re-rendituji s vybranym sample leadem. PlaceholderLegend warning ukaze unknown tokens v real-time.
+
+T8 NEMENI: API routes (T6), apps-script-writer (T6), AS files, lead drawer (T9 scope), listing page (T7).
+
+**T9 update (commit ve stejnem PR):** consumer integration. Dva uplne separatni features ktere oba consumuji T6 endpoints — zadne nove API, zadne AS zmeny, pure UI work.
+
+Feature 1 — lead drawer template selector + regenerate (`lead-detail-drawer.tsx`):
+- Pridana sekce nad subject input: `<select>` s 6 options (auto-select default + 5 template keys: no-website, weak-website, has-website, follow-up-1, follow-up-2) + "Vygenerovat znovu" button.
+- State seedovan z `data.emailTemplateKey` pri fetchLead — operator hned vidi ktera sablona byla pouzita pro current draft.
+- Click "Vygenerovat znovu" -> POST `/api/leads/[id]/regenerate-draft` s `{ templateKey }`. Confirm dialog kdyz current draft neni prazdny (zabranuje accidental overwrite).
+- Po success: drawer state refreshovan z response (subject/body/templateKey), success toast s template_key + version pokud bylo template-renderovano, "fallback text" toast pokud doslo k fallback path.
+- Below selector: amber warning hláška kdyz draft existuje ale `templateKey === ''` (= fallback). Vizualni signal pro operatora ze tento draft NEPOUZIL T8 sablony.
+
+Feature 2 — real leads in editor preview pane (`template-preview-pane.tsx`):
+- On mount fetch `/api/leads`, mapuje pres novy `leadToSampleLead` helper (LeadListItem -> SampleLead shape).
+- Filter: jen leady s `previewUrl` (jinak `{preview_url}` placeholder by renderoval prazdne, useless preview). Cap 10 entries.
+- Dropdown rendering: `<optgroup>` "Reálné leady (qualified, s preview)" first, pak `<optgroup>` "— ukázková data —" se 3 sample leads jako fallback.
+- Auto-select: pri prvním load po fetch, pokud current `selectedLeadId` patri sample leadu, prepne na first real lead (operator usually wants real data).
+- Graceful fallback: pokud fetch selze nebo prázdne → zobrazi se jen sample leads, zadny error toast (silent).
+- Cancellation flag v cleanup zabranuje setState po unmount.
+
+Type infrastruktura — `emailTemplateKey: string` field threaded through 6 souboru:
+- `lib/domain/lead.ts` — canonical Lead interface (mezi emailBodyDraft a emailSyncStatus)
+- `lib/mappers/sheet-to-domain.ts` — map z `email_template_key` Sheets sloupce
+- `lib/mock/leads-data.ts` — 12 mock entries s `emailTemplateKey: ''`
+- `components/leads/lead-detail-drawer.tsx` — local Lead interface + state hydration
+
+T9 NEMENI: AS files, API routes, apps-script-writer, T8 editor main shell, T7 listing.
+
+**T11 update (commit ve stejnem PR):** analytics dashboard. Pure consumer UI nad `/api/analytics/templates` (T6). T10 — history view enhancements — preskocen, deferred do backlogu (current `HistoryDrawer` z T8 je dostatecny pro MVP).
+
+5 novych souboru, 1 modifikovany:
+
+| File | Role |
+|------|------|
+| `app/analytics/page.tsx` | `/analytics` landing (server, prerendered). 1 card → `/analytics/templates`. |
+| `app/analytics/templates/page.tsx` | Main page (client). Fetch on mount + manual refresh button. Summary box (sent/replied/won across active templates). Card grid keyed by `template_key::template_version`. Zero-state link na settings. |
+| `components/analytics/template-stats-card.tsx` | Card per template version. 3-column metrics. Reply rate `replied/sent`, win rate `won/replied` (stricter denominator). Expand "Per segment ({n})" → `SegmentBreakdown`. ExternalLink icon → editor. |
+| `components/analytics/segment-breakdown.tsx` | Per-segment rows, sorted by sent desc. Each row: name + sent/replied/won counts + percentages. |
+| `components/analytics/analytics-skeleton.tsx` | 3 skeleton cards mimicking TemplateStatsCard layout. |
+| `components/layout/sidebar.tsx` | +1 nav item "Analýza" → `/analytics`, BarChart3 icon. |
+
+UX decisions:
+- Win rate denominator: `won / replied` (ne `won / sent`). Per spec — stricter, more meaningful pro sales konverzi (z odpovědí, kolik zavřených dealů). Sent → replied je separate funnel step.
+- Summary box agreguje pouze `status === 'active'` templates. Archived versions ma kazdy svou kartu, ale neceleknuje se do rolling totals (jejich sent/replied/won ovlivňují historicke data, ne current performance).
+- Card per VERSION (ne per key): pokud no-website ma v1 (archived) a v2 (active), uvidis 2 karty. Listing per key by zatemnoval performance srovnani mezi verzemi.
+- Žádný cache — refresh button je explicit, fetch on mount. Backend AS-side `getTemplateAnalytics_` je single-pass LEADS scan (~50ms/800 rows), low cost.
+- Zero-state na cards: kdyz `totals.sent === 0`, "Zatím žádné odeslané emaily s touto šablonou." (active template ale 0 sends — typicky just-published nebo bez fitting leadu).
+
+T11 NEMENI: AS files, API routes, T7-T9 components.
+
+**T12 update (commit ve stejnem PR):** testing layer. Tri vrstvy ochrany B-13 invariantu:
+
+1. **Drift detection** (`scripts/tests/b13-render-drift.test.ts`) — frontend `renderPreview` MUSI rendrovat byte-identicky s AS `renderTemplate_`. Drift = klient dostane jiny email, nez obchodnik schvalil. Catastrophic UX bug. 14 assertions pinning expected outputs pro znamy fixtures (full no-website body, greeting variants, firm_ref fallback, unknown placeholders, service_type humanization, case-insensitive matching, preview_url + sender block).
+
+2. **Routes smoke** (`scripts/tests/b13-routes-smoke.mjs`) — 7 assertions hitting kazdou novou T6 routu. Validuje response shape proti `types/templates.ts` kontraktu + znama error-code paths. Gracefully SKIP pokud `NEXT_TEST_URL` unset — local dev bez serveru je normalni.
+
+3. **AS lifecycle** (`apps-script/tests/B13_template_lifecycle_test.gs`) — 8 manual-runner funkci pro lifecycle: setup idempotence, save/publish/archive cykly, commit message validace (< 5 chars block), empty draft block, render output, chooseTemplate auto-select pro 3 web stavy, fallback path. `B13_runAll` aggregator + `B13_cleanup_` pro `_test_b13_*` rows. Manual editor run before deploy; nepushne se na PROD (`.claspignore` excluduje `tests/**`).
+
+`npm run test:b13` chainuje drift + smoke (drift fails CI hard, smoke skips graceful). AS lifecycle staying as editor-run only — Apps Script nelze rozumne integrovat do node-based test runneru bez clasp run, ktere je heavy + flaky.
+
+T12 caught real bug on first drift run: pinned expected `v Praze` (Czech locative declension) ale neither AS nor frontend declines city names — raw `{city}` substituce produkuje `v Praha`. Demonstrace ze drift test funguje. Updated expected na realistic raw form. Documented in Decisions: kdyz se v budoucnu pridava city declension helper, MUSI byt pridan do obou rendereru zaroven, jinak T12 fails na CI.
+
+T12 NEMENI: production AS code, production frontend code, existing B-stream tests.
+- **Owner:** Stream B
+- **Code:** apps-script/Config.gs (modified), apps-script/EmailTemplateStore.gs (new (T1)), apps-script/EmailTemplateStore.gs (modified (T2)), apps-script/EmailTemplateStore.gs (modified (T3)), apps-script/PreviewPipeline.gs (modified (T3)), apps-script/Config.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T4)), apps-script/PreviewPipeline.gs (modified (T3.5+T4)), apps-script/Menu.gs (modified (T4)), apps-script/EmailTemplateStore.gs (modified (T5)), apps-script/WebAppEndpoint.gs (modified (T5)), crm-frontend/src/types/templates.ts (new (T6)), crm-frontend/src/lib/google/apps-script-writer.ts (modified (T6)), crm-frontend/src/app/api/templates/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/draft/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/history/route.ts (new (T6)), crm-frontend/src/app/api/templates/[key]/publish/route.ts (new (T6)), crm-frontend/src/app/api/analytics/templates/route.ts (new (T6)), crm-frontend/src/app/api/leads/[id]/regenerate-draft/route.ts (new (T6)), crm-frontend/src/app/settings/page.tsx (new (T7)), crm-frontend/src/app/settings/templates/page.tsx (new (T7)), crm-frontend/src/components/templates/template-card.tsx (new (T7)), crm-frontend/src/components/templates/templates-page-skeleton.tsx (new (T7)), crm-frontend/src/components/layout/sidebar.tsx (modified (T7)), crm-frontend/src/lib/templates/sample-leads.ts (new (T8)), crm-frontend/src/lib/templates/render-preview.ts (new (T8)), crm-frontend/src/components/templates/placeholder-legend.tsx (new (T8)), crm-frontend/src/components/templates/template-preview-pane.tsx (new (T8)), crm-frontend/src/components/templates/publish-dialog.tsx (new (T8)), crm-frontend/src/components/templates/history-drawer.tsx (new (T8)), crm-frontend/src/components/templates/template-editor.tsx (new (T8)), crm-frontend/src/app/settings/templates/[key]/page.tsx (new (T8)), crm-frontend/src/lib/domain/lead.ts (modified (T9)), crm-frontend/src/lib/mappers/sheet-to-domain.ts (modified (T9)), crm-frontend/src/lib/mock/leads-data.ts (modified (T9)), crm-frontend/src/lib/templates/sample-leads.ts (modified (T9)), crm-frontend/src/components/templates/template-preview-pane.tsx (modified (T9)), crm-frontend/src/components/leads/lead-detail-drawer.tsx (modified (T9)), crm-frontend/src/app/analytics/page.tsx (new (T11)), crm-frontend/src/app/analytics/templates/page.tsx (new (T11)), crm-frontend/src/components/analytics/template-stats-card.tsx (new (T11)), crm-frontend/src/components/analytics/segment-breakdown.tsx (new (T11)), crm-frontend/src/components/analytics/analytics-skeleton.tsx (new (T11)), crm-frontend/src/components/layout/sidebar.tsx (modified (T11)), scripts/tests/b13-render-drift.test.ts (new (T12)), scripts/tests/b13-routes-smoke.mjs (new (T12)), apps-script/tests/B13_template_lifecycle_test.gs (new (T12)), apps-script/.claspignore (new (T12)), package.json (modified (T12)), apps-script/Menu.gs (modified)
+- **Docs:** docs/30-task-records/B-13.md, docs/11-change-log.md, docs/29-task-registry.md
+
 ## 2026-04-27
 
 ### [B/B-12] Phase 2 hotfix — brief phone/email aliases for marketing web compat — DONE

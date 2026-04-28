@@ -24,6 +24,40 @@ var PREVIEW_SHEET_NAME = '_previews';
 var HEADER_ROW      = 1;
 var DATA_START_ROW  = 2;
 
+/* ── B-13: Email templates store (hidden sheet) ───────────── */
+var EMAIL_TEMPLATES_SHEET_NAME = '_email_templates';
+
+// Schema — ORDER MATTERS, headers are written in this order.
+// All columns are strings/dates; no numeric formulas.
+var EMAIL_TEMPLATES_SHEET_HEADERS = [
+  'template_id',         // ASW-TPL-{ts_base36}-{rand4} — immutable identifier
+  'template_key',        // 'no-website' | 'weak-website' | 'has-website' | 'follow-up-1' | 'follow-up-2'
+  'version',             // 0 (empty placeholder) / 1+ (active or archived)
+  'name',                // human-readable, e.g. 'No website — initial outreach'
+  'description',         // 1–3 sentences, what audience this targets
+  'subject_template',    // raw template string with {placeholders}
+  'body_template',       // raw template string with {placeholders}
+  'placeholders_used',   // CSV of placeholder names found in subject+body
+  'status',              // 'empty' | 'draft' | 'active' | 'archived'
+  'commit_message',      // required when publishing (status='active'), min 5 chars
+  'created_at',          // ISO timestamp
+  'created_by',          // email of user who created this version
+  'activated_at',        // ISO timestamp when status flipped to active
+  'activated_by',        // email of user who published this version
+  'archived_at',         // ISO timestamp when status flipped from active to archived
+  'parent_template_id'   // template_id of the version this was published over (null for v1)
+];
+
+// Default template keys to seed as empty placeholders on first run.
+// Frozen for now — adjust when more web templates ship.
+var EMAIL_TEMPLATE_DEFAULT_KEYS = [
+  'no-website',
+  'weak-website',
+  'has-website',
+  'follow-up-1',
+  'follow-up-2'
+];
+
 /* ── Pipeline control ─────────────────────────────────────── */
 var DRY_RUN        = true;
 var ENABLE_WEBHOOK = false;
@@ -132,7 +166,13 @@ var EXTENSION_COLUMNS = [
   'reviewed_by',
   // KROK 5: multi-user assignee model — '' = unassigned, jinak email
   // z ALLOWED_USERS (== Object.keys(ASSIGNEE_NAMES) — single source of truth)
-  'assignee_email'
+  'assignee_email',
+  // B-13: Email template tracking — written at draft generation time,
+  // immutable through send/reply lifecycle. Enables analytics joins.
+  'email_template_key',      // e.g. 'no-website'
+  'email_template_version',  // e.g. '1' (string for sheet compat)
+  'email_template_id',       // FK to _email_templates.template_id
+  'email_segment_at_send'    // snapshot of segment at draft time
 ];
 
 /* ── Preview stage state machine ──────────────────────────── */
@@ -255,25 +295,107 @@ var EMERGENCY_SEGMENTS = [
   'havarijni','zamecnik','locksmith','nonstop'
 ];
 
-/* ── Pilot assignee identities (KROK 4/5) ─────────────────────
-   Maps lead.assignee_email → display name used for Reply-To header.
-   Used by resolveSenderIdentity_() in OutboundEmail.gs.
-
-   Sender of all outbound mail is the deploying account
-   (sfridrich@unipong.cz under executeAs: USER_DEPLOYING). Reply-To
-   redirects replies to the assigned operator's mailbox.
-
-   When lead has no assignee_email (KROK 4 state, before column is
-   added in KROK 5) or value is unknown, falls back to DEFAULT_REPLY_TO.
-
-   Diacritics: kept exact (Sebastián, Tomáš). All .gs files are saved
-   as UTF-8; clasp + Apps Script editor preserve encoding.            */
-var ASSIGNEE_NAMES = {
-  'sfridrich@unipong.cz':       'Sebastián Fridrich',
-  'sebastian@autosmartweb.cz':  'Sebastián Fridrich',
-  'tomas@autosmartweb.cz':      'Tomáš Maixner',
-  'jan.bezemek@autosmartweb.cz':'Jan Bezemek'
+/* ── B-13 T4: legacy assignee email migration map ───────────
+ * Maps historical assignee_email values found in LEADS rows
+ * (and ASSIGNEE_NAMES at various points in time) to their
+ * canonical autosmartweb.cz domain replacement.
+ *
+ * Used by migrateLegacyAssigneeEmails_ (one-shot menu run)
+ * to rewrite assignee_email cells before ALLOWED_USERS
+ * membership tightens to the 3 new keys only.
+ *
+ * Add new mappings here if more historical emails surface.
+ * Empty/null assignees are NEVER touched (None means
+ * unassigned, valid state).
+ * ──────────────────────────────────────────────────────────── */
+var LEGACY_ASSIGNEE_EMAIL_MAP = {
+  'sfridrich@unipong.cz':         's.fridrich@autosmartweb.cz',
+  'sebastian@autosmartweb.cz':    's.fridrich@autosmartweb.cz',
+  'tomas@autosmartweb.cz':        't.maixner@autosmartweb.cz',
+  'jan.bezemek@autosmartweb.cz':  'j.bezemek@autosmartweb.cz'
 };
+
+/* ── B-13 T4: extended assignee profiles ────────────────────
+ * ASSIGNEE_PROFILES is the new canonical structure with full
+ * contact info per assignee. Used by composeDraft_ to populate
+ * sender_* placeholders in email templates.
+ *
+ * ASSIGNEE_NAMES (below) is kept as a legacy lookup for
+ * resolveSenderIdentity_ in OutboundEmail.gs and other call sites
+ * that only need the display name. It is derived from the source
+ * of truth ASSIGNEE_PROFILES at file load via the helper below.
+ *
+ * Keys are lowercase emails. Update here when team grows.
+ *
+ * Sender of all outbound mail is the deploying account under
+ * executeAs: USER_DEPLOYING; Reply-To redirects replies to the
+ * assigned operator's mailbox.
+ *
+ * Diacritics: kept exact (Sebastián, Tomáš). All .gs files are
+ * saved as UTF-8; clasp + Apps Script editor preserve encoding.
+ * ──────────────────────────────────────────────────────────── */
+var ASSIGNEE_PROFILES = {
+  's.fridrich@autosmartweb.cz': {
+    name:          'Sebastián Fridrich',
+    role:          'webové návrhy a péče o klienty',
+    phone:         '+420 601 557 018',
+    email_display: 's.fridrich@autosmartweb.cz',
+    web:           'autosmartweb.cz'
+  },
+  't.maixner@autosmartweb.cz': {
+    name:          'Tomáš Maixner',
+    role:          'webové návrhy a péče o klienty',
+    phone:         '+420 722 525 872',
+    email_display: 't.maixner@autosmartweb.cz',
+    web:           'autosmartweb.cz'
+  },
+  'j.bezemek@autosmartweb.cz': {
+    name:          'Jan Bezemek',
+    role:          'webové návrhy a péče o klienty',
+    phone:         '+420 773 297 666',
+    email_display: 'j.bezemek@autosmartweb.cz',
+    web:           'autosmartweb.cz'
+  }
+};
+
+// Default fallback profile when assignee_email is empty or unknown.
+// Used by getAssigneeProfile_ + resolveSenderIdentity_ as last resort.
+var DEFAULT_ASSIGNEE_PROFILE = {
+  name:          'Sebastián Fridrich',
+  role:          'webové návrhy a péče o klienty',
+  phone:         '+420 601 557 018',
+  email_display: 's.fridrich@autosmartweb.cz',
+  web:           'autosmartweb.cz'
+};
+
+// Legacy lookup — derived from ASSIGNEE_PROFILES for back-compat.
+// Anything that only needs the display name reads this; new code
+// should use getAssigneeProfile_ instead.
+var ASSIGNEE_NAMES = (function buildAssigneeNamesLegacy_() {
+  var out = {};
+  for (var k in ASSIGNEE_PROFILES) {
+    if (Object.prototype.hasOwnProperty.call(ASSIGNEE_PROFILES, k)) {
+      out[k] = ASSIGNEE_PROFILES[k].name;
+    }
+  }
+  return out;
+})();
+
+/**
+ * Returns the full profile (name, role, phone, email_display, web) for
+ * the given assignee email. Falls back to DEFAULT_ASSIGNEE_PROFILE if
+ * the email is empty or not in ASSIGNEE_PROFILES.
+ *
+ * Always returns a valid object (never null) — callers can safely read
+ * any field without null checks.
+ */
+function getAssigneeProfile_(assigneeEmail) {
+  var key = String(assigneeEmail || '').trim().toLowerCase();
+  if (key && ASSIGNEE_PROFILES[key]) {
+    return ASSIGNEE_PROFILES[key];
+  }
+  return DEFAULT_ASSIGNEE_PROFILE;
+}
 
 var DEFAULT_REPLY_TO_EMAIL = 'sebastian@autosmartweb.cz';
 var DEFAULT_REPLY_TO_NAME  = 'Sebastián Fridrich';

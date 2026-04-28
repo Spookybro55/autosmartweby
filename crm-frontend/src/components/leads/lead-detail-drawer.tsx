@@ -108,6 +108,7 @@ interface Lead {
   previewHeadline: string;
   emailSubjectDraft: string;
   emailBodyDraft: string;
+  emailTemplateKey: string;
   emailSyncStatus: string;
   emailReplyType: string;
   lastEmailSentAt: string;
@@ -230,6 +231,10 @@ export function LeadDetailDrawer({
   // persists the override into draft columns before the GmailApp call).
   const [emailSubject, setEmailSubject] = useState<string>("");
   const [emailBody, setEmailBody] = useState<string>("");
+  // B-13 T9: template selector + regenerate. templateKey carries the
+  // chosen override; '' means "auto-select via chooseEmailTemplate_".
+  const [templateKey, setTemplateKey] = useState<string>("");
+  const [regenerating, setRegenerating] = useState<boolean>(false);
   const [sendState, setSendState] = useState<
     "idle" | "sending" | "success" | "error"
   >("idle");
@@ -274,6 +279,8 @@ export function LeadDetailDrawer({
       // post-send refresh).
       setEmailSubject(data.emailSubjectDraft ?? "");
       setEmailBody(data.emailBodyDraft ?? "");
+      // B-13 T9: surface the template key the draft was generated with.
+      setTemplateKey(data.emailTemplateKey ?? "");
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
         toast.error("Chyba při načítání leadu");
@@ -361,6 +368,52 @@ export function LeadDetailDrawer({
       setPreviewState("error");
       setPreviewError(msg);
       toast.error("Chyba při generování preview");
+    }
+  }
+
+  // B-13 T9: re-run composeDraft_ for this lead, optionally with a
+  // different template key. AS T5 currently honors only auto-select
+  // (manual override is a no-op until further AS work) — but the
+  // dropdown is still useful as visibility into which template was used.
+  async function handleRegenerate() {
+    if (!leadId || regenerating) return;
+    if (
+      (emailSubject || emailBody) &&
+      !confirm("Regenerace přepíše současný draft. Pokračovat?")
+    ) {
+      return;
+    }
+    setRegenerating(true);
+    try {
+      const res = await fetch(`/api/leads/${leadId}/regenerate-draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ templateKey: templateKey || "" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const code = String(data.error ?? "");
+        const msg =
+          code === "lead_not_found"
+            ? "Lead nebyl nalezen."
+            : code || "Regenerace selhala.";
+        toast.error(msg);
+        return;
+      }
+      const draft = data.draft;
+      setEmailSubject(draft.subject ?? "");
+      setEmailBody(draft.body ?? "");
+      setTemplateKey(draft.template_key ?? "");
+      toast.success(
+        draft.template_key
+          ? `Draft regenerován z ${draft.template_key} v${draft.template_version}`
+          : "Draft regenerován (fallback text)",
+      );
+      onSaved();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Chyba při regeneraci");
+    } finally {
+      setRegenerating(false);
     }
   }
 
@@ -688,6 +741,51 @@ export function LeadDetailDrawer({
                       )}
 
                       <div className="space-y-3">
+                        {/* B-13 T9: template selector + regenerate */}
+                        <div className="space-y-1.5">
+                          <Label htmlFor="drawer-template-key">Šablona</Label>
+                          <div className="flex items-center gap-2">
+                            <select
+                              id="drawer-template-key"
+                              value={templateKey}
+                              onChange={(e) => setTemplateKey(e.target.value)}
+                              disabled={regenerating || sendState === "sending"}
+                              className="flex-1 rounded-md border bg-background px-2 py-1.5 text-sm"
+                            >
+                              <option value="">— auto-select —</option>
+                              <option value="no-website">Bez webu (no-website)</option>
+                              <option value="weak-website">Slabý web (weak-website)</option>
+                              <option value="has-website">Má web (has-website)</option>
+                              <option value="follow-up-1">Follow-up 1</option>
+                              <option value="follow-up-2">Follow-up 2</option>
+                            </select>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={handleRegenerate}
+                              disabled={regenerating || sendState === "sending"}
+                            >
+                              {regenerating ? (
+                                <Loader2 className="size-4 animate-spin" />
+                              ) : (
+                                "Vygenerovat znovu"
+                              )}
+                            </Button>
+                          </div>
+                          {templateKey && (
+                            <p className="text-xs text-muted-foreground">
+                              Aktuálně:{" "}
+                              <code className="font-mono">{templateKey}</code>
+                            </p>
+                          )}
+                          {!templateKey && (emailSubject || emailBody) && (
+                            <p className="text-xs italic text-amber-700 dark:text-amber-400">
+                              Draft vygenerován bez šablony (fallback hardcoded text).
+                              Po publikaci no-website šablony můžeš regenerovat.
+                            </p>
+                          )}
+                        </div>
                         <div className="space-y-1.5">
                           <Label htmlFor="drawer-email-subject">Předmět</Label>
                           <Input

@@ -1,6 +1,11 @@
 import { SHEET_CONFIG, OUTREACH_STAGE_REVERSE, OUTREACH_STAGES } from '@/lib/config';
 import type { LeadEditableFields } from '@/lib/domain/lead';
 import type { OutreachStageKey } from '@/lib/config';
+import type {
+  EmailTemplate,
+  TemplateAnalyticsEntry,
+  RegenerateDraftResult,
+} from '@/types/templates';
 
 interface WriteResult {
   success: boolean;
@@ -204,5 +209,317 @@ export async function sendEmail(
       success: false,
       error: err instanceof Error ? err.message : 'Unknown error',
     };
+  }
+}
+
+
+// ───── B-13 T6: Email template management ─────
+
+export interface ListTemplatesResult {
+  success: boolean;
+  templates?: EmailTemplate[];
+  error?: string;
+}
+
+export async function listTemplates(): Promise<ListTemplatesResult> {
+  const url = SHEET_CONFIG.APPS_SCRIPT_URL;
+  if (!url) return { success: false, error: 'Apps Script URL not configured' };
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'listTemplates',
+        token: process.env.APPS_SCRIPT_SECRET,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return { success: false, error: `HTTP ${res.status}: ${text}` };
+    }
+    const data = await res.json();
+    if (data.ok === true) return { success: true, templates: data.templates };
+    return { success: false, error: data.error ?? 'Apps Script returned ok=false' };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
+
+export interface GetTemplateResult {
+  success: boolean;
+  template?: EmailTemplate;
+  error?: string;
+}
+
+export async function getTemplate(key: string): Promise<GetTemplateResult> {
+  const url = SHEET_CONFIG.APPS_SCRIPT_URL;
+  if (!url) return { success: false, error: 'Apps Script URL not configured' };
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'getTemplate',
+        key,
+        token: process.env.APPS_SCRIPT_SECRET,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return { success: false, error: `HTTP ${res.status}: ${text}` };
+    }
+    const data = await res.json();
+    if (data.ok === true) return { success: true, template: data.template };
+    return { success: false, error: data.error ?? 'Apps Script returned ok=false' };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
+
+export interface GetTemplateDraftResult {
+  success: boolean;
+  draft?: EmailTemplate | null;
+  error?: string;
+}
+
+export async function getTemplateDraft(key: string): Promise<GetTemplateDraftResult> {
+  const url = SHEET_CONFIG.APPS_SCRIPT_URL;
+  if (!url) return { success: false, error: 'Apps Script URL not configured' };
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'getTemplateDraft',
+        key,
+        token: process.env.APPS_SCRIPT_SECRET,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return { success: false, error: `HTTP ${res.status}: ${text}` };
+    }
+    const data = await res.json();
+    if (data.ok === true) return { success: true, draft: data.draft };
+    return { success: false, error: data.error ?? 'Apps Script returned ok=false' };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
+
+export interface GetTemplateHistoryResult {
+  success: boolean;
+  history?: EmailTemplate[];
+  error?: string;
+}
+
+export async function getTemplateHistory(key: string): Promise<GetTemplateHistoryResult> {
+  const url = SHEET_CONFIG.APPS_SCRIPT_URL;
+  if (!url) return { success: false, error: 'Apps Script URL not configured' };
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'getTemplateHistory',
+        key,
+        token: process.env.APPS_SCRIPT_SECRET,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return { success: false, error: `HTTP ${res.status}: ${text}` };
+    }
+    const data = await res.json();
+    if (data.ok === true) return { success: true, history: data.history };
+    return { success: false, error: data.error ?? 'Apps Script returned ok=false' };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
+
+export interface SaveTemplateDraftResult {
+  success: boolean;
+  draft?: EmailTemplate;
+  error?: string;
+}
+
+export async function saveTemplateDraft(
+  key: string,
+  opts: { subject: string; body: string; name?: string; description?: string },
+): Promise<SaveTemplateDraftResult> {
+  const url = SHEET_CONFIG.APPS_SCRIPT_URL;
+  if (!url) return { success: false, error: 'Apps Script URL not configured' };
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'saveTemplateDraft',
+        key,
+        subject: opts.subject,
+        body: opts.body,
+        name: opts.name ?? '',
+        description: opts.description ?? '',
+        token: process.env.APPS_SCRIPT_SECRET,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return { success: false, error: `HTTP ${res.status}: ${text}` };
+    }
+    const data = await res.json();
+    if (data.ok === true) return { success: true, draft: data.draft };
+    return { success: false, error: data.error ?? 'Apps Script returned ok=false' };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
+
+export interface DiscardTemplateDraftResult {
+  success: boolean;
+  deleted?: boolean;
+  error?: string;
+}
+
+export async function discardTemplateDraft(key: string): Promise<DiscardTemplateDraftResult> {
+  const url = SHEET_CONFIG.APPS_SCRIPT_URL;
+  if (!url) return { success: false, error: 'Apps Script URL not configured' };
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'discardTemplateDraft',
+        key,
+        token: process.env.APPS_SCRIPT_SECRET,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return { success: false, error: `HTTP ${res.status}: ${text}` };
+    }
+    const data = await res.json();
+    if (data.ok === true) return { success: true, deleted: data.deleted };
+    return { success: false, error: data.error ?? 'Apps Script returned ok=false' };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
+
+export interface PublishTemplateResult {
+  success: boolean;
+  template?: EmailTemplate;
+  error?: string;
+}
+
+export async function publishTemplate(
+  key: string,
+  commitMessage: string,
+): Promise<PublishTemplateResult> {
+  const url = SHEET_CONFIG.APPS_SCRIPT_URL;
+  if (!url) return { success: false, error: 'Apps Script URL not configured' };
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'publishTemplate',
+        key,
+        commitMessage,
+        token: process.env.APPS_SCRIPT_SECRET,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return { success: false, error: `HTTP ${res.status}: ${text}` };
+    }
+    const data = await res.json();
+    if (data.ok === true) return { success: true, template: data.template };
+    return { success: false, error: data.error ?? 'Apps Script returned ok=false' };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
+
+export interface GetTemplateAnalyticsResult {
+  success: boolean;
+  analytics?: TemplateAnalyticsEntry[];
+  error?: string;
+}
+
+export async function getTemplateAnalytics(): Promise<GetTemplateAnalyticsResult> {
+  const url = SHEET_CONFIG.APPS_SCRIPT_URL;
+  if (!url) return { success: false, error: 'Apps Script URL not configured' };
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'getTemplateAnalytics',
+        token: process.env.APPS_SCRIPT_SECRET,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return { success: false, error: `HTTP ${res.status}: ${text}` };
+    }
+    const data = await res.json();
+    if (data.ok === true) return { success: true, analytics: data.analytics };
+    return { success: false, error: data.error ?? 'Apps Script returned ok=false' };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
+
+export interface RegenerateDraftWriterResult {
+  success: boolean;
+  draft?: RegenerateDraftResult;
+  error?: string;
+}
+
+export async function regenerateDraft(
+  leadId: string,
+  templateKey?: string,
+): Promise<RegenerateDraftWriterResult> {
+  const url = SHEET_CONFIG.APPS_SCRIPT_URL;
+  if (!url) return { success: false, error: 'Apps Script URL not configured' };
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'regenerateDraft',
+        leadId,
+        templateKey: templateKey ?? '',
+        token: process.env.APPS_SCRIPT_SECRET,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return { success: false, error: `HTTP ${res.status}: ${text}` };
+    }
+    const data = await res.json();
+    if (data.ok === true) return { success: true, draft: data.draft };
+    return { success: false, error: data.error ?? 'Apps Script returned ok=false' };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
   }
 }

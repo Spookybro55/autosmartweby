@@ -1,0 +1,12 @@
+# Ignore test runners — manual editor execution only, never push to PROD.
+tests/**
+
+# Standard clasp ignores
+.clasp.json
+.claspignore
+.gitignore
+.git/**
+node_modules/**
+README.md
+package.json
+package-lock.json
