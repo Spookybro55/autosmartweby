@@ -78,6 +78,25 @@ function doPost(e) {
       return handleRegenerateDraft_(payload);
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // A-11 T13: Scrape orchestration + dedupe review endpoints
+    // ═══════════════════════════════════════════════════════════
+    if (payload.action === 'triggerScrape') {
+      return handleTriggerScrape_(payload);
+    }
+    if (payload.action === 'ingestScrapedRows') {
+      return handleIngestScrapedRows_(payload);
+    }
+    if (payload.action === 'listScrapeHistory') {
+      return handleListScrapeHistory_(payload);
+    }
+    if (payload.action === 'listPendingReview') {
+      return handleListPendingReview_(payload);
+    }
+    if (payload.action === 'resolveReview') {
+      return handleResolveReview_(payload);
+    }
+
     return jsonResponse_({ success: false, error: 'Unknown action: ' + payload.action });
 
   } catch (err) {
@@ -541,4 +560,411 @@ function handleRegenerateDraft_(payload) {
       'leadId=' + leadId + ' err=' + msg);
     return jsonResponse_({ ok: false, error: msg });
   }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   A-11 — Scrape orchestration + dedupe review handlers
+   ═══════════════════════════════════════════════════════════════
+   Convention (mirrors B-13): all return { ok: true|false, error?: ... }.
+   Token verification is upstream in doPost FRONTEND_API_SECRET check.
+   GH Actions ingest callback uses per-job jobToken in addition to
+   the global secret — defense in depth.
+   ═══════════════════════════════════════════════════════════════ */
+
+function handleTriggerScrape_(payload) {
+  var portal = String(payload.portal || '').trim();
+  var segment = String(payload.segment || '').trim();
+  var city = String(payload.city || '').trim();
+  var district = String(payload.district || '').trim();
+  var maxResults = Number(payload.max_results) || 30;
+  var force = payload.force === true;
+
+  // Validation
+  if (!portal) return jsonResponse_({ ok: false, error: 'missing_portal' });
+  if (!segment) return jsonResponse_({ ok: false, error: 'missing_segment' });
+  if (!city) return jsonResponse_({ ok: false, error: 'missing_city' });
+
+  var portalAllowed = false;
+  for (var i = 0; i < SUPPORTED_SCRAPE_PORTALS.length; i++) {
+    if (SUPPORTED_SCRAPE_PORTALS[i] === portal) { portalAllowed = true; break; }
+  }
+  if (!portalAllowed) {
+    return jsonResponse_({
+      ok: false,
+      error: 'unsupported_portal',
+      supported: SUPPORTED_SCRAPE_PORTALS
+    });
+  }
+
+  if (segment.length > 100) return jsonResponse_({ ok: false, error: 'segment_too_long' });
+  if (city.length > 100) return jsonResponse_({ ok: false, error: 'city_too_long' });
+  if (district.length > 100) return jsonResponse_({ ok: false, error: 'district_too_long' });
+
+  try {
+    // Duplicate-query check unless force=true
+    if (!force) {
+      var existing = findRecentMatchingJob_({
+        portal: portal, segment: segment, city: city, district: district
+      });
+      if (existing) {
+        return jsonResponse_({
+          ok: true,
+          duplicate: true,
+          previousJob: stripJobInternal_(existing)
+        });
+      }
+    }
+
+    var registered = recordScrapeJob_({
+      portal: portal,
+      segment: segment,
+      city: city,
+      district: district,
+      max_results: maxResults
+    });
+
+    return jsonResponse_({
+      ok: true,
+      duplicate: false,
+      job_id: registered.job_id,
+      job_token: registered.job_token
+    });
+  } catch (err) {
+    aswLog_('ERROR', 'handleTriggerScrape_', err.message);
+    return jsonResponse_({ ok: false, error: err.message });
+  }
+}
+
+
+function handleIngestScrapedRows_(payload) {
+  var jobId = String(payload.jobId || '').trim();
+  var jobToken = String(payload.jobToken || '').trim();
+  var rows = payload.rows;
+  var errorMessage = String(payload.error_message || '').trim();
+
+  if (!jobId) return jsonResponse_({ ok: false, error: 'missing_jobId' });
+  if (!jobToken) return jsonResponse_({ ok: false, error: 'missing_jobToken' });
+
+  try {
+    var job = getScrapeJob_(jobId);
+    if (!job) return jsonResponse_({ ok: false, error: 'scrape_job_not_found' });
+    if (job.job_token !== jobToken) {
+      aswLog_('WARN', 'handleIngestScrapedRows_',
+        'Token mismatch for ' + jobId + ' — rejecting');
+      return jsonResponse_({ ok: false, error: 'invalid_jobToken' });
+    }
+    if (job.status === SCRAPE_JOB_STATUS.COMPLETED) {
+      return jsonResponse_({ ok: false, error: 'already_completed' });
+    }
+
+    var nowIso = new Date().toISOString();
+
+    // Failure callback from GH Actions (scraper crashed, etc.)
+    if (errorMessage) {
+      updateScrapeJobStatus_(jobId, {
+        status: SCRAPE_JOB_STATUS.FAILED,
+        completed_at: nowIso,
+        error_message: errorMessage
+      });
+      return jsonResponse_({ ok: true, status: 'failed', recorded: errorMessage });
+    }
+
+    if (!Array.isArray(rows)) {
+      return jsonResponse_({ ok: false, error: 'rows_not_array' });
+    }
+
+    // Append to _raw_import. writeRawImportRows_ expects A-02 row shape;
+    // GH Actions workflow already produces this shape from the scraper output.
+    var ss = openCrmSpreadsheet_();
+    var rawSheet = ensureRawImportSheet_(ss);
+    var written = writeRawImportRows_(rawSheet, rows);
+
+    // Auto-import: process the newly-staged rows immediately.
+    // processRawImportBatch_ handles HARD_DUP (skip), SOFT/REVIEW (held
+    // for review queue), NEW_LEAD (imported into LEADS).
+    var stats;
+    try {
+      stats = processRawImportBatch_({ dryRun: false });
+    } catch (procErr) {
+      aswLog_('ERROR', 'handleIngestScrapedRows_',
+        'processRawImportBatch_ failed: ' + procErr.message);
+      updateScrapeJobStatus_(jobId, {
+        status: SCRAPE_JOB_STATUS.FAILED,
+        completed_at: nowIso,
+        raw_rows_count: written,
+        error_message: 'process_batch_failed: ' + procErr.message
+      });
+      return jsonResponse_({ ok: false, error: 'process_batch_failed', detail: procErr.message });
+    }
+
+    updateScrapeJobStatus_(jobId, {
+      status: SCRAPE_JOB_STATUS.COMPLETED,
+      completed_at: nowIso,
+      raw_rows_count: written,
+      imported_count: stats.imported || 0,
+      duplicate_count: stats.duplicate || 0,
+      review_count: stats.review || 0
+    });
+
+    aswLog_('INFO', 'handleIngestScrapedRows_',
+      'Job ' + jobId + ' completed — raw=' + written +
+      ' imported=' + (stats.imported || 0) +
+      ' duplicate=' + (stats.duplicate || 0) +
+      ' review=' + (stats.review || 0));
+
+    return jsonResponse_({
+      ok: true,
+      status: 'completed',
+      job_id: jobId,
+      raw_rows_count: written,
+      stats: {
+        imported: stats.imported || 0,
+        duplicate: stats.duplicate || 0,
+        review: stats.review || 0,
+        rejected: stats.rejected || 0
+      }
+    });
+  } catch (err) {
+    aswLog_('ERROR', 'handleIngestScrapedRows_', err.message);
+    return jsonResponse_({ ok: false, error: err.message });
+  }
+}
+
+
+function handleListScrapeHistory_(payload) {
+  var limit = Number(payload.limit) || 50;
+  try {
+    var jobs = listScrapeHistory_({ limit: limit });
+    var clean = jobs.map(stripJobInternal_);
+    return jsonResponse_({ ok: true, history: clean });
+  } catch (err) {
+    aswLog_('ERROR', 'handleListScrapeHistory_', err.message);
+    return jsonResponse_({ ok: false, error: err.message });
+  }
+}
+
+
+/**
+ * A-11: list pending-review rows from _raw_import + their matched
+ * existing LEAD (for side-by-side render in /scrape/review UI).
+ */
+function handleListPendingReview_(payload) {
+  try {
+    var ss = openCrmSpreadsheet_();
+    var rawSheet = ensureRawImportSheet_(ss);
+    var leadsSheet = getExternalSheet_(ss);
+    var leadsHr = getHeaderResolver_(leadsSheet);
+
+    var data = rawSheet.getDataRange().getValues();
+    if (data.length < 2) return jsonResponse_({ ok: true, items: [] });
+
+    var headers = data[0];
+    var colIdx = {};
+    for (var i = 0; i < headers.length; i++) colIdx[headers[i]] = i;
+
+    var items = [];
+    for (var r = 1; r < data.length; r++) {
+      var row = data[r];
+      // Status='duplicate_candidate' means awaiting review (per processRawImportBatch_).
+      // Skip rows already resolved by operator (review_import / review_skip / review_merge).
+      if (String(row[colIdx['normalized_status']] || '').trim() !== 'duplicate_candidate') continue;
+      if (String(row[colIdx['import_decision']] || '').trim() !== 'pending_review') continue;
+
+      var rawImportId = String(row[colIdx['raw_import_id']] || '');
+      var dupOfLeadId = String(row[colIdx['duplicate_of_lead_id']] || '');
+      var decisionReason = String(row[colIdx['decision_reason']] || '');
+      var sourcePortal = String(row[colIdx['source_portal']] || '');
+      var sourceUrl = String(row[colIdx['source_url']] || '');
+      var rawPayload = {};
+      try { rawPayload = JSON.parse(row[colIdx['raw_payload_json']] || '{}'); } catch (e) {}
+
+      var matchedLead = null;
+      if (dupOfLeadId) {
+        var leadRowNum = findRowByLeadId_(leadsSheet, leadsHr.col('lead_id'), dupOfLeadId);
+        if (leadRowNum) {
+          var leadValues = leadsSheet.getRange(leadRowNum, 1, 1, leadsSheet.getLastColumn()).getValues()[0];
+          matchedLead = leadsHr.row(leadValues);
+        }
+      }
+
+      items.push({
+        raw_import_id: rawImportId,
+        source_portal: sourcePortal,
+        source_url: sourceUrl,
+        decision_reason: decisionReason,
+        duplicate_of_lead_id: dupOfLeadId,
+        scraped: rawPayload,
+        matched_lead: matchedLead
+      });
+    }
+
+    return jsonResponse_({ ok: true, items: items });
+  } catch (err) {
+    aswLog_('ERROR', 'handleListPendingReview_', err.message);
+    return jsonResponse_({ ok: false, error: err.message });
+  }
+}
+
+
+/**
+ * A-11: operator decision on a pending-review _raw_import row.
+ * Decisions:
+ *   'import' → force-add as new LEAD (operator confirms it's a different firm)
+ *   'merge'  → update matched LEAD with selected fields from raw payload
+ *   'skip'   → mark rejected, no LEADS write
+ */
+function handleResolveReview_(payload) {
+  var rawImportId = String(payload.rawImportId || '').trim();
+  var decision = String(payload.decision || '').trim();
+  var mergeFields = payload.mergeFields || {};
+
+  if (!rawImportId) return jsonResponse_({ ok: false, error: 'missing_rawImportId' });
+  if (decision !== 'import' && decision !== 'merge' && decision !== 'skip') {
+    return jsonResponse_({ ok: false, error: 'invalid_decision' });
+  }
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) {
+    return jsonResponse_({ ok: false, error: 'lock_timeout' });
+  }
+
+  try {
+    var ss = openCrmSpreadsheet_();
+    var rawSheet = ensureRawImportSheet_(ss);
+    var leadsSheet = getExternalSheet_(ss);
+    var leadsHr = getHeaderResolver_(leadsSheet);
+
+    var data = rawSheet.getDataRange().getValues();
+    var headers = data[0];
+    var colIdx = {};
+    for (var i = 0; i < headers.length; i++) colIdx[headers[i]] = i;
+
+    var foundRow = -1;
+    for (var r = 1; r < data.length; r++) {
+      if (String(data[r][colIdx['raw_import_id']] || '') === rawImportId) {
+        foundRow = r;
+        break;
+      }
+    }
+    if (foundRow < 0) return jsonResponse_({ ok: false, error: 'raw_import_not_found' });
+
+    var sheetRowNum = foundRow + 1;
+    var nowIso = new Date().toISOString();
+    var actor = (Session.getActiveUser().getEmail() || 'system').toLowerCase();
+    var dupOfLeadId = String(data[foundRow][colIdx['duplicate_of_lead_id']] || '');
+
+    if (decision === 'skip') {
+      updateRawImportRow_(rawSheet, rawImportId, {
+        normalized_status: RAW_IMPORT_REVIEW_STATUS.REVIEW_SKIP,
+        import_decision: 'rejected_review_skip',
+        decision_reason: 'operator_skip',
+        updated_at: nowIso,
+        processed_by: actor
+      });
+      aswLog_('INFO', 'handleResolveReview_', 'SKIP ' + rawImportId + ' by ' + actor);
+      return jsonResponse_({ ok: true, decision: 'skip', raw_import_id: rawImportId });
+    }
+
+    if (decision === 'import') {
+      // Re-normalize the raw payload, force-append as new LEAD
+      var rawObj = {};
+      for (var k in colIdx) rawObj[k] = data[foundRow][colIdx[k]];
+      rawObj._sheetRow = sheetRowNum;
+      var normResult = normalizeRawImportRow_(rawObj);
+      if (!normResult.ok) {
+        return jsonResponse_({
+          ok: false,
+          error: 'normalize_failed',
+          detail: normResult.error
+        });
+      }
+      appendLeadRow_(leadsSheet, normResult.leadsRow);
+      updateRawImportRow_(rawSheet, rawImportId, {
+        normalized_status: RAW_IMPORT_REVIEW_STATUS.REVIEW_IMPORT,
+        import_decision: 'imported_after_review',
+        lead_id: normResult.leadsRow.lead_id,
+        decision_reason: 'operator_import',
+        updated_at: nowIso,
+        processed_by: actor
+      });
+      aswLog_('INFO', 'handleResolveReview_',
+        'IMPORT ' + rawImportId + ' → ' + normResult.leadsRow.lead_id + ' by ' + actor);
+      return jsonResponse_({
+        ok: true,
+        decision: 'import',
+        raw_import_id: rawImportId,
+        lead_id: normResult.leadsRow.lead_id
+      });
+    }
+
+    // decision === 'merge'
+    if (!dupOfLeadId) {
+      return jsonResponse_({ ok: false, error: 'no_match_to_merge_with' });
+    }
+    var leadRowNum = findRowByLeadId_(leadsSheet, leadsHr.col('lead_id'), dupOfLeadId);
+    if (!leadRowNum) {
+      return jsonResponse_({ ok: false, error: 'matched_lead_not_found' });
+    }
+
+    // Apply each whitelisted mergeField if non-empty in raw
+    var MERGEABLE_FIELDS = {
+      'phone': 1, 'email': 1, 'website_url': 1, 'contact_name': 1,
+      'segment': 1, 'service_type': 1, 'pain_point': 1, 'area': 1,
+      'rating': 1, 'reviews_count': 1
+    };
+    var rawPayload = {};
+    try { rawPayload = JSON.parse(data[foundRow][colIdx['raw_payload_json']] || '{}'); } catch (e) {}
+
+    var mergedFieldsLog = [];
+    for (var field in mergeFields) {
+      if (!mergeFields[field]) continue;          // only update fields operator checked
+      if (!MERGEABLE_FIELDS[field]) continue;     // whitelist guard
+      var newVal = rawPayload[field];
+      if (newVal === null || newVal === undefined || String(newVal).trim() === '') continue;
+      var col = leadsHr.colOrNull(field);
+      if (!col) continue;
+      // Only fill empty cells (don't clobber existing data unless operator
+      // explicitly checked the override box — TODO: pass overrideExisting flag)
+      var currentVal = leadsSheet.getRange(leadRowNum, col).getValue();
+      if (currentVal && String(currentVal).trim() !== '') continue;
+      leadsSheet.getRange(leadRowNum, col).setValue(newVal);
+      mergedFieldsLog.push(field);
+    }
+
+    updateRawImportRow_(rawSheet, rawImportId, {
+      normalized_status: RAW_IMPORT_REVIEW_STATUS.REVIEW_MERGE,
+      import_decision: 'merged_into_existing',
+      lead_id: dupOfLeadId,
+      decision_reason: 'operator_merge:' + mergedFieldsLog.join(','),
+      updated_at: nowIso,
+      processed_by: actor
+    });
+    aswLog_('INFO', 'handleResolveReview_',
+      'MERGE ' + rawImportId + ' → ' + dupOfLeadId +
+      ' fields=[' + mergedFieldsLog.join(',') + '] by ' + actor);
+    return jsonResponse_({
+      ok: true,
+      decision: 'merge',
+      raw_import_id: rawImportId,
+      lead_id: dupOfLeadId,
+      merged_fields: mergedFieldsLog
+    });
+  } catch (err) {
+    aswLog_('ERROR', 'handleResolveReview_', err.message);
+    return jsonResponse_({ ok: false, error: err.message });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+function stripJobInternal_(job) {
+  if (!job) return null;
+  var clean = {};
+  for (var k in job) {
+    if (k === '_rowNum' || k === 'job_token') continue;  // never leak token to UI
+    clean[k] = job[k];
+  }
+  return clean;
 }
