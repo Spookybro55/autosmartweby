@@ -487,7 +487,10 @@ function getAssigneeProfile_(assigneeEmail) {
   return DEFAULT_ASSIGNEE_PROFILE;
 }
 
-var DEFAULT_REPLY_TO_EMAIL = 'sebastian@autosmartweb.cz';
+// Aligned with final email identity model (PR #66): personal senders
+// use <initial>.<lastname>@autosmartweb.cz form. This default fires
+// only when a lead has no assignee_email or an unknown one.
+var DEFAULT_REPLY_TO_EMAIL = 's.fridrich@autosmartweb.cz';
 var DEFAULT_REPLY_TO_NAME  = 'Sebastián Fridrich';
 
 /* ── KROK 5: allowlist of pilot users that may own a lead ─────
