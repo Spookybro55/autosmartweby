@@ -91,6 +91,51 @@ export interface ResolveReviewResponse {
 }
 
 /**
+ * A-11 followup: structured details returned alongside `error: 'already_resolved'`
+ * when an idempotence guard rejects a double-submit on resolveReview.
+ * Server emits this when a row is no longer in pending_review state.
+ */
+export interface ResolveReviewAlreadyResolvedDetails {
+  current_status: string;
+  current_decision: string | null;
+  resolved_at: string | null;
+}
+
+/**
+ * Error codes returned by /api/scrape/review/[id]/resolve.
+ * Centralized here so frontend code paths reference a single source of truth.
+ * Mirrors error strings emitted by handleResolveReview_ in WebAppEndpoint.gs.
+ */
+export const RESOLVE_REVIEW_ERROR_CODES = {
+  MISSING_RAW_IMPORT_ID: 'missing_rawImportId',
+  INVALID_DECISION:      'invalid_decision',
+  RAW_IMPORT_NOT_FOUND:  'raw_import_not_found',
+  ALREADY_RESOLVED:      'already_resolved',
+  NORMALIZE_FAILED:      'normalize_failed',
+  NO_MATCH_TO_MERGE:     'no_match_to_merge_with',
+  MATCHED_LEAD_NOT_FOUND:'matched_lead_not_found',
+  LOCK_TIMEOUT:          'lock_timeout',
+} as const;
+
+export type ResolveReviewErrorCode =
+  (typeof RESOLVE_REVIEW_ERROR_CODES)[keyof typeof RESOLVE_REVIEW_ERROR_CODES];
+
+/**
+ * Czech human-readable labels for resolveReview error codes.
+ * Used by the dialog's catch-branch toast messages.
+ */
+export const RESOLVE_REVIEW_ERROR_LABELS: Record<string, string> = {
+  missing_rawImportId:    'Chybějící raw_import_id v požadavku.',
+  invalid_decision:       'Neplatné rozhodnutí (povoleno: skip / merge / import).',
+  raw_import_not_found:   'Záznam ve frontě již neexistuje.',
+  already_resolved:       'Tento záznam už byl vyřešen jiným operátorem.',
+  normalize_failed:       'Normalizace dat selhala — záznam nelze importovat.',
+  no_match_to_merge_with: 'Není s čím sloučit (chybí matched_lead).',
+  matched_lead_not_found: 'Existující lead nenalezen — možná byl smazán.',
+  lock_timeout:           'Souběžná operace probíhá — zkus to za chvíli znovu.',
+};
+
+/**
  * Decision reason → human-readable Czech label.
  * Used in review queue UI to explain WHY a row is flagged.
  * Mirrors DEDUPE_REASON enum in apps-script/Config.gs.

@@ -119,6 +119,7 @@ export default function ScrapeReviewPage() {
         onOpenChange={(open) => { if (!open) setOpenItem(null); }}
         item={openItem}
         onResolved={handleResolved}
+        onAlreadyResolved={() => fetchItems(true)}
       />
     </div>
   );
