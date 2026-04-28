@@ -193,6 +193,110 @@ function findRecentMatchingJob_(input) {
 
 
 /* ═══════════════════════════════════════════════════════════════
+   enforceScrapeRateLimit_ — A-11 followup pre-flight rate limit gate
+   ═══════════════════════════════════════════════════════════════
+   Counts existing _scrape_history rows in two rolling windows in a
+   single sheet read (2 adjacent columns: requested_at + requested_by):
+
+     P1: hourly per-user — max RATE_LIMIT_HOURLY_PER_USER per actor
+     P2: daily global    — max RATE_LIMIT_DAILY_GLOBAL across all actors
+
+   Hourly check first (more common, faster feedback for the actor who
+   triggered). On exceed, throws Error with .rateLimitDetails property
+   {scope, limit, current, retry_after_seconds}. The caller
+   (handleTriggerScrape_) unwraps and forwards structured data via the
+   existing jsonResponse_ shape.
+
+   retry_after_seconds is when the OLDEST counted row in that window
+   falls out (i.e. when the cap will mathematically drop by 1). This
+   is the floor of the actual wait — if more rows exist, the user may
+   need to wait longer for sustained throughput, but the first slot
+   opens at this offset.
+
+   Defensive: rows with empty/unparseable requested_at are SKIPPED —
+   they are either schema mismatches or in-flight inserts mid-write
+   that haven't committed their timestamp yet. Skipping them under-
+   counts in the worst case; over-counting would falsely block valid
+   requests, which is worse.
+   ═══════════════════════════════════════════════════════════════ */
+
+function enforceScrapeRateLimit_(sheet, actor) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;  // empty history → nothing to count
+
+  var nowMs = Date.now();
+  var hourCutoffMs = nowMs - (60 * 60 * 1000);
+  var dayCutoffMs = nowMs - (24 * 60 * 60 * 1000);
+
+  var rowMap = buildScrapeRowMap_();
+  var requestedAtCol = rowMap.requested_at;  // 1-indexed
+  var requestedByCol = rowMap.requested_by;
+  var startCol = Math.min(requestedAtCol, requestedByCol);
+  var endCol = Math.max(requestedAtCol, requestedByCol);
+  var numCols = endCol - startCol + 1;
+
+  var values = sheet.getRange(2, startCol, lastRow - 1, numCols).getValues();
+  var reqAtIdx = requestedAtCol - startCol;
+  var reqByIdx = requestedByCol - startCol;
+
+  var hourCountForUser = 0;
+  var dayCountGlobal = 0;
+  var oldestHourMs = nowMs;
+  var oldestDayMs = nowMs;
+
+  for (var i = 0; i < values.length; i++) {
+    var reqAt = values[i][reqAtIdx];
+    if (!reqAt) continue;  // skip schema gaps / in-flight rows
+    var reqAtMs = (reqAt instanceof Date) ? reqAt.getTime() : Date.parse(String(reqAt));
+    if (isNaN(reqAtMs)) continue;
+
+    if (reqAtMs >= dayCutoffMs) {
+      dayCountGlobal++;
+      if (reqAtMs < oldestDayMs) oldestDayMs = reqAtMs;
+    }
+    if (reqAtMs >= hourCutoffMs && String(values[i][reqByIdx] || '').toLowerCase() === actor) {
+      hourCountForUser++;
+      if (reqAtMs < oldestHourMs) oldestHourMs = reqAtMs;
+    }
+  }
+
+  // Hourly per-user check first
+  if (hourCountForUser >= RATE_LIMIT_HOURLY_PER_USER) {
+    var hourRetryMs = (oldestHourMs + 60 * 60 * 1000) - nowMs;
+    if (hourRetryMs < 0) hourRetryMs = 0;
+    var err1 = new Error('rate_limit_exceeded:hourly_per_user');
+    err1.rateLimitDetails = {
+      scope: 'hourly_per_user',
+      limit: RATE_LIMIT_HOURLY_PER_USER,
+      current: hourCountForUser,
+      retry_after_seconds: Math.ceil(hourRetryMs / 1000)
+    };
+    aswLog_('WARN', 'enforceScrapeRateLimit_',
+      'hourly_per_user actor=' + actor + ' current=' + hourCountForUser +
+      ' limit=' + RATE_LIMIT_HOURLY_PER_USER);
+    throw err1;
+  }
+
+  // Global daily check
+  if (dayCountGlobal >= RATE_LIMIT_DAILY_GLOBAL) {
+    var dayRetryMs = (oldestDayMs + 24 * 60 * 60 * 1000) - nowMs;
+    if (dayRetryMs < 0) dayRetryMs = 0;
+    var err2 = new Error('rate_limit_exceeded:daily_global');
+    err2.rateLimitDetails = {
+      scope: 'daily_global',
+      limit: RATE_LIMIT_DAILY_GLOBAL,
+      current: dayCountGlobal,
+      retry_after_seconds: Math.ceil(dayRetryMs / 1000)
+    };
+    aswLog_('WARN', 'enforceScrapeRateLimit_',
+      'daily_global actor=' + actor + ' current=' + dayCountGlobal +
+      ' limit=' + RATE_LIMIT_DAILY_GLOBAL);
+    throw err2;
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
    recordScrapeJob_ — INSERT new pending job, returns auth tuple
    ═══════════════════════════════════════════════════════════════
    Lock-protected to prevent concurrent dispatches stomping on each
@@ -216,6 +320,14 @@ function recordScrapeJob_(input) {
     var maxResults = Number(input.max_results) || 30;
     if (maxResults < 1) maxResults = 30;
     if (maxResults > 500) maxResults = 500;  // hard cap, runaway protection
+
+    // ── A-11 followup: rate limit gate ──
+    // Counts both rolling windows in a single sheet read (2 adjacent
+    // columns: requested_at + requested_by). Inside the script lock
+    // window so concurrent dispatches cannot both pass when only one
+    // should. Throws a tagged Error (.rateLimitDetails) — the dispatcher
+    // (handleTriggerScrape_) unwraps and returns structured 429 to client.
+    enforceScrapeRateLimit_(sheet, actor);
 
     var row = [
       jobId,

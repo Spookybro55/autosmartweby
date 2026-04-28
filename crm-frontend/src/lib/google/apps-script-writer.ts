@@ -542,6 +542,9 @@ export interface TriggerScrapeWriterResult {
    * Actions, but it must NOT be forwarded to the browser). */
   data?: ScrapeTriggerResponse & { job_token?: string };
   error?: string;
+  /** A-11 followup: structured payload accompanying error='rate_limit_exceeded'.
+   * Carries scope/limit/current/retry_after_seconds for the route to render 429. */
+  details?: Record<string, unknown>;
 }
 
 export async function triggerScrape(input: ScrapeJobInput): Promise<TriggerScrapeWriterResult> {
@@ -579,7 +582,11 @@ export async function triggerScrape(input: ScrapeJobInput): Promise<TriggerScrap
         },
       };
     }
-    return { success: false, error: data.error ?? 'Apps Script returned ok=false' };
+    return {
+      success: false,
+      error: data.error ?? 'Apps Script returned ok=false',
+      details: data.details,
+    };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
   }

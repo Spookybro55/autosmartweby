@@ -24,6 +24,8 @@ import { SUPPORTED_SCRAPE_PORTALS } from '@/types/scrape';
  *   200 + { duplicate: false, job_id }              — dispatched
  *   200 + { duplicate: true,  previousJob }         — already searched, frontend shows confirm
  *   400 + { error: ... }                            — validation failure
+ *   429 + { error: 'rate_limit_exceeded', details } — A-11 followup rate limit;
+ *                                                     Retry-After header set
  *   502 + { error: ... }                            — AS upstream failure
  *   500 + { error: ... }                            — unexpected
  */
@@ -79,8 +81,25 @@ export async function POST(req: Request) {
     // ── Stage 1 — register with Apps Script ──
     const result = await triggerScrape(input);
     if (!result.success || !result.data) {
+      const code = String(result.error ?? '');
+      // A-11 followup: rate-limit gate fires before any side effect.
+      // RFC 9110 §15.5.27: 429 + Retry-After header lets HTTP clients
+      // (curl, future API consumers) handle backoff without parsing the body.
+      if (code === 'rate_limit_exceeded') {
+        const details = (result.details ?? {}) as { retry_after_seconds?: number };
+        const retryAfter = typeof details.retry_after_seconds === 'number'
+          ? details.retry_after_seconds
+          : null;
+        return NextResponse.json(
+          { error: code, details: result.details ?? null },
+          {
+            status: 429,
+            headers: retryAfter !== null ? { 'Retry-After': String(retryAfter) } : undefined,
+          },
+        );
+      }
       return NextResponse.json(
-        { error: result.error ?? 'trigger_failed' },
+        { error: code || 'trigger_failed' },
         { status: 502 },
       );
     }
