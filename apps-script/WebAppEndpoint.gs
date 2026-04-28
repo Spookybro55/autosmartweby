@@ -631,6 +631,15 @@ function handleTriggerScrape_(payload) {
       job_token: registered.job_token
     });
   } catch (err) {
+    // A-11 followup: enforceScrapeRateLimit_ throws a tagged Error with
+    // .rateLimitDetails attached. Forward as structured 429-friendly response.
+    if (err && err.rateLimitDetails) {
+      return jsonResponse_({
+        ok: false,
+        error: 'rate_limit_exceeded',
+        details: err.rateLimitDetails
+      });
+    }
     aswLog_('ERROR', 'handleTriggerScrape_', err.message);
     return jsonResponse_({ ok: false, error: err.message });
   }

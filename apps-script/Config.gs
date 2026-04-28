@@ -321,6 +321,19 @@ var SCRAPE_JOB_STATUS = {
  * ──────────────────────────────────────────────────────────── */
 var STALE_JOB_TIMEOUT_MIN = 30;
 
+/* ── A-11 followup: rate limiting on scrape job dispatch ─────
+ * PR #76 introduced /api/scrape/trigger with no caps. A 100× burst
+ * (operator misclick, browser autofill loop, scripted retry) would:
+ *   - Dispatch 100 GitHub Actions workflows (~5% of monthly free tier)
+ *   - Risk firmy.cz IP-banning the shared GH Actions outbound IP
+ *   - Pollute _scrape_history with redundant rows
+ * findRecentMatchingJob_ catches identical 4-tuples but any tuple
+ * variation bypasses it. Two rolling-window caps in recordScrapeJob_
+ * provide defense in depth.
+ * ──────────────────────────────────────────────────────────── */
+var RATE_LIMIT_HOURLY_PER_USER = 10;  // max scrape jobs per requested_by per rolling 60 min
+var RATE_LIMIT_DAILY_GLOBAL    = 50;  // max scrape jobs total per rolling 24 h
+
 /* ── A-11: Extension column for review queue tracking on _raw_import ─
  * processRawImportBatch_ sets these on rows that need operator review
  * (SOFT_DUPLICATE / REVIEW). The frontend /scrape/review page reads

@@ -136,6 +136,64 @@ export const RESOLVE_REVIEW_ERROR_LABELS: Record<string, string> = {
 };
 
 /**
+ * A-11 followup: structured details returned alongside `error: 'rate_limit_exceeded'`
+ * when recordScrapeJob_'s rate-limit gate rejects a dispatch attempt.
+ * Server emits this when either the per-user hourly cap or the global daily cap
+ * has been reached.
+ */
+export interface TriggerScrapeRateLimitDetails {
+  scope: 'hourly_per_user' | 'daily_global';
+  limit: number;
+  current: number;
+  retry_after_seconds: number;
+}
+
+/**
+ * Error codes returned by /api/scrape/trigger.
+ * Centralized here so frontend code paths reference a single source of truth.
+ * Mirrors error strings emitted by handleTriggerScrape_ + enforceScrapeRateLimit_
+ * in apps-script/WebAppEndpoint.gs + ScrapeHistoryStore.gs.
+ */
+export const TRIGGER_SCRAPE_ERROR_CODES = {
+  INVALID_JSON:         'invalid_json',
+  MISSING_PORTAL:       'missing_portal',
+  MISSING_SEGMENT:      'missing_segment',
+  MISSING_CITY:         'missing_city',
+  UNSUPPORTED_PORTAL:   'unsupported_portal',
+  SEGMENT_TOO_LONG:     'segment_too_long',
+  CITY_TOO_LONG:        'city_too_long',
+  DISTRICT_TOO_LONG:    'district_too_long',
+  INVALID_MAX_RESULTS:  'invalid_max_results',
+  RATE_LIMIT_EXCEEDED:  'rate_limit_exceeded',
+  AS_RETURNED_NO_JOB_ID:'as_returned_no_job_id',
+  TRIGGER_FAILED:       'trigger_failed',
+} as const;
+
+export type TriggerScrapeErrorCode =
+  (typeof TRIGGER_SCRAPE_ERROR_CODES)[keyof typeof TRIGGER_SCRAPE_ERROR_CODES];
+
+/**
+ * Czech human-readable labels for /api/scrape/trigger error codes.
+ * Used by the scrape-form catch branch to render user-facing toasts.
+ * `rate_limit_exceeded` is rendered with extra detail (scope + retry minutes)
+ * inline in the form — this label is the fallback if details are missing.
+ */
+export const TRIGGER_SCRAPE_ERROR_LABELS: Record<string, string> = {
+  invalid_json:           'Nevalidní požadavek (špatný JSON).',
+  missing_portal:         'Vyber portál.',
+  missing_segment:        'Zadej segment / řemeslo.',
+  missing_city:           'Zadej město.',
+  unsupported_portal:     'Tento portál není podporovaný.',
+  segment_too_long:       'Segment je příliš dlouhý (max 100 znaků).',
+  city_too_long:          'Město je příliš dlouhé (max 100 znaků).',
+  district_too_long:      'Městská část je příliš dlouhá.',
+  invalid_max_results:    'Max výsledků musí být 1–500.',
+  rate_limit_exceeded:    'Příliš mnoho požadavků.',
+  as_returned_no_job_id:  'Apps Script nevrátil job_id — interní chyba.',
+  trigger_failed:         'Spuštění selhalo na backendu.',
+};
+
+/**
  * Decision reason → human-readable Czech label.
  * Used in review queue UI to explain WHY a row is flagged.
  * Mirrors DEDUPE_REASON enum in apps-script/Config.gs.

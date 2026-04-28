@@ -8,6 +8,51 @@
 
 ## 2026-04-28
 
+### [A/A-11-followup-rate-limit] Rate limit on scrape job dispatch — hourly per-user + daily global caps — CODE-COMPLETE
+- **Scope:** A-11 (PR #76) shipped `/api/scrape/trigger` and `recordScrapeJob_` with
+**zero rate limiting**. A 100× burst (operator misclick, browser autofill
+loop, scripted retry) would dispatch 100 GitHub Actions workflows
+(~5% of the free monthly minutes tier in seconds), risk firmy.cz
+IP-banning the shared GH Actions outbound IP, and pollute
+`_scrape_history` with redundant rows. `findRecentMatchingJob_` only
+catches identical (portal, segment, city, district) 4-tuples — any
+tuple variation bypasses it.
+
+This task adds a pre-flight rate-limit gate inside `recordScrapeJob_`,
+running inside the existing script lock (atomic with respect to the
+appendRow that follows, so two concurrent dispatches cannot both pass
+when only one should). Two rolling-window caps:
+
+1. **Per-operator hourly** — `RATE_LIMIT_HOURLY_PER_USER = 10` per
+   `requested_by` per rolling 60 min. Catches operator misclicks +
+   stuck autofill loops in the operator's own session.
+2. **Global daily** — `RATE_LIMIT_DAILY_GLOBAL = 50` across all
+   operators per rolling 24 h. Caps GH Actions cost / firmy.cz blast
+   radius even if every operator independently maxes their hourly.
+
+Single sheet read counts both windows in one pass (2 adjacent columns:
+`requested_at` + `requested_by`). Hourly check is evaluated first
+(more common, faster feedback for the actor who triggered).
+
+On exceed: `enforceScrapeRateLimit_` throws an `Error` with a tagged
+`.rateLimitDetails` property `{scope, limit, current, retry_after_seconds}`.
+`handleTriggerScrape_`'s catch unwraps it and returns
+`{ok: false, error: 'rate_limit_exceeded', details: {...}}`. Vercel
+`/api/scrape/trigger` returns **HTTP 429 Too Many Requests** + the
+RFC 9110 §15.5.27 mandated `Retry-After` header. Frontend renders a
+Czech toast "Příliš mnoho požadavků — překročen hodinový limit (10
+jobů/hod na operátora). Zkus to znovu za N min." with the form left
+open + inputs preserved (no auto-retry, operator decides when to retry).
+
+`retry_after_seconds` is calculated as the time remaining until the
+**oldest** counted row falls out of its rolling window — i.e. when the
+cap mathematically drops by 1 and the next slot opens. This is the
+floor of the actual wait for sustained throughput; for a single retry
+it is exact.
+- **Owner:** Stream A
+- **Code:** apps-script/Config.gs (modified), apps-script/ScrapeHistoryStore.gs (modified), apps-script/WebAppEndpoint.gs (modified), crm-frontend/src/types/scrape.ts (modified), crm-frontend/src/lib/google/apps-script-writer.ts (modified), crm-frontend/src/app/api/scrape/trigger/route.ts (modified), crm-frontend/src/components/scrape/scrape-form.tsx (modified), scripts/test-rate-limit.mjs (new)
+- **Docs:** docs/30-task-records/A-11-followup-rate-limit.md, docs/11-change-log.md, docs/29-task-registry.md
+
 ### [A/A-11-followup-resolve-review-idempotence] handleResolveReview_ idempotence guard — block double-submit before LEADS duplication — CODE-COMPLETE
 - **Scope:** A-11 (PR #76) shipped the `/scrape/review` queue and the
 `POST /api/scrape/review/[id]/resolve` route, backed by

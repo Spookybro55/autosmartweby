@@ -10,6 +10,9 @@ import {
   SUPPORTED_SCRAPE_PORTALS,
   type ScrapeJob,
   type SupportedPortal,
+  TRIGGER_SCRAPE_ERROR_CODES,
+  TRIGGER_SCRAPE_ERROR_LABELS,
+  type TriggerScrapeRateLimitDetails,
 } from '@/types/scrape';
 import { ScrapeDuplicateModal } from './scrape-duplicate-modal';
 
@@ -50,17 +53,28 @@ export function ScrapeForm({ onJobDispatched }: Props) {
       }
 
       if (!res.ok) {
-        const errMap: Record<string, string> = {
-          missing_portal: 'Vyber portál.',
-          missing_segment: 'Zadej segment / řemeslo.',
-          missing_city: 'Zadej město.',
-          unsupported_portal: 'Tento portál není podporovaný.',
-          segment_too_long: 'Segment je příliš dlouhý (max 100 znaků).',
-          city_too_long: 'Město je příliš dlouhé (max 100 znaků).',
-          district_too_long: 'Městská část je příliš dlouhá.',
-          invalid_max_results: 'Max výsledků musí být 1–500.',
-        };
-        toast.error(errMap[String(data.error)] ?? data.error ?? 'Chyba při spuštění');
+        const code = String(data.error ?? '');
+        // A-11 followup: rate limit. Render scope + retry-time so the operator
+        // knows whether it's their personal cap or the global one, and how
+        // long to wait. Form is NOT closed and inputs are preserved so they
+        // can retry without re-typing.
+        if (code === TRIGGER_SCRAPE_ERROR_CODES.RATE_LIMIT_EXCEEDED) {
+          const details = data.details as TriggerScrapeRateLimitDetails | undefined;
+          const minutes = details ? Math.max(1, Math.ceil(details.retry_after_seconds / 60)) : null;
+          const scopeLabel = details?.scope === 'hourly_per_user'
+            ? `překročen hodinový limit (${details.limit} jobů/hod na operátora)`
+            : details?.scope === 'daily_global'
+            ? `překročen denní limit (${details.limit} jobů/den globálně)`
+            : 'rate limit';
+          toast.error(
+            minutes !== null
+              ? `Příliš mnoho požadavků — ${scopeLabel}. Zkus to znovu za ${minutes} min.`
+              : `Příliš mnoho požadavků — ${scopeLabel}.`,
+            { duration: 8000 },
+          );
+          return;
+        }
+        toast.error(TRIGGER_SCRAPE_ERROR_LABELS[code] ?? data.error ?? 'Chyba při spuštění');
         return;
       }
 
