@@ -8,6 +8,20 @@
 > repu. Tento dokument se týká pouze toho, co Phase 3 potřebuje k aktivaci
 > learning loop a real-time monitoring.
 
+## Status (auto-updated 2026-04-29 by autonomous setup run)
+
+| Krok | Status | Detail |
+|---|---|---|
+| 1. Anthropic API key | ⏳ MANUAL — Sebastián | viz `/tmp/anthropic-key-instructions.md` (browser session) |
+| 2. Make scenario secret store | ⏳ AUTO-PENDING | po Anthropic key + Make import |
+| 3. Make plán (Core $9/měs) | ⏳ MANUAL — Sebastián | upgrade z Free před importem |
+| 4. GitHub PAT pro CRM dashboard | ⏳ MANUAL — Sebastián | Phase 3 only, optional |
+| 5. Vercel env: OWNER_EMAIL | ✅ PARTIAL | autosmartweby project: production ✓, development ✓; preview ⚠️ blocked (no Git repo connected v Vercel UI — Sebastián manually) |
+| 6. ntfy topic | ⏳ MANUAL — Sebastián | viz `docs/agents/make/IMPORT-GUIDE.md` |
+| 7. GitHub branch protection: validate-agent-pr required | ✅ DONE | required_status_checks contexts = ["docs-governance", "validate-agent-pr"] (PATCH 2026-04-29) |
+| 8. Make scenarios import | ⏳ MANUAL — Sebastián | 5 blueprints v `docs/agents/make/0*.json`, postup v IMPORT-GUIDE.md |
+| 9. GitHub webhook (learning loop) | ⏳ MANUAL — Sebastián | po Make scenario `03-learning-loop` import |
+
 ---
 
 ## Před Phase 3 PR (přípravné kroky)

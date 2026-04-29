@@ -1,0 +1,77 @@
+{
+  "name": "Agent Team — Daily Triage",
+  "description": "Cron 8:00 AM daily. Watches FINDINGS.md changes, regenerates QUEUE.md (via local agent triage.mjs trigger), notifies Sebastián that queue is ready.",
+  "scheduling": {
+    "type": "cron",
+    "cron": "0 8 * * *",
+    "timezone": "Europe/Prague"
+  },
+  "designer": {
+    "orphans": []
+  },
+  "flow": [
+    {
+      "id": 1,
+      "module": "github:WatchFiles",
+      "version": 1,
+      "parameters": {
+        "owner": "Spookybro55",
+        "repo": "autosmartweby",
+        "path": "docs/audits/FINDINGS.md",
+        "branch": "main"
+      },
+      "metadata": {
+        "designer": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": 2,
+      "module": "github:GetFileContent",
+      "version": 1,
+      "parameters": {
+        "owner": "Spookybro55",
+        "repo": "autosmartweby",
+        "path": "docs/agents/QUEUE.md",
+        "ref": "main"
+      },
+      "metadata": {
+        "designer": {
+          "x": 300,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": 3,
+      "module": "http:MakeRequest",
+      "version": 1,
+      "parameters": {
+        "url": "https://ntfy.sh/{{TODO_SEBASTIAN_TOPIC}}",
+        "method": "POST",
+        "headers": [
+          {"name": "Title", "value": "Agent Team — Daily Triage Ready"},
+          {"name": "Tags", "value": "robot,calendar"},
+          {"name": "Priority", "value": "default"}
+        ],
+        "body": "FINDINGS.md updated since last triage.\n\nRun locally: claude → 'vezmi další task z queue'.\n\nQUEUE.md head: see https://github.com/Spookybro55/autosmartweby/blob/main/docs/agents/QUEUE.md"
+      },
+      "metadata": {
+        "designer": {
+          "x": 600,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "_setup_notes": [
+    "REQUIRES: Make GitHub connection (PAT s repo scope).",
+    "REPLACE: TODO_SEBASTIAN_TOPIC with your ntfy topic name (~14-char random suffix).",
+    "OPTIONAL: install ntfy iOS/Android app, subscribe to topic.",
+    "TEST: Make UI 'Run once' button → notification should arrive in seconds.",
+    "OPS estimate: ~30/měs (1× per day if FINDINGS unchanged, more if changes detected)."
+  ],
+  "_phase_3_only": true
+}

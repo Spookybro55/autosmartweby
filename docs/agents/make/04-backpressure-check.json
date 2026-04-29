@@ -1,0 +1,72 @@
+{
+  "name": "Agent Team — Backpressure Check",
+  "description": "Hourly. Counts unmerged agent/* PRs. If ≥5 (master plan §5 stop condition), notifies Sebastián with HIGH priority. Recommends manual QUEUE.md status flip to PAUSED.",
+  "scheduling": {
+    "type": "cron",
+    "cron": "0 * * * *",
+    "timezone": "Europe/Prague"
+  },
+  "flow": [
+    {
+      "id": 1,
+      "module": "github:ListPullRequests",
+      "version": 1,
+      "parameters": {
+        "owner": "Spookybro55",
+        "repo": "autosmartweby",
+        "state": "open",
+        "per_page": 50
+      }
+    },
+    {
+      "id": 2,
+      "module": "builtin:Filter",
+      "version": 1,
+      "parameters": {
+        "condition": "{{1.head.ref}} starts with 'agent/' OR {{1.head.ref}} starts with 'agent-team/'"
+      }
+    },
+    {
+      "id": 3,
+      "module": "builtin:Aggregator",
+      "version": 1,
+      "parameters": {
+        "operation": "count"
+      }
+    },
+    {
+      "id": 4,
+      "module": "builtin:Router",
+      "version": 1,
+      "routes": [
+        {
+          "condition": "{{3.count}} >= 5",
+          "flow": [
+            {
+              "id": 5,
+              "module": "http:MakeRequest",
+              "parameters": {
+                "url": "https://ntfy.sh/{{TODO_SEBASTIAN_TOPIC}}",
+                "method": "POST",
+                "headers": [
+                  {"name": "Title", "value": "Agent backpressure: {{3.count}} PRs unmerged"},
+                  {"name": "Tags", "value": "warning,no_entry"},
+                  {"name": "Priority", "value": "urgent"}
+                ],
+                "body": "{{3.count}} unmerged agent PRs.\n\nMaster plan §5 stop condition reached.\n\nRECOMMENDED ACTION:\n1. Edit docs/agents/QUEUE.md status header → PAUSED.\n2. Triage open PRs (merge / close).\n3. After backlog drained, flip status back to ACTIVE.\n\nOpen PRs: https://github.com/Spookybro55/autosmartweby/pulls?q=is%3Aopen+head%3Aagent%2F"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "_setup_notes": [
+    "REQUIRES: Make GitHub connection.",
+    "REPLACE: TODO_SEBASTIAN_TOPIC.",
+    "TUNE: threshold 5 in Router condition.",
+    "OPS estimate: ~720/měs (24 × 30).",
+    "DOES NOT auto-pause QUEUE.md — only notifies. Sebastián or Tech Lead must manually flip status."
+  ],
+  "_phase_3_only": true
+}
