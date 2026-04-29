@@ -98,6 +98,34 @@ This task was 3 phases:
 - **Code:** apps-script/Config.gs (modified), apps-script/EmailTemplateStore.gs (modified), apps-script/Menu.gs (modified), crm-frontend/src/lib/config.ts (modified), crm-frontend/src/components/leads/lead-detail-drawer.tsx (modified), scripts/test-email-cleanup.mjs (new)
 - **Docs:** README.md, docs/22-technical-architecture.md, docs/PHASE2-RECON.md, docs/PILOT-SMOKE-TEST.md, docs/PILOT-OPERATIONS.md, docs/PILOT-INCIDENT-RESPONSE.md, docs/PILOT-ENV-VARS.md, docs/30-task-records/B-13.md, docs/30-task-records/B-11.md, docs/30-task-records/email-cleanup-eliminate-legacy.md, docs/11-change-log.md, docs/29-task-registry.md
 
+### [B/redesign-lead-detail-modal] Redesign LeadDetailDrawer — side drawer → centered glass modal — CODE-COMPLETE
+- **Scope:** Operator UX request: the right-side `Sheet` drawer (max-w 520px) felt
+cramped when working with email drafts and lead-edit forms. Redesign as
+a centered modal at ~80% viewport with glass effect (backdrop-blur,
+semi-transparent), 2-column layout for the dense top-row sections,
+sticky footer with primary actions always visible, and an unsaved-
+changes guard on close.
+
+**Operator-locked decisions** preserved as-is:
+1. Layout: large centered modal, ~80% viewport, all content together
+   with internal scroll (NOT tabs, NOT wizard).
+2. Close behavior: confirmation prompt when closing iff form is dirty
+   OR email draft modified from baseline; if clean, close silently.
+3. Visual style: glass effect via `backdrop-blur-xl` + semi-transparent
+   `bg-background/85` + soft shadow + rounded corners.
+
+The component name (`LeadDetailDrawer`) and filename
+(`crm-frontend/src/components/leads/lead-detail-drawer.tsx`) are
+preserved to avoid breaking imports across leads page, dashboard,
+pipeline, and follow-ups widgets.
+
+Layout was approved by operator before implementation per
+mid-task check-in (one addition: AssigneeBadge added in header
+left of PriorityBadge).
+- **Owner:** Stream B
+- **Code:** crm-frontend/src/components/leads/lead-detail-drawer.tsx (rewritten)
+- **Docs:** docs/30-task-records/redesign-lead-detail-modal.md, docs/11-change-log.md, docs/29-task-registry.md
+
 ## 2026-04-28
 
 ### [A/A-11-followup-rate-limit] Rate limit on scrape job dispatch — hourly per-user + daily global caps — CODE-COMPLETE

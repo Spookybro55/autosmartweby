@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { cs } from "date-fns/locale";
 import { toast } from "sonner";
@@ -19,13 +19,6 @@ import {
   Building2,
   Loader2,
 } from "lucide-react";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
@@ -33,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -54,8 +48,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { PriorityBadge } from "@/components/leads/priority-badge";
-import { StatusBadge } from "@/components/leads/status-badge";
-import { ASSIGNEE_NAMES, ALLOWED_USERS, UNASSIGNED_LABEL } from "@/lib/config";
+import {
+  ASSIGNEE_NAMES,
+  ALLOWED_USERS,
+  UNASSIGNED_LABEL,
+  formatAssignee,
+} from "@/lib/config";
 
 const OUTREACH_STAGES: Record<string, string> = {
   NOT_CONTACTED: "Neosloveno",
@@ -190,17 +188,23 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
-function DrawerSkeleton() {
+function ModalSkeleton() {
   return (
-    <div className="space-y-6 p-4 pt-0">
-      <div className="space-y-2">
-        <Skeleton className="h-6 w-48" />
-        <Skeleton className="h-4 w-24" />
+    <div className="space-y-6 p-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {Array.from({ length: 2 }).map((_, i) => (
+          <div key={i} className="space-y-3">
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-5/6" />
+            <Skeleton className="h-4 w-2/3" />
+          </div>
+        ))}
       </div>
       <Separator />
-      {Array.from({ length: 4 }).map((_, i) => (
+      {Array.from({ length: 3 }).map((_, i) => (
         <div key={i} className="space-y-3">
-          <Skeleton className="h-3 w-20" />
+          <Skeleton className="h-3 w-32" />
           <Skeleton className="h-4 w-full" />
           <Skeleton className="h-4 w-3/4" />
         </div>
@@ -240,6 +244,10 @@ export function LeadDetailDrawer({
   >("idle");
   const [sendError, setSendError] = useState<string>("");
   const [confirmOpen, setConfirmOpen] = useState<boolean>(false);
+  // Unsaved-changes guard: when the operator tries to close the modal
+  // (X / Esc / click outside / Zavřít) and isDirty is true, this opens
+  // a confirmation dialog instead of closing immediately.
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState<boolean>(false);
   const [form, setForm] = useState<LeadEditableFields>({
     outreachStage: "",
     nextAction: "",
@@ -305,6 +313,7 @@ export function LeadDetailDrawer({
     setSendState("idle");
     setSendError("");
     setConfirmOpen(false);
+    setCloseConfirmOpen(false);
     return () => {
       abortRef.current?.abort();
     };
@@ -322,6 +331,8 @@ export function LeadDetailDrawer({
       if (!res.ok) throw new Error("Nepodařilo se uložit změny");
       toast.success("Změny uloženy");
       onSaved();
+      // Refresh so isDirty resets — operator can close without prompt.
+      if (leadId) await fetchLead(leadId);
     } catch {
       toast.error("Chyba při ukládání");
     } finally {
@@ -474,599 +485,743 @@ export function LeadDetailDrawer({
     setForm((prev) => ({ ...prev, ...patch }));
   }
 
+  // Unsaved-changes detection. Compares form + email editor state to the
+  // last-fetched lead baseline. After save / send / regenerate handlers
+  // re-fetch the lead, the baseline updates and isDirty flips back to false.
+  const isDirty = useMemo(() => {
+    if (!lead) return false;
+    const formDirty =
+      form.outreachStage !== (lead.outreachStage ?? "") ||
+      form.nextAction !== (lead.nextAction ?? "") ||
+      form.lastContactAt !== formatDateForInput(lead.lastContactAt) ||
+      form.nextFollowupAt !== formatDateForInput(lead.nextFollowupAt) ||
+      form.salesNote !== (lead.salesNote ?? "") ||
+      form.assigneeEmail !== (lead.assigneeEmail ?? "").toLowerCase();
+    const emailDirty =
+      emailSubject !== (lead.emailSubjectDraft ?? "") ||
+      emailBody !== (lead.emailBodyDraft ?? "");
+    return formDirty || emailDirty;
+  }, [lead, form, emailSubject, emailBody]);
+
+  const handleOpenChange = useCallback(
+    (newOpen: boolean) => {
+      if (!newOpen && isDirty) {
+        setCloseConfirmOpen(true);
+        return;
+      }
+      onOpenChange(newOpen);
+    },
+    [isDirty, onOpenChange],
+  );
+
+  // ── Send-related computed state lifted to component scope so the
+  //    sticky footer Send button can use it (was inline in email section).
+  const alreadySent = lead ? !!lead.lastEmailSentAt : false;
+  const senderName =
+    lead && lead.assigneeEmail && ASSIGNEE_NAMES[lead.assigneeEmail]
+      ? ASSIGNEE_NAMES[lead.assigneeEmail]
+      : "Sebastián Fridrich";
+  const senderEmail =
+    lead && lead.assigneeEmail && ASSIGNEE_NAMES[lead.assigneeEmail]
+      ? lead.assigneeEmail
+      : "s.fridrich@autosmartweb.cz";
+  let sendDisabledReason: string | null = null;
+  if (lead) {
+    if (!lead.qualifiedForPreview) {
+      sendDisabledReason = "Lead není kvalifikovaný.";
+    } else if (!lead.previewUrl || lead.previewStage !== "READY_FOR_REVIEW") {
+      sendDisabledReason =
+        "Preview ještě není připravený (stav " +
+        (lead.previewStage || "—") +
+        "). Nejdřív vygenerujte preview.";
+    } else if (!emailSubject.trim() || !emailBody.trim()) {
+      sendDisabledReason = "Předmět nebo tělo emailu je prázdné.";
+    } else if (!lead.email || !lead.email.includes("@")) {
+      sendDisabledReason = "Lead nemá validní emailovou adresu.";
+    }
+  }
+  const sendDisabled = !lead || !!sendDisabledReason || sendState === "sending";
+  const sendButtonLabel =
+    sendState === "sending"
+      ? "Odesílám…"
+      : alreadySent
+        ? "Odeslat e-mail znovu"
+        : "Odeslat e-mail";
+
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="right"
-        className="w-full sm:max-w-[520px] p-0 flex flex-col"
-        showCloseButton
-      >
-        {loading || !lead ? (
-          <>
-            <SheetHeader className="p-4 pb-0">
-              <SheetTitle>
-                <Skeleton className="h-6 w-48" />
-              </SheetTitle>
-              <SheetDescription>
-                <Skeleton className="h-4 w-24" />
-              </SheetDescription>
-            </SheetHeader>
-            <DrawerSkeleton />
-          </>
-        ) : (
-          <>
-            <SheetHeader className="p-4 pb-2">
-              <div className="flex items-start justify-between gap-3 pr-8">
-                <div className="min-w-0">
-                  <SheetTitle className="text-lg leading-tight">
-                    {lead.businessName}
-                  </SheetTitle>
-                  <SheetDescription className="mt-1">
-                    {lead.city}
-                    {lead.area ? ` / ${lead.area}` : ""}
-                  </SheetDescription>
-                </div>
-                <PriorityBadge priority={lead.contactPriority} />
+    <>
+      <Dialog open={open} onOpenChange={handleOpenChange}>
+        <DialogContent
+          className="
+            max-w-[95vw] lg:max-w-[80vw] w-[95vw] lg:w-[80vw]
+            h-[90vh] lg:h-[85vh]
+            p-0 flex flex-col gap-0
+            bg-background/85 backdrop-blur-xl
+            border border-border/60
+            shadow-2xl rounded-2xl
+            overflow-hidden
+          "
+          showCloseButton
+        >
+          {loading || !lead ? (
+            <>
+              <DialogHeader className="px-6 pt-6 pb-4 border-b border-border/40">
+                <DialogTitle>
+                  <Skeleton className="h-7 w-64" />
+                </DialogTitle>
+                <DialogDescription>
+                  <Skeleton className="h-4 w-32" />
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex-1 overflow-hidden">
+                <ModalSkeleton />
               </div>
-            </SheetHeader>
-
-            <ScrollArea className="flex-1 overflow-y-auto">
-              <div className="px-4 pb-4 space-y-5">
-                {/* Kontaktni udaje */}
-                <section>
-                  <SectionTitle>Kontaktní údaje</SectionTitle>
-                  <div className="space-y-0.5">
-                    <DetailRow
-                      icon={<Phone className="size-3.5" />}
-                      label="Telefon"
-                      value={lead.phone}
-                      href={lead.phone ? `tel:${lead.phone}` : undefined}
-                    />
-                    <DetailRow
-                      icon={<Mail className="size-3.5" />}
-                      label="E-mail"
-                      value={lead.email}
-                      href={lead.email ? `mailto:${lead.email}` : undefined}
-                    />
-                    <DetailRow
-                      icon={<Globe className="size-3.5" />}
-                      label="Web"
-                      value={lead.websiteUrl}
-                      href={lead.websiteUrl || undefined}
-                    />
-                    <DetailRow
-                      icon={<User className="size-3.5" />}
-                      label="Kontaktní osoba"
-                      value={lead.contactName}
-                    />
-                    <DetailRow
-                      icon={<Building2 className="size-3.5" />}
-                      label="ICO"
-                      value={lead.ico}
-                    />
+            </>
+          ) : (
+            <>
+              <DialogHeader className="px-6 pt-6 pb-4 border-b border-border/40">
+                <div className="flex items-start justify-between gap-3 pr-8">
+                  <div className="min-w-0 flex-1">
+                    <DialogTitle className="text-2xl font-semibold leading-tight break-words">
+                      {lead.businessName}
+                    </DialogTitle>
+                    <DialogDescription className="mt-1.5">
+                      {lead.city}
+                      {lead.area ? ` / ${lead.area}` : ""}
+                    </DialogDescription>
                   </div>
-                </section>
-
-                <Separator />
-
-                {/* Shrnutí */}
-                <section>
-                  <SectionTitle>Shrnutí</SectionTitle>
-                  <div className="space-y-2 text-sm">
-                    {lead.painPoint && (
-                      <div>
-                        <span className="text-muted-foreground">Problém: </span>
-                        <span className="text-foreground">{lead.painPoint}</span>
-                      </div>
-                    )}
-                    {lead.serviceType && (
-                      <div>
-                        <span className="text-muted-foreground">Služba: </span>
-                        <span className="text-foreground">{lead.serviceType}</span>
-                      </div>
-                    )}
-                    {lead.segment && (
-                      <div>
-                        <span className="text-muted-foreground">Segment: </span>
-                        <span className="text-foreground">{lead.segment}</span>
-                      </div>
-                    )}
-                    {lead.contactReason && (
-                      <div>
-                        <span className="text-muted-foreground">Důvod kontaktu: </span>
-                        <span className="text-foreground">{lead.contactReason}</span>
-                      </div>
-                    )}
+                  <div className="flex items-center gap-2 shrink-0 mt-1">
+                    <Tooltip>
+                      <TooltipTrigger render={<span tabIndex={0} />}>
+                        <Badge variant="outline" className="gap-1.5 px-2">
+                          <User className="size-3" />
+                          {formatAssignee(lead.assigneeEmail)}
+                        </Badge>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {lead.assigneeEmail || UNASSIGNED_LABEL}
+                      </TooltipContent>
+                    </Tooltip>
+                    <PriorityBadge priority={lead.contactPriority} />
                   </div>
-                </section>
+                </div>
+              </DialogHeader>
 
-                <Separator />
-
-                {/* Preview — Phase 2 KROK 4: always rendered (even when no
-                    preview yet) so operator can trigger generation. */}
-                <section>
-                  <SectionTitle>Preview</SectionTitle>
-                  {lead.previewHeadline && (
-                    <p className="text-sm text-foreground mb-1.5">
-                      {lead.previewHeadline}
-                    </p>
-                  )}
-
-                  <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                    {lead.previewUrl && (
-                      <a
-                        href={lead.previewUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-                      >
-                        Zobrazit preview
-                        <ExternalLink className="size-3" />
-                      </a>
-                    )}
-
-                    {lead.qualifiedForPreview ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={lead.previewUrl ? "outline" : "default"}
-                        onClick={handleGenerate}
-                        disabled={previewState === "generating"}
-                      >
-                        {previewState === "generating" ? (
-                          <>
-                            <Loader2 className="size-4 animate-spin" />
-                            Generuji preview… (5–15 s)
-                          </>
-                        ) : lead.previewUrl ? (
-                          <>
-                            <RefreshCw className="size-4" />
-                            Regenerovat
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles className="size-4" />
-                            Vygenerovat preview
-                          </>
-                        )}
-                      </Button>
-                    ) : (
-                      <Tooltip>
-                        {/* base-ui TooltipTrigger renders a <button> by
-                            default; we override with `render={<span>}` so
-                            the disabled button inside still triggers the
-                            tooltip on hover (disabled buttons do not
-                            dispatch pointer events themselves). */}
-                        <TooltipTrigger render={<span tabIndex={0} />}>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant={lead.previewUrl ? "outline" : "default"}
-                            disabled
-                          >
-                            {lead.previewUrl ? (
-                              <>
-                                <RefreshCw className="size-4" />
-                                Regenerovat
-                              </>
-                            ) : (
-                              <>
-                                <Sparkles className="size-4" />
-                                Vygenerovat preview
-                              </>
-                            )}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          Lead není kvalifikovaný.
-                        </TooltipContent>
-                      </Tooltip>
-                    )}
-                  </div>
-
-                  {previewState === "success" && (
-                    <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-emerald-600">
-                      <CheckCircle2 className="size-3.5" />
-                      Preview vygenerováno.
-                    </p>
-                  )}
-                  {previewState === "error" && previewError && (
-                    <p className="mt-2 inline-flex items-start gap-1.5 text-xs text-destructive">
-                      <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
-                      {previewError}
-                    </p>
-                  )}
-                </section>
-                <Separator />
-
-                {/* E-mail draft — Phase 2 KROK 6: editable + Odeslat */}
-                {(() => {
-                  const alreadySent = !!lead.lastEmailSentAt;
-                  const senderName =
-                    lead.assigneeEmail && ASSIGNEE_NAMES[lead.assigneeEmail]
-                      ? ASSIGNEE_NAMES[lead.assigneeEmail]
-                      : "Sebastián Fridrich";
-                  const senderEmail =
-                    lead.assigneeEmail && ASSIGNEE_NAMES[lead.assigneeEmail]
-                      ? lead.assigneeEmail
-                      : "s.fridrich@autosmartweb.cz";
-
-                  // Disable reasons (most-specific first)
-                  let disabledReason: string | null = null;
-                  if (!lead.qualifiedForPreview) {
-                    disabledReason = "Lead není kvalifikovaný.";
-                  } else if (!lead.previewUrl || lead.previewStage !== "READY_FOR_REVIEW") {
-                    disabledReason =
-                      "Preview ještě není připravený (stav " +
-                      (lead.previewStage || "—") +
-                      "). Nejdřív vygenerujte preview.";
-                  } else if (!emailSubject.trim() || !emailBody.trim()) {
-                    disabledReason = "Předmět nebo tělo emailu je prázdné.";
-                  } else if (!lead.email || !lead.email.includes("@")) {
-                    disabledReason = "Lead nemá validní emailovou adresu.";
-                  }
-                  const sendDisabled =
-                    !!disabledReason || sendState === "sending";
-
-                  const buttonLabel =
-                    sendState === "sending"
-                      ? "Odesílám…"
-                      : alreadySent
-                        ? "Odeslat znovu"
-                        : "Odeslat";
-
-                  return (
+              <ScrollArea className="flex-1 overflow-y-auto">
+                <div className="px-6 py-6 space-y-6">
+                  {/* Top row: 2-col grid for Kontaktní údaje + Editovatelná pole */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Kontaktni udaje */}
                     <section>
-                      <SectionTitle>E-mail</SectionTitle>
+                      <SectionTitle>Kontaktní údaje</SectionTitle>
+                      <div className="space-y-0.5">
+                        <DetailRow
+                          icon={<Phone className="size-3.5" />}
+                          label="Telefon"
+                          value={lead.phone}
+                          href={lead.phone ? `tel:${lead.phone}` : undefined}
+                        />
+                        <DetailRow
+                          icon={<Mail className="size-3.5" />}
+                          label="E-mail"
+                          value={lead.email}
+                          href={lead.email ? `mailto:${lead.email}` : undefined}
+                        />
+                        <DetailRow
+                          icon={<Globe className="size-3.5" />}
+                          label="Web"
+                          value={lead.websiteUrl}
+                          href={lead.websiteUrl || undefined}
+                        />
+                        <DetailRow
+                          icon={<User className="size-3.5" />}
+                          label="Kontaktní osoba"
+                          value={lead.contactName}
+                        />
+                        <DetailRow
+                          icon={<Building2 className="size-3.5" />}
+                          label="ICO"
+                          value={lead.ico}
+                        />
+                      </div>
+                    </section>
 
-                      {alreadySent && (
-                        <p className="mb-3 inline-flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                          <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
-                          <span>
-                            Email byl již odeslán{" "}
-                            {(() => {
-                              try {
-                                return format(
-                                  parseISO(lead.lastEmailSentAt),
-                                  "d. MMMM yyyy 'v' HH:mm",
-                                  { locale: cs },
-                                );
-                              } catch {
-                                return lead.lastEmailSentAt;
+                    {/* Editovatelna pole */}
+                    <section>
+                      <SectionTitle>Editovatelná pole</SectionTitle>
+                      <div className="space-y-3">
+                        <div className="space-y-1.5">
+                          <Label htmlFor="drawer-stage">Stav</Label>
+                          <Select
+                            value={form.outreachStage}
+                            onValueChange={(val) =>
+                              val != null && updateForm({ outreachStage: val })
+                            }
+                          >
+                            <SelectTrigger id="drawer-stage" className="w-full">
+                              <SelectValue placeholder="Zvolte stav" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(OUTREACH_STAGES).map(
+                                ([key, label]) => (
+                                  <SelectItem key={key} value={key}>
+                                    {label}
+                                  </SelectItem>
+                                ),
+                              )}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label htmlFor="drawer-assignee">Přiděleno</Label>
+                          <Select
+                            value={
+                              form.assigneeEmail === ""
+                                ? UNASSIGNED_VALUE
+                                : ALLOWED_USERS.includes(form.assigneeEmail)
+                                  ? form.assigneeEmail
+                                  : form.assigneeEmail /* unknown legacy email — render raw */
+                            }
+                            onValueChange={(val) => {
+                              if (val == null) return;
+                              updateForm({
+                                assigneeEmail:
+                                  val === UNASSIGNED_VALUE ? "" : val,
+                              });
+                            }}
+                          >
+                            <SelectTrigger
+                              id="drawer-assignee"
+                              className="w-full"
+                            >
+                              <SelectValue placeholder="Zvolte přidělení" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={UNASSIGNED_VALUE}>
+                                {UNASSIGNED_LABEL}
+                              </SelectItem>
+                              {ALLOWED_USERS.map((email) => (
+                                <SelectItem key={email} value={email}>
+                                  {ASSIGNEE_NAMES[email]}{" "}
+                                  <span className="text-xs text-muted-foreground">
+                                    ({email})
+                                  </span>
+                                </SelectItem>
+                              ))}
+                              {/* Surface orphaned legacy assignee so operator can re-pick */}
+                              {form.assigneeEmail !== "" &&
+                                !ALLOWED_USERS.includes(form.assigneeEmail) && (
+                                  <SelectItem value={form.assigneeEmail}>
+                                    Neznámý: {form.assigneeEmail}
+                                  </SelectItem>
+                                )}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label htmlFor="drawer-action">Další krok</Label>
+                          <Select
+                            value={form.nextAction}
+                            onValueChange={(val) =>
+                              val != null && updateForm({ nextAction: val })
+                            }
+                          >
+                            <SelectTrigger
+                              id="drawer-action"
+                              className="w-full"
+                            >
+                              <SelectValue placeholder="Zvolte akci" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {NEXT_ACTIONS.map((action) => (
+                                <SelectItem key={action} value={action}>
+                                  {action}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1.5">
+                            <Label htmlFor="drawer-last-contact">
+                              Poslední kontakt
+                            </Label>
+                            <Input
+                              id="drawer-last-contact"
+                              type="date"
+                              value={form.lastContactAt}
+                              onChange={(e) =>
+                                updateForm({ lastContactAt: e.target.value })
                               }
-                            })()}
-                            . Opětovné odeslání pošle email znovu.
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label htmlFor="drawer-followup">Follow-up</Label>
+                            <Input
+                              id="drawer-followup"
+                              type="date"
+                              value={form.nextFollowupAt}
+                              onChange={(e) =>
+                                updateForm({ nextFollowupAt: e.target.value })
+                              }
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label htmlFor="drawer-note">Poznámka</Label>
+                          <Textarea
+                            id="drawer-note"
+                            value={form.salesNote}
+                            onChange={(e) =>
+                              updateForm({ salesNote: e.target.value })
+                            }
+                            placeholder="Poznámka k leadu..."
+                            className="min-h-20"
+                          />
+                        </div>
+                      </div>
+                    </section>
+                  </div>
+
+                  <Separator />
+
+                  {/* Shrnutí — full width */}
+                  <section>
+                    <SectionTitle>Shrnutí</SectionTitle>
+                    <div className="space-y-2 text-sm">
+                      {lead.painPoint && (
+                        <div>
+                          <span className="text-muted-foreground">
+                            Problém:{" "}
                           </span>
-                        </p>
+                          <span className="text-foreground">
+                            {lead.painPoint}
+                          </span>
+                        </div>
+                      )}
+                      {lead.serviceType && (
+                        <div>
+                          <span className="text-muted-foreground">
+                            Služba:{" "}
+                          </span>
+                          <span className="text-foreground">
+                            {lead.serviceType}
+                          </span>
+                        </div>
+                      )}
+                      {lead.segment && (
+                        <div>
+                          <span className="text-muted-foreground">
+                            Segment:{" "}
+                          </span>
+                          <span className="text-foreground">
+                            {lead.segment}
+                          </span>
+                        </div>
+                      )}
+                      {lead.contactReason && (
+                        <div>
+                          <span className="text-muted-foreground">
+                            Důvod kontaktu:{" "}
+                          </span>
+                          <span className="text-foreground">
+                            {lead.contactReason}
+                          </span>
+                        </div>
+                      )}
+                      {!lead.painPoint &&
+                        !lead.serviceType &&
+                        !lead.segment &&
+                        !lead.contactReason && (
+                          <p className="italic text-muted-foreground">
+                            Žádné shrnutí.
+                          </p>
+                        )}
+                    </div>
+                  </section>
+
+                  <Separator />
+
+                  {/* Preview — Phase 2 KROK 4: always rendered (even when no
+                      preview yet) so operator can trigger generation. */}
+                  <section>
+                    <SectionTitle>Preview</SectionTitle>
+                    {lead.previewHeadline && (
+                      <p className="text-sm text-foreground mb-1.5">
+                        {lead.previewHeadline}
+                      </p>
+                    )}
+
+                    <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                      {lead.previewUrl && (
+                        <a
+                          href={lead.previewUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                        >
+                          Zobrazit preview
+                          <ExternalLink className="size-3" />
+                        </a>
                       )}
 
-                      <div className="space-y-3">
-                        {/* B-13 T9: template selector + regenerate */}
-                        <div className="space-y-1.5">
-                          <Label htmlFor="drawer-template-key">Šablona</Label>
-                          <div className="flex items-center gap-2">
-                            <select
-                              id="drawer-template-key"
-                              value={templateKey}
-                              onChange={(e) => setTemplateKey(e.target.value)}
-                              disabled={regenerating || sendState === "sending"}
-                              className="flex-1 rounded-md border bg-background px-2 py-1.5 text-sm"
-                            >
-                              <option value="">— auto-select —</option>
-                              <option value="no-website">Bez webu (no-website)</option>
-                              <option value="weak-website">Slabý web (weak-website)</option>
-                              <option value="has-website">Má web (has-website)</option>
-                              <option value="follow-up-1">Follow-up 1</option>
-                              <option value="follow-up-2">Follow-up 2</option>
-                            </select>
+                      {lead.qualifiedForPreview ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={lead.previewUrl ? "outline" : "default"}
+                          onClick={handleGenerate}
+                          disabled={previewState === "generating"}
+                        >
+                          {previewState === "generating" ? (
+                            <>
+                              <Loader2 className="size-4 animate-spin" />
+                              Generuji preview… (5–15 s)
+                            </>
+                          ) : lead.previewUrl ? (
+                            <>
+                              <RefreshCw className="size-4" />
+                              Regenerovat
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="size-4" />
+                              Vygenerovat preview
+                            </>
+                          )}
+                        </Button>
+                      ) : (
+                        <Tooltip>
+                          {/* base-ui TooltipTrigger renders a <button> by
+                              default; we override with `render={<span>}` so
+                              the disabled button inside still triggers the
+                              tooltip on hover (disabled buttons do not
+                              dispatch pointer events themselves). */}
+                          <TooltipTrigger render={<span tabIndex={0} />}>
                             <Button
                               type="button"
-                              variant="outline"
                               size="sm"
-                              onClick={handleRegenerate}
-                              disabled={regenerating || sendState === "sending"}
+                              variant={lead.previewUrl ? "outline" : "default"}
+                              disabled
                             >
-                              {regenerating ? (
-                                <Loader2 className="size-4 animate-spin" />
+                              {lead.previewUrl ? (
+                                <>
+                                  <RefreshCw className="size-4" />
+                                  Regenerovat
+                                </>
                               ) : (
-                                "Vygenerovat znovu"
+                                <>
+                                  <Sparkles className="size-4" />
+                                  Vygenerovat preview
+                                </>
                               )}
                             </Button>
-                          </div>
-                          {templateKey && (
-                            <p className="text-xs text-muted-foreground">
-                              Aktuálně:{" "}
-                              <code className="font-mono">{templateKey}</code>
-                            </p>
-                          )}
-                          {!templateKey && (emailSubject || emailBody) && (
-                            <p className="text-xs italic text-amber-700 dark:text-amber-400">
-                              Draft vygenerován bez šablony (fallback hardcoded text).
-                              Po publikaci no-website šablony můžeš regenerovat.
-                            </p>
-                          )}
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label htmlFor="drawer-email-subject">Předmět</Label>
-                          <Input
-                            id="drawer-email-subject"
-                            value={emailSubject}
-                            onChange={(e) => setEmailSubject(e.target.value)}
-                            disabled={sendState === "sending"}
-                            placeholder="Předmět emailu"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label htmlFor="drawer-email-body">Tělo e-mailu</Label>
-                          <Textarea
-                            id="drawer-email-body"
-                            value={emailBody}
-                            onChange={(e) => setEmailBody(e.target.value)}
-                            disabled={sendState === "sending"}
-                            className="min-h-32 text-sm font-mono"
-                            placeholder="Tělo emailu"
-                          />
-                        </div>
-                      </div>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            Lead není kvalifikovaný.
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
+                    </div>
 
-                      <div className="mt-4 flex flex-wrap items-center gap-2">
-                        {sendDisabled && disabledReason ? (
-                          <Tooltip>
-                            <TooltipTrigger render={<span tabIndex={0} />}>
-                              <Button type="button" disabled>
-                                {sendState === "sending" ? (
-                                  <Loader2 className="size-4 animate-spin" />
-                                ) : (
-                                  <Send className="size-4" />
-                                )}
-                                {buttonLabel}
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>{disabledReason}</TooltipContent>
-                          </Tooltip>
-                        ) : (
+                    {previewState === "success" && (
+                      <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-emerald-600">
+                        <CheckCircle2 className="size-3.5" />
+                        Preview vygenerováno.
+                      </p>
+                    )}
+                    {previewState === "error" && previewError && (
+                      <p className="mt-2 inline-flex items-start gap-1.5 text-xs text-destructive">
+                        <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
+                        {previewError}
+                      </p>
+                    )}
+                  </section>
+
+                  <Separator />
+
+                  {/* E-mail draft — Phase 2 KROK 6: editable; Send button
+                      lives in the sticky footer. */}
+                  <section>
+                    <SectionTitle>E-mail</SectionTitle>
+
+                    {alreadySent && (
+                      <p className="mb-3 inline-flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
+                        <span>
+                          Email byl již odeslán{" "}
+                          {(() => {
+                            try {
+                              return format(
+                                parseISO(lead.lastEmailSentAt),
+                                "d. MMMM yyyy 'v' HH:mm",
+                                { locale: cs },
+                              );
+                            } catch {
+                              return lead.lastEmailSentAt;
+                            }
+                          })()}
+                          . Opětovné odeslání pošle email znovu.
+                        </span>
+                      </p>
+                    )}
+
+                    <div className="space-y-3">
+                      {/* B-13 T9: template selector + regenerate */}
+                      <div className="space-y-1.5">
+                        <Label htmlFor="drawer-template-key">Šablona</Label>
+                        <div className="flex items-center gap-2">
+                          <select
+                            id="drawer-template-key"
+                            value={templateKey}
+                            onChange={(e) => setTemplateKey(e.target.value)}
+                            disabled={
+                              regenerating || sendState === "sending"
+                            }
+                            className="flex-1 rounded-md border bg-background px-2 py-1.5 text-sm"
+                          >
+                            <option value="">— auto-select —</option>
+                            <option value="no-website">
+                              Bez webu (no-website)
+                            </option>
+                            <option value="weak-website">
+                              Slabý web (weak-website)
+                            </option>
+                            <option value="has-website">
+                              Má web (has-website)
+                            </option>
+                            <option value="follow-up-1">Follow-up 1</option>
+                            <option value="follow-up-2">Follow-up 2</option>
+                          </select>
                           <Button
                             type="button"
-                            onClick={() => setConfirmOpen(true)}
-                            disabled={sendDisabled}
+                            variant="outline"
+                            size="sm"
+                            onClick={handleRegenerate}
+                            disabled={
+                              regenerating || sendState === "sending"
+                            }
                           >
-                            {sendState === "sending" ? (
+                            {regenerating ? (
                               <Loader2 className="size-4 animate-spin" />
                             ) : (
-                              <Send className="size-4" />
+                              "Vygenerovat znovu"
                             )}
-                            {buttonLabel}
                           </Button>
+                        </div>
+                        {templateKey && (
+                          <p className="text-xs text-muted-foreground">
+                            Aktuálně:{" "}
+                            <code className="font-mono">{templateKey}</code>
+                          </p>
+                        )}
+                        {!templateKey && (emailSubject || emailBody) && (
+                          <p className="text-xs italic text-amber-700 dark:text-amber-400">
+                            Draft vygenerován bez šablony (fallback hardcoded
+                            text). Po publikaci no-website šablony můžeš
+                            regenerovat.
+                          </p>
                         )}
                       </div>
-
-                      {sendState === "success" && (
-                        <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-emerald-600">
-                          <CheckCircle2 className="size-3.5" />
-                          Email odeslán.
-                        </p>
-                      )}
-                      {sendState === "error" && sendError && (
-                        <p className="mt-2 inline-flex items-start gap-1.5 text-xs text-destructive">
-                          <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
-                          {sendError}
-                        </p>
-                      )}
-
-                      {/* Confirm dialog */}
-                      <Dialog
-                        open={confirmOpen}
-                        onOpenChange={(o) => setConfirmOpen(o)}
-                      >
-                        <DialogContent>
-                          <DialogHeader>
-                            <DialogTitle>Odeslat email</DialogTitle>
-                            <DialogDescription>
-                              Email půjde rovnou klientovi. Po odeslání se aktualizuje
-                              stav leadu na <strong>CONTACTED</strong>.
-                            </DialogDescription>
-                          </DialogHeader>
-                          <div className="space-y-3 py-2 text-sm">
-                            <div>
-                              <p className="text-xs uppercase tracking-wider text-muted-foreground">
-                                Příjemce
-                              </p>
-                              <p className="font-medium">
-                                {lead.businessName} &lt;{lead.email}&gt;
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-xs uppercase tracking-wider text-muted-foreground">
-                                Reply-To
-                              </p>
-                              <p className="font-medium">
-                                {senderName} &lt;{senderEmail}&gt;
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-xs uppercase tracking-wider text-muted-foreground">
-                                Předmět
-                              </p>
-                              <p className="font-medium break-words">
-                                {emailSubject}
-                              </p>
-                            </div>
-                          </div>
-                          <DialogFooter>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={() => setConfirmOpen(false)}
-                            >
-                              Zrušit
-                            </Button>
-                            <Button type="button" onClick={handleSend}>
-                              <Send className="size-4" />
-                              {alreadySent ? "Odeslat znovu" : "Odeslat"}
-                            </Button>
-                          </DialogFooter>
-                        </DialogContent>
-                      </Dialog>
-                    </section>
-                  );
-                })()}
-                <Separator />
-
-                {/* Editovatelna pole */}
-                <section>
-                  <SectionTitle>Editovatelná pole</SectionTitle>
-                  <div className="space-y-3">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="drawer-stage">Stav</Label>
-                      <Select
-                        value={form.outreachStage}
-                        onValueChange={(val) =>
-                          val != null && updateForm({ outreachStage: val })
-                        }
-                      >
-                        <SelectTrigger id="drawer-stage" className="w-full">
-                          <SelectValue placeholder="Zvolte stav" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {Object.entries(OUTREACH_STAGES).map(
-                            ([key, label]) => (
-                              <SelectItem key={key} value={key}>
-                                {label}
-                              </SelectItem>
-                            )
-                          )}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label htmlFor="drawer-assignee">Přiděleno</Label>
-                      <Select
-                        value={
-                          form.assigneeEmail === ""
-                            ? UNASSIGNED_VALUE
-                            : ALLOWED_USERS.includes(form.assigneeEmail)
-                              ? form.assigneeEmail
-                              : form.assigneeEmail /* unknown legacy email — render raw */
-                        }
-                        onValueChange={(val) => {
-                          if (val == null) return;
-                          updateForm({
-                            assigneeEmail: val === UNASSIGNED_VALUE ? "" : val,
-                          });
-                        }}
-                      >
-                        <SelectTrigger id="drawer-assignee" className="w-full">
-                          <SelectValue placeholder="Zvolte přidělení" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={UNASSIGNED_VALUE}>
-                            {UNASSIGNED_LABEL}
-                          </SelectItem>
-                          {ALLOWED_USERS.map((email) => (
-                            <SelectItem key={email} value={email}>
-                              {ASSIGNEE_NAMES[email]}{" "}
-                              <span className="text-xs text-muted-foreground">
-                                ({email})
-                              </span>
-                            </SelectItem>
-                          ))}
-                          {/* Surface orphaned legacy assignee so operator can re-pick */}
-                          {form.assigneeEmail !== "" &&
-                            !ALLOWED_USERS.includes(form.assigneeEmail) && (
-                              <SelectItem value={form.assigneeEmail}>
-                                Neznámý: {form.assigneeEmail}
-                              </SelectItem>
-                            )}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label htmlFor="drawer-action">Další krok</Label>
-                      <Select
-                        value={form.nextAction}
-                        onValueChange={(val) =>
-                          val != null && updateForm({ nextAction: val })
-                        }
-                      >
-                        <SelectTrigger id="drawer-action" className="w-full">
-                          <SelectValue placeholder="Zvolte akci" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {NEXT_ACTIONS.map((action) => (
-                            <SelectItem key={action} value={action}>
-                              {action}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1.5">
-                        <Label htmlFor="drawer-last-contact">
-                          Poslední kontakt
-                        </Label>
+                        <Label htmlFor="drawer-email-subject">Předmět</Label>
                         <Input
-                          id="drawer-last-contact"
-                          type="date"
-                          value={form.lastContactAt}
-                          onChange={(e) =>
-                            updateForm({ lastContactAt: e.target.value })
-                          }
+                          id="drawer-email-subject"
+                          value={emailSubject}
+                          onChange={(e) => setEmailSubject(e.target.value)}
+                          disabled={sendState === "sending"}
+                          placeholder="Předmět emailu"
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <Label htmlFor="drawer-followup">Follow-up</Label>
-                        <Input
-                          id="drawer-followup"
-                          type="date"
-                          value={form.nextFollowupAt}
-                          onChange={(e) =>
-                            updateForm({ nextFollowupAt: e.target.value })
-                          }
+                        <Label htmlFor="drawer-email-body">Tělo e-mailu</Label>
+                        <Textarea
+                          id="drawer-email-body"
+                          value={emailBody}
+                          onChange={(e) => setEmailBody(e.target.value)}
+                          disabled={sendState === "sending"}
+                          className="min-h-48 text-sm font-mono"
+                          placeholder="Tělo emailu"
                         />
                       </div>
                     </div>
 
-                    <div className="space-y-1.5">
-                      <Label htmlFor="drawer-note">Poznámka</Label>
-                      <Textarea
-                        id="drawer-note"
-                        value={form.salesNote}
-                        onChange={(e) =>
-                          updateForm({ salesNote: e.target.value })
-                        }
-                        placeholder="Poznámka k leadu..."
-                        className="min-h-20"
-                      />
-                    </div>
+                    {sendState === "success" && (
+                      <p className="mt-3 inline-flex items-center gap-1.5 text-xs text-emerald-600">
+                        <CheckCircle2 className="size-3.5" />
+                        Email odeslán.
+                      </p>
+                    )}
+                    {sendState === "error" && sendError && (
+                      <p className="mt-3 inline-flex items-start gap-1.5 text-xs text-destructive">
+                        <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
+                        {sendError}
+                      </p>
+                    )}
+                  </section>
+                </div>
+              </ScrollArea>
+            </>
+          )}
 
-                    <Button
-                      onClick={handleSave}
-                      disabled={saving}
-                      className="w-full"
-                    >
-                      {saving ? (
-                        <>
-                          <Loader2 className="size-4 mr-1.5 animate-spin" />
-                          Ukládám...
-                        </>
+          {/* Sticky footer — primary actions always visible */}
+          <DialogFooter
+            className="
+              border-t border-border/40
+              bg-background/70 backdrop-blur-md
+              px-6 py-4
+              flex !justify-between items-center gap-3
+              shrink-0
+              sm:flex-row
+            "
+          >
+            <Button
+              variant="ghost"
+              onClick={() => handleOpenChange(false)}
+              type="button"
+            >
+              Zavřít
+            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleSave}
+                disabled={!lead || saving}
+              >
+                {saving ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    Ukládám…
+                  </>
+                ) : (
+                  <>
+                    <Save className="size-4" />
+                    Uložit změny
+                  </>
+                )}
+              </Button>
+              {sendDisabled && sendDisabledReason ? (
+                <Tooltip>
+                  <TooltipTrigger render={<span tabIndex={0} />}>
+                    <Button type="button" disabled>
+                      {sendState === "sending" ? (
+                        <Loader2 className="size-4 animate-spin" />
                       ) : (
-                        <>
-                          <Save className="size-4 mr-1.5" />
-                          Uložit změny
-                        </>
+                        <Send className="size-4" />
                       )}
+                      {sendButtonLabel}
                     </Button>
-                  </div>
-                </section>
+                  </TooltipTrigger>
+                  <TooltipContent>{sendDisabledReason}</TooltipContent>
+                </Tooltip>
+              ) : (
+                <Button
+                  type="button"
+                  onClick={() => setConfirmOpen(true)}
+                  disabled={sendDisabled}
+                >
+                  {sendState === "sending" ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Send className="size-4" />
+                  )}
+                  {sendButtonLabel}
+                </Button>
+              )}
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Send-confirm dialog (Phase 2 KROK 6) — separate from the modal,
+          retained from the old drawer with its values. */}
+      {lead && (
+        <Dialog open={confirmOpen} onOpenChange={(o) => setConfirmOpen(o)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Odeslat email</DialogTitle>
+              <DialogDescription>
+                Email půjde rovnou klientovi. Po odeslání se aktualizuje stav
+                leadu na <strong>CONTACTED</strong>.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-2 text-sm">
+              <div>
+                <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                  Příjemce
+                </p>
+                <p className="font-medium">
+                  {lead.businessName} &lt;{lead.email}&gt;
+                </p>
               </div>
-            </ScrollArea>
-          </>
-        )}
-      </SheetContent>
-    </Sheet>
+              <div>
+                <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                  Reply-To
+                </p>
+                <p className="font-medium">
+                  {senderName} &lt;{senderEmail}&gt;
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                  Předmět
+                </p>
+                <p className="font-medium break-words">{emailSubject}</p>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setConfirmOpen(false)}
+              >
+                Zrušit
+              </Button>
+              <Button type="button" onClick={handleSend}>
+                <Send className="size-4" />
+                {alreadySent ? "Odeslat znovu" : "Odeslat"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Unsaved-changes confirm dialog — fires when isDirty=true and the
+          operator tries to close (X / Esc / click-outside / Zavřít). */}
+      <Dialog open={closeConfirmOpen} onOpenChange={setCloseConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Neuložené změny</DialogTitle>
+            <DialogDescription>
+              Máš neuložené změny v tomto leadu. Pokud zavřeš okno, ztratíš je.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCloseConfirmOpen(false)}
+            >
+              Zůstat v okně
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                setCloseConfirmOpen(false);
+                onOpenChange(false);
+              }}
+            >
+              Zavřít bez uložení
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
