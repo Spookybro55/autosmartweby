@@ -22,6 +22,7 @@
 | A7 | A | Auto qualify hook | Stream A | - | done | 2026-04-17 | docs/20-current-state.md, docs/24-automation-workflows.md | apps-script, scripts, docs |
 | A8 | A | Preview queue → BRIEF_READY | Stream A | - | done | 2026-04-20 | docs/20-current-state.md, docs/24-automation-workflows.md | apps-script, scripts, docs |
 | A9 | A | Ingest quality report per source_job_id | Stream A | - | done | 2026-04-20 | docs/20-current-state.md, docs/23-data-model.md, docs/24-automation-workflows.md | apps-script, scripts, docs |
+| AGENT-TEAM-FIX-MAKE-BLUEPRINTS | B | Rewrite 5 Make blueprints in valid format + Pla... | Claude Code (Sonnet 4.6, autonomous Playwright run) | docs-guardian | code-complete | 2026-04-29 | docs/30-task-records/AGENT-TEAM-FIX-MAKE-BLUEPRINTS.md, docs/11-change-log.md, docs/29-task-registry.md | docs, scripts |
 | AGENT-TEAM-MAKE-BLUEPRINT-EXTRACTOR | B | Playwright extractor for Make scenario blueprin... | Claude Code (Sonnet 4.6, autonomous Playwright run) | docs-guardian | code-complete | 2026-04-29 | docs/30-task-records/AGENT-TEAM-MAKE-BLUEPRINT-EXTRACTOR.md, docs/11-change-log.md, docs/29-task-registry.md | scripts |
 | AGENT-TEAM-PHASE-1 | B | AI Agent Team — Phase 1: knowledge base + Tech ... | Sebastián Fridrich | human | code-complete | 2026-04-29 | docs/30-task-records/AGENT-TEAM-PHASE-1.md, docs/agents/*, CLAUDE.md, docs/30-task-records/_template.md, docs/14-definition-of-done.md, docs/11-change-log.md, docs/29-task-registry.md | docs, CLAUDE.md |
 | AGENT-TEAM-PHASE-2 | B | AI Agent Team — Phase 2: remaining roles + CI w... | Sebastián Fridrich | human | code-complete | 2026-04-29 | docs/30-task-records/AGENT-TEAM-PHASE-2.md, docs/agents/roles/security-engineer.md, docs/agents/roles/qa-engineer.md, docs/agents/roles/docs-guardian.md, docs/11-change-log.md, docs/29-task-registry.md | docs, .github, scripts |
@@ -59,4 +60,4 @@
 | redesign-lead-detail-modal | B | Redesign LeadDetailDrawer — side drawer → cente... | Stream B | - | code-complete | 2026-04-29 | docs/30-task-records/redesign-lead-detail-modal.md, docs/11-change-log.md, docs/29-task-registry.md | crm-frontend |
 | visual-restyle-dark-futuristic-pr1 | B | Visual restyle — dark futuristic premium SaaS l... | Stream B | - | code-complete | 2026-04-29 | docs/30-task-records/visual-restyle-dark-futuristic-pr1.md, docs/11-change-log.md, docs/29-task-registry.md | crm-frontend |
 
-*50 tasks total.*
+*51 tasks total.*
