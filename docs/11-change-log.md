@@ -8,6 +8,23 @@
 
 ## 2026-04-29
 
+### [B/AGENT-TEAM-MAKE-BLUEPRINT-EXTRACTOR] Playwright extractor for Make scenario blueprint reference template (unblocks QFH-0004) — CODE-COMPLETE
+- **Scope:** QFH-0004 reported that 5 Make blueprints shipped in PR #90 fail import with
+"invalid blueprint" error because they used a simplified JSON format that
+does not match Make's real blueprint structure. Sebastián provided unblock
+postup: export reference template from Make UI manually.
+
+This task automates that step via Playwright, removing the manual click work.
+The extractor connects to Sebastián's existing Chrome session (CDP port 9222),
+creates a minimal scenario in Make UI, and exports the blueprint.
+
+The goal is a **valid blueprint reference template** in the repo, against
+which the 5 broken blueprints in `docs/agents/make/` can be rewritten in a
+follow-up PR (`fix/make-blueprints-format`).
+- **Owner:** Claude Code (Sonnet 4.6, autonomous Playwright run)
+- **Code:** scripts/agent/extract-make-blueprint.mjs (new), scripts/agent/make-reference-blueprint.json (new)
+- **Docs:** docs/30-task-records/AGENT-TEAM-MAKE-BLUEPRINT-EXTRACTOR.md, docs/11-change-log.md, docs/29-task-registry.md
+
 ### [B/AGENT-TEAM-PHASE-1] AI Agent Team — Phase 1: knowledge base + Tech Lead + Bug Hunter — CODE-COMPLETE
 - **Scope:** Phase 1 of 3 — bootstrap AI agent team setup per `docs/agents/_discovery-report.md`
 (approved 2026-04-29) and `~/agent-team-setup-files/03-master-plan.md` v1.0.
