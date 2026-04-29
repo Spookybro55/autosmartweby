@@ -1,77 +1,84 @@
 {
-  "name": "Agent Team — Daily Triage",
-  "description": "Cron 8:00 AM daily. Watches FINDINGS.md changes, regenerates QUEUE.md (via local agent triage.mjs trigger), notifies Sebastián that queue is ready.",
-  "scheduling": {
-    "type": "cron",
-    "cron": "0 8 * * *",
-    "timezone": "Europe/Prague"
-  },
-  "designer": {
-    "orphans": []
-  },
-  "flow": [
-    {
-      "id": 1,
-      "module": "github:WatchFiles",
-      "version": 1,
-      "parameters": {
-        "owner": "Spookybro55",
-        "repo": "autosmartweby",
-        "path": "docs/audits/FINDINGS.md",
-        "branch": "main"
-      },
-      "metadata": {
-        "designer": {
-          "x": 0,
-          "y": 0
+    "name": "Agent Team — Daily Triage",
+    "flow": [
+        {
+            "id": 1,
+            "module": "util:GetVariables",
+            "version": 1,
+            "metadata": {
+                "designer": {
+                    "x": 0,
+                    "y": 0
+                },
+                "restore": {},
+                "expect": [
+                    {
+                        "name": "variables",
+                        "type": "array",
+                        "label": "Variables (replace this placeholder with GitHub Watch Files trigger)"
+                    }
+                ]
+            }
+        },
+        {
+            "id": 2,
+            "module": "util:GetVariables",
+            "version": 1,
+            "metadata": {
+                "designer": {
+                    "x": 300,
+                    "y": 0
+                },
+                "restore": {},
+                "expect": [
+                    {
+                        "name": "variables",
+                        "type": "array",
+                        "label": "Variables (replace this placeholder with HTTP Make a request → POST https://ntfy.sh/{TOPIC})"
+                    }
+                ]
+            }
         }
-      }
-    },
-    {
-      "id": 2,
-      "module": "github:GetFileContent",
-      "version": 1,
-      "parameters": {
-        "owner": "Spookybro55",
-        "repo": "autosmartweby",
-        "path": "docs/agents/QUEUE.md",
-        "ref": "main"
-      },
-      "metadata": {
+    ],
+    "metadata": {
+        "instant": false,
+        "version": 1,
+        "scenario": {
+            "roundtrips": 1,
+            "maxErrors": 3,
+            "autoCommit": true,
+            "autoCommitTriggerLast": true,
+            "sequential": false,
+            "slots": null,
+            "confidential": false,
+            "dataloss": false,
+            "dlq": false,
+            "freshVariables": false
+        },
         "designer": {
-          "x": 300,
-          "y": 0
-        }
-      }
-    },
-    {
-      "id": 3,
-      "module": "http:MakeRequest",
-      "version": 1,
-      "parameters": {
-        "url": "https://ntfy.sh/{{TODO_SEBASTIAN_TOPIC}}",
-        "method": "POST",
-        "headers": [
-          {"name": "Title", "value": "Agent Team — Daily Triage Ready"},
-          {"name": "Tags", "value": "robot,calendar"},
-          {"name": "Priority", "value": "default"}
-        ],
-        "body": "FINDINGS.md updated since last triage.\n\nRun locally: claude → 'vezmi další task z queue'.\n\nQUEUE.md head: see https://github.com/Spookybro55/autosmartweby/blob/main/docs/agents/QUEUE.md"
-      },
-      "metadata": {
-        "designer": {
-          "x": 600,
-          "y": 0
-        }
-      }
+            "orphans": []
+        },
+        "zone": "eu2.make.com",
+        "notes": [
+            {
+                "moduleIds": [
+                    1
+                ],
+                "content": "<p><strong>Module 1 (replace placeholder):</strong> GitHub → Watch files. Owner: Spookybro55, repo: autosmartweby, path: docs/audits/FINDINGS.md, branch: main.</p>",
+                "isFilterNote": false
+            },
+            {
+                "moduleIds": [
+                    2
+                ],
+                "content": "<p><strong>Module 2 (replace placeholder):</strong> HTTP → Make a request. URL: https://ntfy.sh/{TODO_SEBASTIAN_TOPIC}. Method: POST. Headers: Title=Agent Team — Daily Triage Ready, Tags=robot,calendar. Body: \"FINDINGS.md updated. Run: claude → vezmi další task z queue.\"</p>",
+                "isFilterNote": false
+            },
+            {
+                "moduleIds": [],
+                "content": "<p><strong>Schedule:</strong> Cron 0 8 * * * (08:00 Europe/Prague). Set in Make UI → scenario settings (NOT in blueprint). Triggers daily.</p><p><strong>Ops/měs:</strong> ~30. Description: notifies Sebastián about daily triage availability.</p>",
+                "isFilterNote": false
+            }
+        ]
     }
-  ],
-  "_setup_notes": [
-    "REQUIRES: Make GitHub connection (PAT s repo scope).",
-    "REPLACE: TODO_SEBASTIAN_TOPIC with your ntfy topic name (~14-char random suffix).",
-    "OPTIONAL: install ntfy iOS/Android app, subscribe to topic.",
-    "TEST: Make UI 'Run once' button → notification should arrive in seconds.",
-    "OPS estimate: ~30/měs (1× per day if FINDINGS unchanged, more if changes detected)."
-  ],
-  "_phase_3_only": true
 }

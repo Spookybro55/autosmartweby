@@ -8,6 +8,30 @@
 
 ## 2026-04-29
 
+### [B/AGENT-TEAM-FIX-MAKE-BLUEPRINTS] Rewrite 5 Make blueprints in valid format + Playwright verifier (resolves QFH-0004) — CODE-COMPLETE
+- **Scope:** QFH-0004 reported that the 5 Make blueprints shipped in PR #90 (merged as
+`ccd8714`) failed import to Make UI with "invalid blueprint" error. The
+prior PR #92 (`chore/make-blueprint-extractor`) added a Playwright extractor
+that captured a valid reference template (`scripts/agent/make-reference-blueprint.json`).
+
+This PR uses that reference to rewrite all 5 blueprints in
+`docs/agents/make/0{1..5}-*.json` so they pass Make's import validator.
+
+Strategy: structurally-valid blueprints with `util:GetVariables` placeholder
+modules + rich `metadata.notes` blocks describing the intended real module
+per node. After import, Sebastián replaces placeholder modules with real
+ones (HTTP, GitHub, Anthropic, Webhooks) using Make's UI module picker.
+
+Adds `scripts/agent/verify-make-blueprint.mjs` — Playwright-based verifier
+that imports a blueprint via Make UI and reports success/failure with
+exit codes and screenshots.
+
+**All 5 blueprints PASS verification** (page title updates to scenario name
+after import; no "invalid blueprint" error text detected).
+- **Owner:** Claude Code (Sonnet 4.6, autonomous Playwright run)
+- **Code:** docs/agents/make/01-daily-triage.json (rewritten), docs/agents/make/02-pr-review-reminder.json (rewritten), docs/agents/make/03-learning-loop.json (rewritten), docs/agents/make/04-backpressure-check.json (rewritten), docs/agents/make/05-weekly-digest.json (rewritten), scripts/agent/verify-make-blueprint.mjs (new)
+- **Docs:** docs/30-task-records/AGENT-TEAM-FIX-MAKE-BLUEPRINTS.md, docs/11-change-log.md, docs/29-task-registry.md
+
 ### [B/AGENT-TEAM-PHASE-1] AI Agent Team — Phase 1: knowledge base + Tech Lead + Bug Hunter — CODE-COMPLETE
 - **Scope:** Phase 1 of 3 — bootstrap AI agent team setup per `docs/agents/_discovery-report.md`
 (approved 2026-04-29) and `~/agent-team-setup-files/03-master-plan.md` v1.0.

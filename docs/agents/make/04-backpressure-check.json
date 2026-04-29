@@ -1,72 +1,136 @@
 {
-  "name": "Agent Team — Backpressure Check",
-  "description": "Hourly. Counts unmerged agent/* PRs. If ≥5 (master plan §5 stop condition), notifies Sebastián with HIGH priority. Recommends manual QUEUE.md status flip to PAUSED.",
-  "scheduling": {
-    "type": "cron",
-    "cron": "0 * * * *",
-    "timezone": "Europe/Prague"
-  },
-  "flow": [
-    {
-      "id": 1,
-      "module": "github:ListPullRequests",
-      "version": 1,
-      "parameters": {
-        "owner": "Spookybro55",
-        "repo": "autosmartweby",
-        "state": "open",
-        "per_page": 50
-      }
-    },
-    {
-      "id": 2,
-      "module": "builtin:Filter",
-      "version": 1,
-      "parameters": {
-        "condition": "{{1.head.ref}} starts with 'agent/' OR {{1.head.ref}} starts with 'agent-team/'"
-      }
-    },
-    {
-      "id": 3,
-      "module": "builtin:Aggregator",
-      "version": 1,
-      "parameters": {
-        "operation": "count"
-      }
-    },
-    {
-      "id": 4,
-      "module": "builtin:Router",
-      "version": 1,
-      "routes": [
+    "name": "Agent Team — Backpressure Check",
+    "flow": [
         {
-          "condition": "{{3.count}} >= 5",
-          "flow": [
-            {
-              "id": 5,
-              "module": "http:MakeRequest",
-              "parameters": {
-                "url": "https://ntfy.sh/{{TODO_SEBASTIAN_TOPIC}}",
-                "method": "POST",
-                "headers": [
-                  {"name": "Title", "value": "Agent backpressure: {{3.count}} PRs unmerged"},
-                  {"name": "Tags", "value": "warning,no_entry"},
-                  {"name": "Priority", "value": "urgent"}
-                ],
-                "body": "{{3.count}} unmerged agent PRs.\n\nMaster plan §5 stop condition reached.\n\nRECOMMENDED ACTION:\n1. Edit docs/agents/QUEUE.md status header → PAUSED.\n2. Triage open PRs (merge / close).\n3. After backlog drained, flip status back to ACTIVE.\n\nOpen PRs: https://github.com/Spookybro55/autosmartweby/pulls?q=is%3Aopen+head%3Aagent%2F"
-              }
+            "id": 1,
+            "module": "util:GetVariables",
+            "version": 1,
+            "metadata": {
+                "designer": {
+                    "x": 0,
+                    "y": 0
+                },
+                "restore": {},
+                "expect": [
+                    {
+                        "name": "variables",
+                        "type": "array",
+                        "label": "Variables (replace with GitHub → List pull requests; state=open, per_page=50)"
+                    }
+                ]
             }
-          ]
+        },
+        {
+            "id": 2,
+            "module": "util:GetVariables",
+            "version": 1,
+            "metadata": {
+                "designer": {
+                    "x": 300,
+                    "y": 0
+                },
+                "restore": {},
+                "expect": [
+                    {
+                        "name": "variables",
+                        "type": "array",
+                        "label": "Filter (replace with flow filter — head.ref starts with agent/ or agent-team/)"
+                    }
+                ]
+            }
+        },
+        {
+            "id": 3,
+            "module": "util:GetVariables",
+            "version": 1,
+            "metadata": {
+                "designer": {
+                    "x": 600,
+                    "y": 0
+                },
+                "restore": {},
+                "expect": [
+                    {
+                        "name": "variables",
+                        "type": "array",
+                        "label": "Variables (replace with Tools → Aggregator; operation=count)"
+                    }
+                ]
+            }
+        },
+        {
+            "id": 4,
+            "module": "util:GetVariables",
+            "version": 1,
+            "metadata": {
+                "designer": {
+                    "x": 900,
+                    "y": 0
+                },
+                "restore": {},
+                "expect": [
+                    {
+                        "name": "variables",
+                        "type": "array",
+                        "label": "Variables (replace with HTTP → POST https://ntfy.sh/{TOPIC} when count >= 5; priority=urgent)"
+                    }
+                ]
+            }
         }
-      ]
+    ],
+    "metadata": {
+        "instant": false,
+        "version": 1,
+        "scenario": {
+            "roundtrips": 1,
+            "maxErrors": 3,
+            "autoCommit": true,
+            "autoCommitTriggerLast": true,
+            "sequential": false,
+            "slots": null,
+            "confidential": false,
+            "dataloss": false,
+            "dlq": false,
+            "freshVariables": false
+        },
+        "designer": {
+            "orphans": []
+        },
+        "zone": "eu2.make.com",
+        "notes": [
+            {
+                "moduleIds": [
+                    1
+                ],
+                "content": "<p><strong>Module 1 (replace placeholder):</strong> GitHub → List pull requests. Owner: Spookybro55, repo: autosmartweby, state: open, per_page: 50.</p>",
+                "isFilterNote": false
+            },
+            {
+                "moduleIds": [
+                    2
+                ],
+                "content": "<p><strong>Module 2 (replace placeholder):</strong> Flow filter — <code>head.ref starts with 'agent/' OR head.ref starts with 'agent-team/'</code>.</p>",
+                "isFilterNote": true
+            },
+            {
+                "moduleIds": [
+                    3
+                ],
+                "content": "<p><strong>Module 3 (replace placeholder):</strong> Tools → Aggregator. Operation: count. Output: <code>{{count}}</code>.</p>",
+                "isFilterNote": false
+            },
+            {
+                "moduleIds": [
+                    4
+                ],
+                "content": "<p><strong>Module 4 (replace placeholder):</strong> Conditional HTTP request via Router. Condition: <code>{{3.count}} >= 5</code>. URL: https://ntfy.sh/{TODO_SEBASTIAN_TOPIC}. Method: POST. Headers: Title=Agent backpressure: {count} PRs unmerged, Priority=urgent. Body: backpressure stop condition reached, recommend QUEUE.md status flip to PAUSED.</p>",
+                "isFilterNote": false
+            },
+            {
+                "moduleIds": [],
+                "content": "<p><strong>Schedule:</strong> Cron 0 * * * * (hourly). Threshold: 5 PRs (master plan §5 stop condition). Does NOT auto-pause QUEUE.md — only notifies.</p><p><strong>Ops/měs:</strong> ~720 (24 × 30).</p>",
+                "isFilterNote": false
+            }
+        ]
     }
-  ],
-  "_setup_notes": [
-    "REQUIRES: Make GitHub connection.",
-    "REPLACE: TODO_SEBASTIAN_TOPIC.",
-    "TUNE: threshold 5 in Router condition.",
-    "OPS estimate: ~720/měs (24 × 30).",
-    "DOES NOT auto-pause QUEUE.md — only notifies. Sebastián or Tech Lead must manually flip status."
-  ],
-  "_phase_3_only": true
 }

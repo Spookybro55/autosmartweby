@@ -1,85 +1,136 @@
 {
-  "name": "Agent Team — Weekly Digest",
-  "description": "Monday 9:00 AM Europe/Prague. Summary of past week's agent activity: PRs merged by role, patterns added, cost (manual update reference).",
-  "scheduling": {
-    "type": "cron",
-    "cron": "0 9 * * 1",
-    "timezone": "Europe/Prague"
-  },
-  "flow": [
-    {
-      "id": 1,
-      "module": "github:ListPullRequests",
-      "version": 1,
-      "parameters": {
-        "owner": "Spookybro55",
-        "repo": "autosmartweby",
-        "state": "closed",
-        "per_page": 100
-      }
-    },
-    {
-      "id": 2,
-      "module": "builtin:Filter",
-      "version": 1,
-      "parameters": {
-        "condition": "({{1.head.ref}} starts with 'agent/' OR {{1.head.ref}} starts with 'agent-team/') AND {{1.merged_at}} > now - 604800000 AND {{1.merged}} == true"
-      }
-    },
-    {
-      "id": 3,
-      "module": "builtin:Aggregator",
-      "version": 1,
-      "parameters": {
-        "operation": "group_by",
-        "groupBy": "head.ref",
-        "extractRole": "match({{2.head.ref}}; 'agent/([^/]+)/'; 1)"
-      }
-    },
-    {
-      "id": 4,
-      "module": "github:GetCommits",
-      "version": 1,
-      "parameters": {
-        "owner": "Spookybro55",
-        "repo": "autosmartweby",
-        "path": "docs/agents/PATTERNS.md",
-        "since": "now - 7d",
-        "per_page": 50
-      }
-    },
-    {
-      "id": 5,
-      "module": "builtin:Aggregator",
-      "version": 1,
-      "parameters": {
-        "operation": "count",
-        "input": "{{4}}",
-        "filter": "message starts with 'chore(agents): learning loop — pattern'"
-      }
-    },
-    {
-      "id": 6,
-      "module": "http:MakeRequest",
-      "version": 1,
-      "parameters": {
-        "url": "https://ntfy.sh/{{TODO_SEBASTIAN_TOPIC}}",
-        "method": "POST",
-        "headers": [
-          {"name": "Title", "value": "Agent Team — Weekly Digest"},
-          {"name": "Tags", "value": "bar_chart,calendar"},
-          {"name": "Priority", "value": "default"}
-        ],
-        "body": "Past week (Mon-Sun):\n\n• Merged: {{2.length}} agent PRs\n• By role: {{3.summary}}\n• New patterns added: {{5.count}}\n\nReview backlog: https://github.com/Spookybro55/autosmartweby/pulls\nQueue: https://github.com/Spookybro55/autosmartweby/blob/main/docs/agents/QUEUE.md\n\nManual cost check: https://console.anthropic.com/settings/usage"
-      }
+    "name": "Agent Team — Weekly Digest",
+    "flow": [
+        {
+            "id": 1,
+            "module": "util:GetVariables",
+            "version": 1,
+            "metadata": {
+                "designer": {
+                    "x": 0,
+                    "y": 0
+                },
+                "restore": {},
+                "expect": [
+                    {
+                        "name": "variables",
+                        "type": "array",
+                        "label": "Variables (replace with GitHub → List pull requests; state=closed, per_page=100)"
+                    }
+                ]
+            }
+        },
+        {
+            "id": 2,
+            "module": "util:GetVariables",
+            "version": 1,
+            "metadata": {
+                "designer": {
+                    "x": 300,
+                    "y": 0
+                },
+                "restore": {},
+                "expect": [
+                    {
+                        "name": "variables",
+                        "type": "array",
+                        "label": "Filter (replace with flow filter — head.ref starts with agent/, merged=true, merged_at > now-7d)"
+                    }
+                ]
+            }
+        },
+        {
+            "id": 3,
+            "module": "util:GetVariables",
+            "version": 1,
+            "metadata": {
+                "designer": {
+                    "x": 600,
+                    "y": 0
+                },
+                "restore": {},
+                "expect": [
+                    {
+                        "name": "variables",
+                        "type": "array",
+                        "label": "Variables (replace with Tools → Aggregator group by extracted role)"
+                    }
+                ]
+            }
+        },
+        {
+            "id": 4,
+            "module": "util:GetVariables",
+            "version": 1,
+            "metadata": {
+                "designer": {
+                    "x": 900,
+                    "y": 0
+                },
+                "restore": {},
+                "expect": [
+                    {
+                        "name": "variables",
+                        "type": "array",
+                        "label": "Variables (replace with HTTP → POST https://ntfy.sh/{TOPIC} weekly summary)"
+                    }
+                ]
+            }
+        }
+    ],
+    "metadata": {
+        "instant": false,
+        "version": 1,
+        "scenario": {
+            "roundtrips": 1,
+            "maxErrors": 3,
+            "autoCommit": true,
+            "autoCommitTriggerLast": true,
+            "sequential": false,
+            "slots": null,
+            "confidential": false,
+            "dataloss": false,
+            "dlq": false,
+            "freshVariables": false
+        },
+        "designer": {
+            "orphans": []
+        },
+        "zone": "eu2.make.com",
+        "notes": [
+            {
+                "moduleIds": [
+                    1
+                ],
+                "content": "<p><strong>Module 1 (replace placeholder):</strong> GitHub → List pull requests. Owner: Spookybro55, repo: autosmartweby, state: closed, per_page: 100.</p>",
+                "isFilterNote": false
+            },
+            {
+                "moduleIds": [
+                    2
+                ],
+                "content": "<p><strong>Module 2 (replace placeholder):</strong> Flow filter — <code>head.ref starts with 'agent/' AND merged_at > now() - 604800000 AND merged == true</code> (past 7 days, agent-merged).</p>",
+                "isFilterNote": true
+            },
+            {
+                "moduleIds": [
+                    3
+                ],
+                "content": "<p><strong>Module 3 (replace placeholder):</strong> Tools → Aggregator. Group by: head.ref. Extract role: <code>match(head.ref; 'agent/([^/]+)/'; 1)</code>. Outputs: count per role.</p>",
+                "isFilterNote": false
+            },
+            {
+                "moduleIds": [
+                    4
+                ],
+                "content": "<p><strong>Module 4 (replace placeholder):</strong> HTTP → Make a request. URL: https://ntfy.sh/{TODO_SEBASTIAN_TOPIC}. Method: POST. Headers: Title=Agent Team — Weekly Digest, Tags=bar_chart,calendar. Body: summary of past week's merged agent PRs by role + new patterns count + manual cost link to https://console.anthropic.com/settings/usage.</p>",
+                "isFilterNote": false
+            },
+            {
+                "moduleIds": [],
+                "content": "<p><strong>Schedule:</strong> Cron 0 9 * * 1 (Monday 09:00 Europe/Prague).</p><p><strong>Ops/měs:</strong> ~4 (4 Mondays).</p><p><strong>Optional extension:</strong> include task records analytics (count of done vs blocked from QUEUE.md / RUN-LOG.md).</p>",
+                "isFilterNote": false
+            }
+        ]
     }
-  ],
-  "_setup_notes": [
-    "REQUIRES: Make GitHub connection.",
-    "REPLACE: TODO_SEBASTIAN_TOPIC.",
-    "OPS estimate: ~4/měs (4 Mondays).",
-    "MANUAL: cost from Anthropic Console (no API for billing aggregation in MVP).",
-    "OPTIONAL EXTENSION: include task records analytics (count of done vs blocked from QUEUE.md / RUN-LOG.md)."
-  ],
-  "_phase_3_only": true
 }

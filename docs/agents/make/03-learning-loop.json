@@ -1,180 +1,188 @@
 {
-  "name": "Agent Team — Learning Loop",
-  "description": "Webhook triggered by GitHub PR merged. For agent/* and agent-team/* branches, calls Anthropic API to extract pattern/gotcha/regression risk from PR diff, appends to docs/agents/PATTERNS.md / GOTCHAS.md / REGRESSION-LOG.md auto-generated sections via GitHub API commit.",
-  "scheduling": {
-    "type": "on-demand"
-  },
-  "flow": [
-    {
-      "id": 1,
-      "module": "webhooks:CustomWebhook",
-      "version": 1,
-      "parameters": {
-        "name": "github-pr-merged"
-      },
-      "_note": "After import, Make creates a unique webhook URL. Copy it → GitHub repo Settings → Webhooks → Add webhook. Payload URL = Make webhook URL. Content type = application/json. Events = Pull requests.",
-      "metadata": {
-        "designer": {
-          "x": 0,
-          "y": 0
+    "name": "Agent Team — Learning Loop",
+    "flow": [
+        {
+            "id": 1,
+            "module": "util:GetVariables",
+            "version": 1,
+            "metadata": {
+                "designer": {
+                    "x": 0,
+                    "y": 0
+                },
+                "restore": {},
+                "expect": [
+                    {
+                        "name": "variables",
+                        "type": "array",
+                        "label": "Webhook (replace with Webhooks → Custom webhook trigger; instant=true)"
+                    }
+                ]
+            }
+        },
+        {
+            "id": 2,
+            "module": "util:GetVariables",
+            "version": 1,
+            "metadata": {
+                "designer": {
+                    "x": 300,
+                    "y": 0
+                },
+                "restore": {},
+                "expect": [
+                    {
+                        "name": "variables",
+                        "type": "array",
+                        "label": "Filter (replace with flow filter — action='closed' AND merged=true AND head.ref starts with agent/ or agent-team/)"
+                    }
+                ]
+            }
+        },
+        {
+            "id": 3,
+            "module": "util:GetVariables",
+            "version": 1,
+            "metadata": {
+                "designer": {
+                    "x": 600,
+                    "y": 0
+                },
+                "restore": {},
+                "expect": [
+                    {
+                        "name": "variables",
+                        "type": "array",
+                        "label": "Variables (replace with GitHub → Get a pull request diff; pull_number={{1.pull_request.number}})"
+                    }
+                ]
+            }
+        },
+        {
+            "id": 4,
+            "module": "util:GetVariables",
+            "version": 1,
+            "metadata": {
+                "designer": {
+                    "x": 900,
+                    "y": 0
+                },
+                "restore": {},
+                "expect": [
+                    {
+                        "name": "variables",
+                        "type": "array",
+                        "label": "Variables (replace with Anthropic → Create a Message; system+user prompts; max_tokens=1500)"
+                    }
+                ]
+            }
+        },
+        {
+            "id": 5,
+            "module": "util:GetVariables",
+            "version": 1,
+            "metadata": {
+                "designer": {
+                    "x": 1200,
+                    "y": 0
+                },
+                "restore": {},
+                "expect": [
+                    {
+                        "name": "variables",
+                        "type": "array",
+                        "label": "Variables (replace with Tools → Parse JSON; input={{4.content[0].text}})"
+                    }
+                ]
+            }
+        },
+        {
+            "id": 6,
+            "module": "util:GetVariables",
+            "version": 1,
+            "metadata": {
+                "designer": {
+                    "x": 1500,
+                    "y": 0
+                },
+                "restore": {},
+                "expect": [
+                    {
+                        "name": "variables",
+                        "type": "array",
+                        "label": "Variables (replace with GitHub → Update a file in PATTERNS.md; commit message + content append between markers)"
+                    }
+                ]
+            }
         }
-      }
-    },
-    {
-      "id": 2,
-      "module": "builtin:Filter",
-      "version": 1,
-      "parameters": {
-        "condition": "{{1.action}} == 'closed' AND {{1.pull_request.merged}} == true AND ({{1.pull_request.head.ref}} starts with 'agent/' OR {{1.pull_request.head.ref}} starts with 'agent-team/')"
-      },
-      "metadata": {
+    ],
+    "metadata": {
+        "instant": true,
+        "version": 1,
+        "scenario": {
+            "roundtrips": 1,
+            "maxErrors": 3,
+            "autoCommit": true,
+            "autoCommitTriggerLast": true,
+            "sequential": false,
+            "slots": null,
+            "confidential": false,
+            "dataloss": false,
+            "dlq": false,
+            "freshVariables": false
+        },
         "designer": {
-          "x": 300,
-          "y": 0
-        }
-      }
-    },
-    {
-      "id": 3,
-      "module": "github:GetPullRequestDiff",
-      "version": 1,
-      "parameters": {
-        "owner": "Spookybro55",
-        "repo": "autosmartweby",
-        "pull_number": "{{1.pull_request.number}}"
-      },
-      "metadata": {
-        "designer": {
-          "x": 600,
-          "y": 0
-        }
-      }
-    },
-    {
-      "id": 4,
-      "module": "anthropic:CreateMessage",
-      "version": 1,
-      "parameters": {
-        "model": "claude-sonnet-4-6",
-        "max_tokens": 1500,
-        "system": "You analyze a merged PR diff from project Autosmartweby (Czech CRM with Apps Script + Next.js). Extract concise project-specific knowledge:\n\n(1) PATTERN — a reusable approach worth documenting (e.g. 'When AS X, do Y because Z'). Skip if PR is purely cleanup.\n(2) GOTCHA — a non-obvious pitfall future readers should know about. Skip if no surprises.\n(3) REGRESSION — risk note: 'this fix could be undone by X simpler-looking refactor'. Skip if not applicable.\n\nRules:\n- 1-3 sentences each. Be concrete. Reference file paths and finding IDs (SEC-013, FF-020, etc.) when relevant.\n- NO marketing speak, NO generic LLM advice.\n- Return strict JSON: {\"pattern\": \"...\" | null, \"gotcha\": \"...\" | null, \"regression\": \"...\" | null, \"references\": [\"finding-id\", ...]}.",
-        "user": "PR #{{1.pull_request.number}}: {{1.pull_request.title}}\n\nBody:\n{{1.pull_request.body}}\n\nMerged commit: {{1.pull_request.merge_commit_sha}}\nBranch: {{1.pull_request.head.ref}}\n\nDiff (truncate at 8000 chars):\n{{3.diff}}"
-      },
-      "metadata": {
-        "designer": {
-          "x": 900,
-          "y": 0
-        }
-      }
-    },
-    {
-      "id": 5,
-      "module": "builtin:JSONParse",
-      "version": 1,
-      "parameters": {
-        "input": "{{4.content[0].text}}"
-      },
-      "metadata": {
-        "designer": {
-          "x": 1200,
-          "y": 0
-        }
-      }
-    },
-    {
-      "id": 6,
-      "module": "github:GetFileContent",
-      "version": 1,
-      "parameters": {
-        "owner": "Spookybro55",
-        "repo": "autosmartweby",
-        "path": "docs/agents/PATTERNS.md",
-        "ref": "main"
-      },
-      "metadata": {
-        "designer": {
-          "x": 1500,
-          "y": -150
-        }
-      }
-    },
-    {
-      "id": 7,
-      "module": "github:UpdateFile",
-      "version": 1,
-      "parameters": {
-        "owner": "Spookybro55",
-        "repo": "autosmartweby",
-        "path": "docs/agents/PATTERNS.md",
-        "branch": "main",
-        "commit_message": "chore(agents): learning loop — pattern from PR #{{1.pull_request.number}}",
-        "_marker_strategy": "Insert before <!-- learning-loop-marker: PATTERN-AUTO-END -->",
-        "content_replacement_pattern": "<!-- learning-loop-marker: PATTERN-AUTO-START -->",
-        "content_append": "<!-- learning-loop-marker: PATTERN-AUTO-START -->\n\n### PATTERN-AUTO-{{1.pull_request.number}}: {{1.pull_request.title}}\n- **Source:** PR #{{1.pull_request.number}} (commit `{{1.pull_request.merge_commit_sha}}`)\n- **Date:** {{formatDate(now; 'YYYY-MM-DD')}}\n- **Pattern:** {{5.pattern}}\n- **References:** {{join(5.references; ', ')}}\n",
-        "_condition": "Only run if {{5.pattern}} != null"
-      },
-      "metadata": {
-        "designer": {
-          "x": 1800,
-          "y": -150
-        }
-      }
-    },
-    {
-      "id": 8,
-      "module": "github:UpdateFile",
-      "version": 1,
-      "parameters": {
-        "owner": "Spookybro55",
-        "repo": "autosmartweby",
-        "path": "docs/agents/GOTCHAS.md",
-        "branch": "main",
-        "commit_message": "chore(agents): learning loop — gotcha from PR #{{1.pull_request.number}}",
-        "content_append": "### GOTCHA-AUTO-{{1.pull_request.number}}: {{1.pull_request.title}}\n- **Where it bites:** {{5.gotcha}}\n- **Source:** PR #{{1.pull_request.number}}\n- **Date:** {{formatDate(now; 'YYYY-MM-DD')}}\n",
-        "_condition": "Only run if {{5.gotcha}} != null"
-      },
-      "metadata": {
-        "designer": {
-          "x": 1800,
-          "y": 0
-        }
-      }
-    },
-    {
-      "id": 9,
-      "module": "github:UpdateFile",
-      "version": 1,
-      "parameters": {
-        "owner": "Spookybro55",
-        "repo": "autosmartweby",
-        "path": "docs/agents/REGRESSION-LOG.md",
-        "branch": "main",
-        "commit_message": "chore(agents): learning loop — regression note from PR #{{1.pull_request.number}}",
-        "content_append": "### REGRESSION-AUTO-{{1.pull_request.number}}: {{1.pull_request.title}}\n- **First fixed in:** PR #{{1.pull_request.number}} (commit `{{1.pull_request.merge_commit_sha}}`)\n- **Re-introduction risk:** {{5.regression}}\n- **Date:** {{formatDate(now; 'YYYY-MM-DD')}}\n",
-        "_condition": "Only run if {{5.regression}} != null"
-      },
-      "metadata": {
-        "designer": {
-          "x": 1800,
-          "y": 150
-        }
-      }
+            "orphans": []
+        },
+        "zone": "eu2.make.com",
+        "notes": [
+            {
+                "moduleIds": [
+                    1
+                ],
+                "content": "<p><strong>Module 1 (replace placeholder):</strong> Webhooks → Custom webhook. After saving, Make assigns a unique webhook URL. Copy URL → GitHub repo Settings → Webhooks → Add webhook → Payload URL = Make webhook URL, Content type = application/json, Events = Pull requests.</p>",
+                "isFilterNote": false
+            },
+            {
+                "moduleIds": [
+                    2
+                ],
+                "content": "<p><strong>Module 2 (replace placeholder):</strong> Add flow filter. Condition: <code>{{1.action}} == 'closed' AND {{1.pull_request.merged}} == true AND ({{1.pull_request.head.ref}} starts with 'agent/' OR {{1.pull_request.head.ref}} starts with 'agent-team/')</code></p>",
+                "isFilterNote": true
+            },
+            {
+                "moduleIds": [
+                    3
+                ],
+                "content": "<p><strong>Module 3 (replace placeholder):</strong> GitHub → Get a pull request diff. Owner: Spookybro55, repo: autosmartweby, pull_number: <code>{{1.pull_request.number}}</code>.</p>",
+                "isFilterNote": false
+            },
+            {
+                "moduleIds": [
+                    4
+                ],
+                "content": "<p><strong>Module 4 (replace placeholder):</strong> Anthropic → Create a Message. Model: claude-sonnet-4-6, max_tokens: 1500. System prompt: \"You analyze a merged PR diff from project Autosmartweby. Extract: (1) PATTERN — reusable approach worth documenting. (2) GOTCHA — non-obvious pitfall. (3) REGRESSION — risk note. 1-3 sentences each. Return JSON {pattern, gotcha, regression, references}. Use null if not applicable.\" User prompt: PR title + body + diff (truncate at 8000 chars).</p>",
+                "isFilterNote": false
+            },
+            {
+                "moduleIds": [
+                    5
+                ],
+                "content": "<p><strong>Module 5 (replace placeholder):</strong> Tools → Parse JSON. Input: <code>{{4.content[0].text}}</code>. Outputs structure: <code>{pattern, gotcha, regression, references}</code>.</p>",
+                "isFilterNote": false
+            },
+            {
+                "moduleIds": [
+                    6
+                ],
+                "content": "<p><strong>Module 6 (replace placeholder):</strong> GitHub → Update a file. Path: docs/agents/PATTERNS.md, branch: main, commit_message: \"chore(agents): learning loop — pattern from PR #{{1.pull_request.number}}\". Append content between markers <code>&lt;!-- learning-loop-marker: PATTERN-AUTO-START --&gt;</code> and <code>&lt;!-- learning-loop-marker: PATTERN-AUTO-END --&gt;</code>. <strong>Add 2 more parallel branches</strong> for GOTCHAS.md and REGRESSION-LOG.md (use Make's Router to fan out from module 5).</p>",
+                "isFilterNote": false
+            },
+            {
+                "moduleIds": [],
+                "content": "<p><strong>Trigger:</strong> Webhook (instant=true). No cron schedule.</p><p><strong>Cost:</strong> ~$0.05 per merged agent PR (Anthropic Sonnet 4.6 ~1500 tokens).</p><p><strong>Ops/měs:</strong> ~60 (1 per merged agent PR × 60 PRs target).</p><p><strong>Cost cap recommended:</strong> Anthropic Console → Billing → Spend caps → Monthly $20, Daily $2.</p>",
+                "isFilterNote": false
+            }
+        ]
     }
-  ],
-  "_setup_notes": [
-    "REQUIRES: Make Anthropic connection (API key from ~/.config/anthropic/api-key).",
-    "REQUIRES: Make GitHub connection (PAT with repo scope — write access for commit).",
-    "REQUIRES: GitHub repo webhook configured. After import:",
-    "  1. In Make UI, copy webhook URL from module 1.",
-    "  2. GitHub repo Settings → Webhooks → Add webhook.",
-    "  3. Payload URL: paste Make webhook URL.",
-    "  4. Content type: application/json.",
-    "  5. Events: 'Let me select individual events' → 'Pull requests'.",
-    "  6. Active: ✓.",
-    "COST estimate: ~$0.05 per merged agent PR via Anthropic Sonnet 4.6 API.",
-    "OPS estimate: ~60/měs (1 per merged agent PR × 60 PRs target).",
-    "MARKER STRATEGY: append-only writes BEFORE the AUTO-END marker in each file. Module 7-9 logic placeholder; Make's UpdateFile module may need a Tools→Set Variable step + Tools→Replace Text step to insert before marker. See IMPORT-GUIDE.md for refinement.",
-    "FALLBACK: if Anthropic API call fails (rate limit, timeout), Make scenario should fail gracefully (no commit). Subsequent merged PR triggers retry."
-  ],
-  "_phase_3_only": true
 }
