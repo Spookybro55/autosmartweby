@@ -58,7 +58,7 @@ function FollowUpSection({
     <div>
       <div className="flex items-center gap-2 mb-3">
         <Icon className={`h-4 w-4 ${iconColor}`} />
-        <h2 className="font-semibold text-slate-800">{title}</h2>
+        <h2 className="font-semibold text-foreground">{title}</h2>
         {leads.length > 0 && (
           <Badge variant="secondary" className="text-xs">
             {leads.length}
@@ -66,45 +66,45 @@ function FollowUpSection({
         )}
       </div>
       {leads.length === 0 ? (
-        <p className="text-sm text-slate-400 pl-6 pb-2">{emptyText}</p>
+        <p className="text-sm text-muted-foreground/70 pl-6 pb-2">{emptyText}</p>
       ) : (
         <div className="space-y-2">
           {leads.map(lead => (
             <Card
               key={lead.id}
-              className="p-3 hover:shadow-sm transition-shadow cursor-pointer border-slate-200"
+              className="p-3 hover:shadow-sm transition-shadow cursor-pointer border-border"
               onClick={() => (window.location.href = `/leads?id=${lead.id}`)}
             >
               <div className="flex items-center justify-between">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <p className="font-medium text-sm text-slate-900 truncate">
+                    <p className="font-medium text-sm text-foreground truncate">
                       {lead.businessName}
                     </p>
                     <Badge
                       variant="outline"
                       className={`text-[10px] px-1.5 py-0 shrink-0 ${
                         lead.contactPriority === 'HIGH'
-                          ? 'bg-red-50 text-red-600 border-red-200'
+                          ? 'bg-red-500/10 text-red-600 border-red-500/20 dark:text-red-400'
                           : lead.contactPriority === 'MEDIUM'
-                            ? 'bg-amber-50 text-amber-600 border-amber-200'
-                            : 'bg-slate-50 text-slate-500 border-slate-200'
+                            ? 'bg-amber-500/10 text-amber-600 border-amber-500/20 dark:text-amber-400'
+                            : 'bg-muted text-muted-foreground border-border'
                       }`}
                     >
                       {PRIORITIES[lead.contactPriority].label}
                     </Badge>
                   </div>
-                  <p className="text-xs text-slate-500 mt-0.5">{lead.city}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{lead.city}</p>
                 </div>
                 <div className="flex items-center gap-3 shrink-0 ml-4">
                   {lead.nextAction && (
-                    <div className="flex items-center gap-1 text-xs text-slate-500">
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
                       <ArrowRight className="h-3 w-3" />
                       {lead.nextAction}
                     </div>
                   )}
                   {lead.nextFollowupAt && (
-                    <span className="text-xs text-slate-400">
+                    <span className="text-xs text-muted-foreground/70">
                       {(() => {
                         try {
                           return format(parseISO(lead.nextFollowupAt), 'd. M. yyyy', { locale: cs });
@@ -146,7 +146,7 @@ export default function FollowUpsPage() {
   if (loading) {
     return (
       <div>
-        <h1 className="text-2xl font-bold text-slate-900 mb-6">Follow-upy</h1>
+        <h1 className="text-2xl font-bold text-foreground mb-6">Follow-upy</h1>
         <div className="space-y-6">
           {[1, 2, 3, 4].map(i => (
             <div key={i}>
@@ -165,7 +165,7 @@ export default function FollowUpsPage() {
   if (fetchError) {
     return (
       <div>
-        <h1 className="text-2xl font-bold text-slate-900 mb-6">Follow-upy</h1>
+        <h1 className="text-2xl font-bold text-foreground mb-6">Follow-upy</h1>
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {fetchError}
         </div>
@@ -180,8 +180,8 @@ export default function FollowUpsPage() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Follow-upy</h1>
-        <p className="text-sm text-slate-500 mt-1">
+        <h1 className="text-2xl font-bold text-foreground">Follow-upy</h1>
+        <p className="text-sm text-muted-foreground mt-1">
           {totalFollowUps > 0
             ? `${totalFollowUps} naplánovaných follow-upů`
             : 'Žádné naplánované follow-upy'}
@@ -216,7 +216,7 @@ export default function FollowUpsPage() {
         <FollowUpSection
           title="Tento týden"
           icon={Calendar}
-          iconColor="text-slate-500"
+          iconColor="text-muted-foreground"
           leads={grouped.thisWeek}
           emptyText="Tento týden žádné další follow-upy"
         />

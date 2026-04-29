@@ -126,6 +126,23 @@ left of PriorityBadge).
 - **Code:** crm-frontend/src/components/leads/lead-detail-drawer.tsx (rewritten)
 - **Docs:** docs/30-task-records/redesign-lead-detail-modal.md, docs/11-change-log.md, docs/29-task-registry.md
 
+### [B/visual-restyle-dark-futuristic-pr1] Visual restyle — dark futuristic premium SaaS look (PR 1 of 2) — CODE-COMPLETE
+- **Scope:** Operator UX request: re-skin the CRM as premium AI-native dark SaaS
+(navy-black background, cyan/violet glow accents, glass cards, breathing
+room). PR 1 of 2 — global tokens + sidebar + app shell + component-level
+class swaps. PR 2 (after operator review) will polish specific spots.
+
+**Pure visual restyle.** No structural changes, no new components, no new
+features, no removed components, no changed routes, no changed component
+logic, no new dependencies. Every page, navigation entry, button, table,
+form, and route works exactly as before — just looks different.
+
+Mid-task layout was approved by operator (sidebar at 288 px confirmed)
+before second-half sweep per spec ("DO NOT skip this check").
+- **Owner:** Stream B
+- **Code:** crm-frontend/src/app/globals.css (rewritten), crm-frontend/src/app/layout.tsx (modified), crm-frontend/src/components/layout/app-shell.tsx (modified), crm-frontend/src/components/layout/sidebar.tsx (rewritten), crm-frontend/src/components/layout/header.tsx (modified), crm-frontend/src/components/dashboard/stat-card.tsx (modified), crm-frontend/src/components/pipeline/kanban-column.tsx (modified), crm-frontend/src/components/pipeline/kanban-board.tsx (modified), crm-frontend/src/app/follow-ups/page.tsx (modified), crm-frontend/src/app/pipeline/page.tsx (modified), crm-frontend/src/components/leads/status-badge.tsx (modified), crm-frontend/src/components/leads/priority-badge.tsx (modified)
+- **Docs:** docs/30-task-records/visual-restyle-dark-futuristic-pr1.md, docs/11-change-log.md, docs/29-task-registry.md
+
 ## 2026-04-28
 
 ### [A/A-11-followup-rate-limit] Rate limit on scrape job dispatch — hourly per-user + daily global caps — CODE-COMPLETE

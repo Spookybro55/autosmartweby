@@ -15,8 +15,8 @@ export default function PipelinePage() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Pipeline</h1>
-        <p className="text-sm text-slate-500 mt-1">
+        <h1 className="text-2xl font-bold text-foreground">Pipeline</h1>
+        <p className="text-sm text-muted-foreground mt-1">
           Vizuální přehled stavu všech leadů
         </p>
       </div>

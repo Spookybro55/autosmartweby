@@ -8,9 +8,9 @@ import type { OutreachStageKey } from '@/lib/config';
 import { OUTREACH_STAGES } from '@/lib/config';
 
 const COLUMN_CONFIG: { key: OutreachStageKey; color: string }[] = [
-  { key: 'NOT_CONTACTED', color: 'bg-slate-400' },
+  { key: 'NOT_CONTACTED', color: 'bg-muted-foreground/40' },
   { key: 'DRAFT_READY', color: 'bg-blue-400' },
-  { key: 'CONTACTED', color: 'bg-indigo-400' },
+  { key: 'CONTACTED', color: 'bg-violet-400' },
   { key: 'RESPONDED', color: 'bg-amber-400' },
   { key: 'WON', color: 'bg-emerald-400' },
   { key: 'LOST', color: 'bg-red-400' },

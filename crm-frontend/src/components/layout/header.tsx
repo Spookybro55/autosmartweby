@@ -27,10 +27,10 @@ export function Header() {
   const title = getPageTitle(pathname);
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between border-b border-border bg-white/80 px-6 backdrop-blur-sm">
+    <header className="sticky top-0 z-30 flex h-20 shrink-0 items-center justify-between border-b border-border/60 bg-card/70 px-8 backdrop-blur-md">
       {/* Left: Page title (with left padding on mobile for hamburger button) */}
       <div className="pl-12 lg:pl-0">
-        <h1 className="text-lg font-semibold tracking-tight text-foreground">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
           {title}
         </h1>
       </div>
@@ -45,10 +45,10 @@ export function Header() {
         >
           <Bell className="h-5 w-5" />
           {/* Notification dot */}
-          <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-indigo-600" />
+          <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary glow-cyan" />
         </Button>
 
-        <div className="ml-2 flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-sm font-medium text-slate-700">
+        <div className="ml-2 flex h-10 w-10 items-center justify-center rounded-full bg-secondary text-sm font-medium text-secondary-foreground">
           JN
         </div>
       </div>
