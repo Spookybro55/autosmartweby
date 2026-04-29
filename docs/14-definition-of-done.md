@@ -2,7 +2,9 @@
 
 Tento dokument definuje podminky, ktere musi byt splneny, aby byla zmena povazovana za dokoncenu.
 
-Zmena je HOTOVA az kdyz jsou splneny vsechny tri oblasti: Code Done + Documentation Done + Test Done.
+**Pro human-driven tasky:** zmena je HOTOVA kdyz jsou splneny vsechny tri oblasti: Code Done + Documentation Done + Test Done.
+
+**Pro agent-driven tasky (Track A autonomous):** zmena je HOTOVA kdyz jsou splneny VSECHNY CTYRI oblasti: Code Done + Documentation Done + Test Done + **Agent Done** (sekce 4 niže). Pro Track B plan-driven tasky se Agent Done aplikuje primerene (diff size limit neplati, ale ostatni body ano).
 
 ---
 
@@ -32,7 +34,27 @@ Zmena je HOTOVA az kdyz jsou splneny vsechny tri oblasti: Code Done + Documentat
 |---|---------|------------|
 | T1 | Testy prochazi | `npm test` nebo rucni overeni |
 | T2 | Build verified | `npm run build` uspesne dokoncen |
-| T3 | Validace dokumentace | `node scripts/check-doc-sync.mjs` — 0 fail |
+| T3 | Validace dokumentace | `node scripts/docs/check-doc-sync.mjs` — 0 fail |
+
+## 4. Agent Done (jen pro Track A autonomous runs; Track B partially)
+
+> Pridano v Phase 1 agent team setup (master plan §4 amendment).
+> Discovery report Sekce 8 #5 (DoD harmonizace).
+
+| # | Podminka | Jak overit |
+|---|---------|------------|
+| A1 | Diff size limit | Track A: <500 LOC. Track B: no limit (plan defines phase scope). |
+| A2 | Secret scan clean | Mental scan diff for API keys, tokens, sheet IDs >20 znakù v plain textu, hesla, private keys. (Phase 2 CI: gitleaks). |
+| A3 | Self-review pass | Agent re-read whole diff with fresh eyes, found 0 issues. Append `self-review` OK do `docs/agents/RUN-LOG.md`. |
+| A4 | Cross-role review pass | Tech Lead role re-read diff before PR open. Append `cross-review` OK do RUN-LOG. |
+| A5 | QUEUE.md updated | If Track A task: removed from `docs/agents/QUEUE.md`. If Track B: checkbox ticked in active plán. |
+| A6 | RUN-LOG.md appended | `complete` step appended s task-id + timestamp. |
+| A7 | No `.clasp.json` change | Diff does NOT touch `apps-script/.clasp.json`. |
+| A8 | No `.env*` change | Diff does NOT touch `.env`, `.env.local`, etc. (`.env.example` OK pri legitimní env-doc update). |
+| A9 | No `docs/archive/` change | Diff does NOT touch `docs/archive/*`. |
+| A10 | Branch convention | Branch name matches `agent/{role}/{task-id-or-finding-id}` (Track A) NEBO `task/{TASK_ID}-{name}` (Track B can use either). |
+
+Agent done se aplikuje **navic** k Code/Doc/Test, ne jako náhrada.
 
 ---
 

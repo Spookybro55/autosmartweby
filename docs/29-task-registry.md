@@ -22,6 +22,7 @@
 | A7 | A | Auto qualify hook | Stream A | done | 2026-04-17 | docs/20-current-state.md, docs/24-automation-workflows.md | apps-script, scripts, docs |
 | A8 | A | Preview queue → BRIEF_READY | Stream A | done | 2026-04-20 | docs/20-current-state.md, docs/24-automation-workflows.md | apps-script, scripts, docs |
 | A9 | A | Ingest quality report per source_job_id | Stream A | done | 2026-04-20 | docs/20-current-state.md, docs/23-data-model.md, docs/24-automation-workflows.md | apps-script, scripts, docs |
+| AGENT-TEAM-PHASE-1 | B | AI Agent Team — Phase 1: knowledge base + Tech ... | Sebastián Fridrich | code-complete | 2026-04-29 | docs/30-task-records/AGENT-TEAM-PHASE-1.md, docs/agents/*, CLAUDE.md, docs/30-task-records/_template.md, docs/14-definition-of-done.md, docs/11-change-log.md, docs/29-task-registry.md | docs, CLAUDE.md |
 | B-07 | B | Buffer / podpora — pilot support package pro so... | Stream B | done | 2026-04-24 | docs/30-task-records/B-07.md, docs/11-change-log.md, docs/29-task-registry.md | — |
 | B-09 | B | Phase 2 KROK 4 — manual "Vygenerovat preview" b... | Stream B | done | 2026-04-26 | docs/30-task-records/B-09.md | apps-script, crm-frontend |
 | B-10 | B | Phase 2 KROK 5 — auto trigger lands READY_FOR_R... | Stream B | done | 2026-04-26 | docs/30-task-records/B-10.md | apps-script, crm-frontend |
@@ -55,4 +56,4 @@
 | redesign-lead-detail-modal | B | Redesign LeadDetailDrawer — side drawer → cente... | Stream B | code-complete | 2026-04-29 | docs/30-task-records/redesign-lead-detail-modal.md, docs/11-change-log.md, docs/29-task-registry.md | crm-frontend |
 | visual-restyle-dark-futuristic-pr1 | B | Visual restyle — dark futuristic premium SaaS l... | Stream B | code-complete | 2026-04-29 | docs/30-task-records/visual-restyle-dark-futuristic-pr1.md, docs/11-change-log.md, docs/29-task-registry.md | crm-frontend |
 
-*46 tasks total.*
+*47 tasks total.*
