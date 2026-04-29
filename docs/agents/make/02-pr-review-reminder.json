@@ -1,99 +1,110 @@
 {
-  "name": "Agent Team — PR Review Reminder",
-  "description": "Cron 6× daily. Finds unmerged agent/* and agent-team/* PRs older than 24h, notifies Sebastián. Prevents review backlog stop condition (master plan §5).",
-  "scheduling": {
-    "type": "cron",
-    "cron": "0 9,11,13,15,18,21 * * *",
-    "timezone": "Europe/Prague"
-  },
-  "flow": [
-    {
-      "id": 1,
-      "module": "github:ListPullRequests",
-      "version": 1,
-      "parameters": {
-        "owner": "Spookybro55",
-        "repo": "autosmartweby",
-        "state": "open",
-        "per_page": 50
-      },
-      "metadata": {
-        "designer": {
-          "x": 0,
-          "y": 0
-        }
-      }
-    },
-    {
-      "id": 2,
-      "module": "builtin:Filter",
-      "version": 1,
-      "parameters": {
-        "condition": "(head.ref starts with 'agent/' OR head.ref starts with 'agent-team/') AND (now - created_at) > 86400000"
-      },
-      "metadata": {
-        "designer": {
-          "x": 300,
-          "y": 0
-        }
-      }
-    },
-    {
-      "id": 3,
-      "module": "builtin:Aggregator",
-      "version": 1,
-      "parameters": {
-        "operation": "count",
-        "groupBy": "head.ref"
-      },
-      "metadata": {
-        "designer": {
-          "x": 600,
-          "y": 0
-        }
-      }
-    },
-    {
-      "id": 4,
-      "module": "builtin:Router",
-      "version": 1,
-      "routes": [
+    "name": "Agent Team — PR Review Reminder",
+    "flow": [
         {
-          "condition": "{{3.count}} >= 1",
-          "flow": [
-            {
-              "id": 5,
-              "module": "http:MakeRequest",
-              "parameters": {
-                "url": "https://ntfy.sh/{{TODO_SEBASTIAN_TOPIC}}",
-                "method": "POST",
-                "headers": [
-                  {"name": "Title", "value": "Agent PRs awaiting review"},
-                  {"name": "Tags", "value": "warning,git"},
-                  {"name": "Priority", "value": "high"},
-                  {"name": "Click", "value": "https://github.com/Spookybro55/autosmartweby/pulls?q=is%3Aopen+head%3Aagent%2F"}
-                ],
-                "body": "{{3.count}} unmerged agent PRs > 24h.\n\nReview queue may be blocking new agent runs (≥5 = master plan §5 stop condition).\n\nOpen: https://github.com/Spookybro55/autosmartweby/pulls"
-              }
+            "id": 1,
+            "module": "util:GetVariables",
+            "version": 1,
+            "metadata": {
+                "designer": {
+                    "x": 0,
+                    "y": 0
+                },
+                "restore": {},
+                "expect": [
+                    {
+                        "name": "variables",
+                        "type": "array",
+                        "label": "Variables (replace with GitHub → List pull requests; state=open, per_page=50)"
+                    }
+                ]
             }
-          ]
+        },
+        {
+            "id": 2,
+            "module": "util:GetVariables",
+            "version": 1,
+            "metadata": {
+                "designer": {
+                    "x": 300,
+                    "y": 0
+                },
+                "restore": {},
+                "expect": [
+                    {
+                        "name": "variables",
+                        "type": "array",
+                        "label": "Filter (replace with flow filter — head.ref starts with 'agent/' OR 'agent-team/' AND now() - created_at > 86400000)"
+                    }
+                ]
+            }
+        },
+        {
+            "id": 3,
+            "module": "util:GetVariables",
+            "version": 1,
+            "metadata": {
+                "designer": {
+                    "x": 600,
+                    "y": 0
+                },
+                "restore": {},
+                "expect": [
+                    {
+                        "name": "variables",
+                        "type": "array",
+                        "label": "Variables (replace with HTTP → POST https://ntfy.sh/{TOPIC} when count >= 1)"
+                    }
+                ]
+            }
         }
-      ],
-      "metadata": {
+    ],
+    "metadata": {
+        "instant": false,
+        "version": 1,
+        "scenario": {
+            "roundtrips": 1,
+            "maxErrors": 3,
+            "autoCommit": true,
+            "autoCommitTriggerLast": true,
+            "sequential": false,
+            "slots": null,
+            "confidential": false,
+            "dataloss": false,
+            "dlq": false,
+            "freshVariables": false
+        },
         "designer": {
-          "x": 900,
-          "y": 0
-        }
-      }
+            "orphans": []
+        },
+        "zone": "eu2.make.com",
+        "notes": [
+            {
+                "moduleIds": [
+                    1
+                ],
+                "content": "<p><strong>Module 1 (replace placeholder):</strong> GitHub → List pull requests. Owner: Spookybro55, repo: autosmartweby, state: open, per_page: 50.</p>",
+                "isFilterNote": false
+            },
+            {
+                "moduleIds": [
+                    2
+                ],
+                "content": "<p><strong>Module 2 (replace placeholder):</strong> Add a flow filter (Make's built-in — no module). Condition: <code>head.ref starts with 'agent/' OR head.ref starts with 'agent-team/' AND (now() - created_at) > 86400000</code> (older than 24h).</p>",
+                "isFilterNote": true
+            },
+            {
+                "moduleIds": [
+                    3
+                ],
+                "content": "<p><strong>Module 3 (replace placeholder):</strong> HTTP → Make a request. URL: https://ntfy.sh/{TODO_SEBASTIAN_TOPIC}. Method: POST. Headers: Title=Agent PRs awaiting review, Tags=warning,git, Priority=high. Body: \"{count} unmerged agent PRs > 24h. https://github.com/Spookybro55/autosmartweby/pulls\"</p>",
+                "isFilterNote": false
+            },
+            {
+                "moduleIds": [],
+                "content": "<p><strong>Schedule:</strong> Cron 0 9,11,13,15,18,21 * * * (6× daily, Europe/Prague). Set in Make UI → scenario settings.</p><p><strong>Ops/měs:</strong> ~180.</p>",
+                "isFilterNote": false
+            }
+        ]
     }
-  ],
-  "_setup_notes": [
-    "REQUIRES: Make GitHub connection (read PRs).",
-    "REPLACE: TODO_SEBASTIAN_TOPIC.",
-    "TUNE: cron timing in scheduling block to match your active hours.",
-    "TUNE: 24h threshold via Filter condition (86400000 ms).",
-    "OPS estimate: ~180/měs (6 × 30 days).",
-    "STOP CONDITION TIE-IN: when count reaches 5+, Tech Lead's queue should be PAUSED in QUEUE.md. This scenario does NOT auto-pause — only notifies."
-  ],
-  "_phase_3_only": true
 }
