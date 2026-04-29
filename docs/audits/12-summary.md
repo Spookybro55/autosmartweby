@@ -109,11 +109,12 @@ Celkový počet findings: **161** (counts vycházejí z `docs/audits/FINDINGS.md
 
 ## E. Top P1 blockers (top 15 ranked by impact)
 
-> **Update 2026-04-29:** SEC-016 (Rank 1 below) is **resolved** in commit `24e3d65` —
-> `crm-frontend/src/lib/auth/session-secret.ts` validates min 32 chars + throws on
-> missing/short. Verified: `NEXTAUTH_SECRET= npm run build` fails loud. BLD-011
-> (Rank 5+) resolved transitively. Snapshot below preserved for audit history;
-> see FINDINGS.md status column for current state.
+> **Update 2026-04-29 (audit reconciliation pass):** Multiple Rank-N findings below
+> are now **resolved** in current main. Snapshot preserved for audit history;
+> per-finding status in FINDINGS.md is authoritative. Rank-3 / Rank-7 / Rank-8 /
+> Rank-9 / Rank-13 / Rank-14 / Rank-15 ranks are stale because their items have
+> shipped or been documented. New top P1 blockers (after reconciliation) listed in
+> the "Top 5 P1 blockers (post-reconciliation)" subsection below.
 
 | Rank | ID | Category | Stručně |
 |------|-----|----------|---------|
@@ -121,17 +122,25 @@ Celkový počet findings: **161** (counts vycházejí z `docs/audits/FINDINGS.md
 | 2 | **SEC-007** | security | Žádný rate limit / lockout / 2FA na `/api/auth/login` ani write endpointy |
 | 3 | **SEC-009** | security/PII | Public `/preview/<slug>` route s deterministic slugs vystavuje PII bez consent |
 | 4 | **SEC-014** | security/GDPR | Žádný GDPR/PII inventory, erasure path, privacy policy, retention policy |
-| 5 | **SEC-012 / BLD-010** | security | `next@16.2.2` HIGH DoS CVE; fix v 16.2.4 |
+| 5 | ~~**SEC-012 / BLD-010**~~ ✅ RESOLVED | security | ~~`next@16.2.2` HIGH DoS CVE; fix v 16.2.4~~ — fixed in `2aecb39`; package.json now `^16.2.4` |
 | 6 | **SEC-003** | security | Apps Script Web App `executeAs: USER_DEPLOYING` + `ANYONE_ANONYMOUS` + token-only auth |
 | 7 | **SEC-017 / DP-019 / DOC-020** | secrets ops | Žádný documented secrets rotation procedure |
 | 8 | **DP-018 / DOC-019** | deploy ops | Žádný rollback runbook |
-| 9 | **DP-005 / BLD-015** | CI/quality | CI nespouští build / lint / typecheck / tests |
+| 9 | ~~**DP-005 / BLD-015**~~ ✅ RESOLVED | CI/quality | ~~CI nespouští build / lint / typecheck / tests~~ — `pilot-ci.yml` exists (KROK 7); operator action: add to required_status_checks (DP-010) |
 | 10 | **DP-009** | deploy | Vercel deploy úplně mimo repo (žádný `vercel.json`, žádný GH workflow) |
 | 11 | **DP-010** | governance | Branch protection `enforce_admins: false` — admin bypass docs-governance + reviewers |
-| 12 | **DP-021 / SEC-011** | runtime safety | `envGuard_()` definovaná ale nikdy automaticky nevolaná před destruktivními ops |
+| 12 | ~~**DP-021 / SEC-011**~~ ✅ RESOLVED | runtime safety | ~~`envGuard_()` definovaná ale nikdy automaticky nevolaná před destruktivními ops~~ — choke-point fix in `Helpers.gs:148` (`openCrmSpreadsheet_`) |
 | 13 | **FF-003 / FF-019** | concurrency | `processPreviewQueue` 15-min cron bez LockService → race risk; cron může přepsat operator review |
-| 14 | **FF-006** | flow integrity | OutboundEmail nekontroluje `review_decision==APPROVE` — operator může poslat REJECT-nutému leadu |
+| 14 | ~~**FF-006**~~ ✅ RESOLVED | flow integrity | ~~OutboundEmail nekontroluje `review_decision==APPROVE`~~ — KROK 4 added gate in `OutboundEmail.gs:54,279` |
 | 15 | **FF-015** | lifecycle | CS1 `lifecycle_state` SPEC-ONLY — runtime má 4 separate state machines bez canonical orchestrator |
+
+### Top 5 P1 blockers (post-reconciliation, 2026-04-29)
+
+1. **SEC-007** — login + write endpoints have no rate limit / lockout / 2FA. Credential stuffing practical. (Note: scrape `/api/scrape/trigger` got rate-limited in PR #80 — but `/api/auth/login` still open.)
+2. **SEC-009** — `/preview/<slug>` public + guessable slugs + PII payload. GDPR exposure.
+3. **SEC-014 / DOC-018** — no GDPR/PII inventory, erasure path, privacy policy, retention policy.
+4. **SEC-003** — Apps Script Web App auth model (token-only, `executeAs: USER_DEPLOYING`, `ANYONE_ANONYMOUS`). D-7 / SEC-007 cross-cut.
+5. **SEC-017 / DP-019 / DOC-020** — no documented secrets rotation procedure for any of `FRONTEND_API_SECRET`, `PREVIEW_WEBHOOK_SECRET`, `AUTH_PASSWORD`, `NEXTAUTH_SECRET`, `GOOGLE_PRIVATE_KEY`. Cross-cut DP-018 (no rollback runbook).
 
 P1 priority axes (ranking rule):
 1. Security/data leakage (~~SEC-016~~, SEC-007, SEC-009, SEC-014, SEC-012, SEC-003)
