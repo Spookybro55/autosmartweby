@@ -15,7 +15,7 @@ const PRIORITY_CONFIG: Record<string, { label: string; className: string }> = {
   },
   LOW: {
     label: "Nízká",
-    className: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
+    className: "bg-muted text-muted-foreground",
   },
 };
 

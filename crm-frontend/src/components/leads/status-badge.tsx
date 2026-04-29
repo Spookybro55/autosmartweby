@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 const STAGE_CONFIG: Record<string, { label: string; className: string }> = {
   NOT_CONTACTED: {
     label: "Neosloveno",
-    className: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
+    className: "bg-muted text-muted-foreground",
   },
   DRAFT_READY: {
     label: "Připraveno",
@@ -15,7 +15,7 @@ const STAGE_CONFIG: Record<string, { label: string; className: string }> = {
   CONTACTED: {
     label: "Osloveno",
     className:
-      "bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300",
+      "bg-violet-500/10 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300",
   },
   RESPONDED: {
     label: "Reagoval",
@@ -41,7 +41,7 @@ interface StatusBadgeProps {
 export function StatusBadge({ stage, className }: StatusBadgeProps) {
   const config = STAGE_CONFIG[stage] ?? {
     label: stage,
-    className: "bg-gray-100 text-gray-700",
+    className: "bg-muted text-muted-foreground",
   };
 
   return (

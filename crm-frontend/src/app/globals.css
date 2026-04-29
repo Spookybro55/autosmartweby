@@ -4,6 +4,22 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ─────────────────────────────────────────────────────────────────
+ * Theme tokens — operator-locked palette (visual-restyle PR 1).
+ * Dark is the default; .dark class on <html> activates the dark map,
+ * light values live in :root and apply when .dark is absent.
+ *
+ * shadcn primitives read --background, --foreground, --card,
+ * --card-foreground, --primary, --primary-foreground, --secondary,
+ * --secondary-foreground, --muted, --muted-foreground, --accent,
+ * --accent-foreground, --destructive, --border, --input, --ring,
+ * --popover*, --sidebar*, --success*, --warning* — preserved verbatim.
+ *
+ * Accents (--accent-cyan / -violet / -blue / -success / -warning /
+ * -danger) are exposed both as CSS vars and as Tailwind utilities via
+ * the @theme block below so authors can write `bg-accent-cyan`,
+ * `text-accent-violet`, etc.
+ * ───────────────────────────────────────────────────────────────── */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -43,6 +59,22 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+
+  /* New custom accents (operator brief) */
+  --color-accent-cyan: var(--accent-cyan);
+  --color-accent-violet: var(--accent-violet);
+  --color-accent-blue: var(--accent-blue);
+  --color-accent-success: var(--accent-success);
+  --color-accent-warning: var(--accent-warning);
+  --color-accent-danger: var(--accent-danger);
+
+  /* Surfaces */
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-background-2: var(--background-2);
+  --color-background-3: var(--background-3);
+  --color-border-strong: var(--border-strong);
+
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -52,77 +84,143 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* ── Light mode (preserved as toggle) ─────────────────────────── */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --background: #ffffff;
+  --background-2: #f8fafc;
+  --background-3: #f1f5f9;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --foreground: #0f172a;
+
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+
+  --primary: #06b6d4; /* cyan-500 — slightly less neon for light bg */
+  --primary-foreground: #ffffff;
+
+  --secondary: #f1f5f9;
+  --secondary-foreground: #0f172a;
+
+  --muted: #f1f5f9;
+  --muted-foreground: rgba(15, 23, 42, 0.55);
+
+  --accent: #6d5cff; /* violet — AI feel */
+  --accent-foreground: #ffffff;
+
+  --destructive: #dc2626;
+  --border: rgba(15, 23, 42, 0.10);
+  --border-strong: rgba(15, 23, 42, 0.18);
+  --input: rgba(15, 23, 42, 0.10);
+  --ring: #06b6d4;
+
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --warning: oklch(0.795 0.184 86.047);
-  --warning-foreground: oklch(0.421 0.095 57.708);
-  --success: oklch(0.765 0.177 163.223);
-  --success-foreground: oklch(0.393 0.095 152.535);
+
+  --warning: #d97706;
+  --warning-foreground: #ffffff;
+  --success: #059669;
+  --success-foreground: #ffffff;
+
+  --accent-cyan: #06b6d4;
+  --accent-violet: #6d5cff;
+  --accent-blue: #3b82f6;
+  --accent-success: #059669;
+  --accent-warning: #d97706;
+  --accent-danger: #dc2626;
+
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+
+  --sidebar: #f8fafc;
+  --sidebar-foreground: #0f172a;
+  --sidebar-primary: #06b6d4;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f1f5f9;
+  --sidebar-accent-foreground: #0f172a;
+  --sidebar-border: rgba(15, 23, 42, 0.10);
+  --sidebar-ring: #06b6d4;
+
+  /* Glow opacities scale per mode — light bg can't carry strong neon */
+  --glow-cyan-1: rgba(6, 182, 212, 0.10);
+  --glow-cyan-2: rgba(6, 182, 212, 0.20);
+  --glow-cyan-strong: rgba(6, 182, 212, 0.35);
+  --glow-violet-1: rgba(109, 92, 255, 0.10);
+  --glow-violet-2: rgba(109, 92, 255, 0.20);
+
+  --grid-line: rgba(15, 23, 42, 0.04);
 }
 
+/* ── Dark mode (default) ──────────────────────────────────────── */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --background: #050816;
+  --background-2: #071021;
+  --background-3: #0a1020;
+  --surface: #0d1528;
+  --surface-2: #10192e;
+  --foreground: #f5f7ff;
+
+  --card: #0d1528;
+  --card-foreground: #f5f7ff;
+  --popover: #10192e;
+  --popover-foreground: #f5f7ff;
+
+  --primary: #40f0e0; /* cyan/teal — main CTA */
+  --primary-foreground: #050816;
+
+  --secondary: #10192e;
+  --secondary-foreground: #f5f7ff;
+
+  --muted: #0a1020;
+  --muted-foreground: rgba(245, 247, 255, 0.55);
+
+  --accent: #6d5cff; /* violet — AI feel */
+  --accent-foreground: #ffffff;
+
+  --destructive: #f87171;
+  --border: rgba(130, 160, 255, 0.15);
+  --border-strong: rgba(130, 160, 255, 0.25);
+  --input: rgba(130, 160, 255, 0.15);
+  --ring: #40f0e0;
+
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+
+  --warning: #fbbf24;
+  --warning-foreground: #050816;
+  --success: #34d399;
+  --success-foreground: #050816;
+
+  --accent-cyan: #40f0e0;
+  --accent-violet: #6d5cff;
+  --accent-blue: #3b82f6;
+  --accent-success: #34d399;
+  --accent-warning: #fbbf24;
+  --accent-danger: #f87171;
+
+  --sidebar: #071021;
+  --sidebar-foreground: #f5f7ff;
+  --sidebar-primary: #40f0e0;
+  --sidebar-primary-foreground: #050816;
+  --sidebar-accent: rgba(64, 240, 224, 0.10);
+  --sidebar-accent-foreground: #40f0e0;
+  --sidebar-border: rgba(130, 160, 255, 0.12);
+  --sidebar-ring: #40f0e0;
+
+  --glow-cyan-1: rgba(64, 240, 224, 0.15);
+  --glow-cyan-2: rgba(64, 240, 224, 0.30);
+  --glow-cyan-strong: rgba(64, 240, 224, 0.45);
+  --glow-violet-1: rgba(109, 92, 255, 0.15);
+  --glow-violet-2: rgba(109, 92, 255, 0.30);
+
+  --grid-line: rgba(130, 160, 255, 0.04);
 }
 
 @layer base {
@@ -135,4 +233,42 @@
   html {
     @apply font-sans;
   }
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * Glow utilities — selectively applied (CTA, active sidebar, focused
+ * input). Auto-dim in light mode via the --glow-* CSS variables.
+ *
+ * Glow is a hierarchy tool, not decoration. Use sparingly.
+ * ───────────────────────────────────────────────────────────────── */
+@utility glow-cyan {
+  box-shadow:
+    0 0 20px 0 var(--glow-cyan-1),
+    0 0 40px 0 var(--glow-cyan-1);
+}
+@utility glow-cyan-strong {
+  box-shadow:
+    0 0 24px 0 var(--glow-cyan-2),
+    0 0 48px 0 var(--glow-cyan-1);
+}
+@utility glow-violet {
+  box-shadow:
+    0 0 20px 0 var(--glow-violet-1),
+    0 0 40px 0 var(--glow-violet-1);
+}
+@utility glow-active {
+  box-shadow: 0 0 16px 0 var(--glow-cyan-strong);
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * Background grid pattern — subtle crosshatch on the main content
+ * area for the "AI dashboard" feel. Fades to nothing in light mode
+ * via --grid-line opacity ramp.
+ * ───────────────────────────────────────────────────────────────── */
+@utility bg-grid-pattern {
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-position: -1px -1px;
 }

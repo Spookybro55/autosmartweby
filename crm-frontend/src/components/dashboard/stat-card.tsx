@@ -21,12 +21,12 @@ const colorVariants = {
     value: "text-green-700 dark:text-green-300",
   },
   indigo: {
-    icon: "bg-indigo-100 text-indigo-600 dark:bg-indigo-950 dark:text-indigo-400",
-    value: "text-indigo-700 dark:text-indigo-300",
+    icon: "bg-violet-500/10 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300",
+    value: "text-violet-700 dark:text-violet-300",
   },
   slate: {
-    icon: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
-    value: "text-slate-700 dark:text-slate-300",
+    icon: "bg-muted text-muted-foreground",
+    value: "text-foreground",
   },
 } as const;
 
