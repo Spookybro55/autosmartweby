@@ -27,6 +27,7 @@
 | AGENT-TEAM-PHASE-1 | B | AI Agent Team — Phase 1: knowledge base + Tech ... | Sebastián Fridrich | human | code-complete | 2026-04-29 | docs/30-task-records/AGENT-TEAM-PHASE-1.md, docs/agents/*, CLAUDE.md, docs/30-task-records/_template.md, docs/14-definition-of-done.md, docs/11-change-log.md, docs/29-task-registry.md | docs, CLAUDE.md |
 | AGENT-TEAM-PHASE-2 | B | AI Agent Team — Phase 2: remaining roles + CI w... | Sebastián Fridrich | human | code-complete | 2026-04-29 | docs/30-task-records/AGENT-TEAM-PHASE-2.md, docs/agents/roles/security-engineer.md, docs/agents/roles/qa-engineer.md, docs/agents/roles/docs-guardian.md, docs/11-change-log.md, docs/29-task-registry.md | docs, .github, scripts |
 | AGENT-TEAM-PHASE-3-PREREQUISITES | B | Phase 3 prerequisites — Make blueprints + IMPOR... | Claude Code (Sonnet 4.6, autonomous admin run) | docs-guardian | code-complete | 2026-04-29 | docs/30-task-records/AGENT-TEAM-PHASE-3-PREREQUISITES.md, docs/agents/SETUP-CHECKLIST.md, docs/agents/QUESTIONS-FOR-HUMAN.md, docs/11-change-log.md, docs/29-task-registry.md | docs, crm-frontend |
+| AGENT-TEAM-PHASE-3 | B | AI Agent Team — Phase 3: CRM `/admin/dev-team` ... | Sebastián Fridrich | human | code-complete | 2026-04-30 | docs/30-task-records/AGENT-TEAM-PHASE-3.md, docs/11-change-log.md, docs/29-task-registry.md | crm-frontend |
 | B-07 | B | Buffer / podpora — pilot support package pro so... | Stream B | - | done | 2026-04-24 | docs/30-task-records/B-07.md, docs/11-change-log.md, docs/29-task-registry.md | — |
 | B-09 | B | Phase 2 KROK 4 — manual "Vygenerovat preview" b... | Stream B | - | done | 2026-04-26 | docs/30-task-records/B-09.md | apps-script, crm-frontend |
 | B-10 | B | Phase 2 KROK 5 — auto trigger lands READY_FOR_R... | Stream B | - | done | 2026-04-26 | docs/30-task-records/B-10.md | apps-script, crm-frontend |
@@ -60,4 +61,4 @@
 | redesign-lead-detail-modal | B | Redesign LeadDetailDrawer — side drawer → cente... | Stream B | - | code-complete | 2026-04-29 | docs/30-task-records/redesign-lead-detail-modal.md, docs/11-change-log.md, docs/29-task-registry.md | crm-frontend |
 | visual-restyle-dark-futuristic-pr1 | B | Visual restyle — dark futuristic premium SaaS l... | Stream B | - | code-complete | 2026-04-29 | docs/30-task-records/visual-restyle-dark-futuristic-pr1.md, docs/11-change-log.md, docs/29-task-registry.md | crm-frontend |
 
-*51 tasks total.*
+*52 tasks total.*

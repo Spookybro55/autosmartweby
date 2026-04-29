@@ -6,6 +6,36 @@
 
 ---
 
+## 2026-04-30
+
+### [B/AGENT-TEAM-PHASE-3] AI Agent Team — Phase 3: CRM `/admin/dev-team` read-only dashboard — CODE-COMPLETE
+- **Scope:** Phase 3 of 3 — final phase of agent team setup. Implements the read-only CRM
+dashboard at `/admin/dev-team` per master plan §7 and discovery report
+Sekce 10. Visualizes 8 panels of agent team state (Now / Queue / Plans /
+Review Queue / Knowledge / Stats / Cost / Health) sourced from filesystem
+(`docs/agents/`) and GitHub API.
+
+**Read-only.** No write actions. No "spustit agenta" buttons. Agent runs
+remain triggered by `claude` in terminal per master plan §3.2.
+
+**Auth:** OWNER_EMAIL middleware check. Single-user admin route
+(only Sebastián accesses `/admin/*`).
+
+**Data sources:**
+- GitHub REST API (raw fetch, no Octokit dep — lighter, no extra surface)
+  for: PRs, file content (QUEUE.md, RUN-LOG.md, plans/, PATTERNS.md,
+  GOTCHAS.md, REGRESSION-LOG.md), commits.
+- Local filesystem fallback in dev (when GITHUB_AGENT_TOKEN missing) —
+  reads from repo root via `path.resolve(process.cwd(), '..')`.
+
+Phase 3 also enables the visual smoke-test loop for previously-shipped Phase 1+2
+infrastructure: as agents start running, dashboard surfaces queue progress,
+PR backlog, and learning loop output (PATTERNS.md auto-appends from Make
+scenario 03 once Sebastián completes the manual setup per SETUP-CHECKLIST.md).
+- **Owner:** Sebastián Fridrich
+- **Code:** crm-frontend/src/lib/agent-team/types.ts (new), crm-frontend/src/lib/agent-team/source.ts (new), crm-frontend/src/lib/agent-team/parse-queue.ts (new), crm-frontend/src/lib/agent-team/parse-run-log.ts (new), crm-frontend/src/lib/agent-team/list-prs.ts (new), crm-frontend/src/lib/agent-team/list-plans.ts (new), crm-frontend/src/lib/agent-team/knowledge-stats.ts (new), crm-frontend/src/app/admin/dev-team/page.tsx (new), crm-frontend/src/app/admin/dev-team/components/now-panel.tsx (new), crm-frontend/src/app/admin/dev-team/components/queue-panel.tsx (new), crm-frontend/src/app/admin/dev-team/components/plans-panel.tsx (new), crm-frontend/src/app/admin/dev-team/components/review-queue-panel.tsx (new), crm-frontend/src/app/admin/dev-team/components/knowledge-panel.tsx (new), crm-frontend/src/app/admin/dev-team/components/stats-cost-health-panels.tsx (new), crm-frontend/src/app/admin/dev-team/api/queue/route.ts (new), crm-frontend/src/app/admin/dev-team/api/prs/route.ts (new), crm-frontend/src/middleware.ts (modified), crm-frontend/src/components/layout/sidebar.tsx (modified), crm-frontend/.env.example (modified)
+- **Docs:** docs/30-task-records/AGENT-TEAM-PHASE-3.md, docs/11-change-log.md, docs/29-task-registry.md
+
 ## 2026-04-29
 
 ### [B/AGENT-TEAM-FIX-MAKE-BLUEPRINTS] Rewrite 5 Make blueprints in valid format + Playwright verifier (resolves QFH-0004) — CODE-COMPLETE

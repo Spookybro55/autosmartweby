@@ -12,11 +12,13 @@ import {
   Settings,
   BarChart3,
   Search,
+  ShieldCheck,
   Sun,
   Moon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
+import { useCurrentUser } from "@/lib/auth/use-current-user";
 
 const navigation = [
   { label: "Přehled", href: "/dashboard", icon: LayoutDashboard },
@@ -27,6 +29,15 @@ const navigation = [
   { label: "Nastavení", href: "/settings", icon: Settings },
   { label: "Analýza", href: "/analytics", icon: BarChart3 },
 ] as const;
+
+// Admin-only nav item — appended at runtime when current user matches
+// NEXT_PUBLIC_OWNER_EMAIL. Server-side middleware also enforces this gate;
+// hiding the link is purely UX (no point teasing a 4xx redirect).
+const ADMIN_NAV = {
+  label: "Dev Team",
+  href: "/admin/dev-team",
+  icon: ShieldCheck,
+} as const;
 
 // Inline theme toggle — small enough to live in sidebar.tsx without
 // a dedicated file (no new structural component per task spec).
@@ -86,6 +97,11 @@ function ThemeToggle({ collapsed }: { collapsed: boolean }) {
 export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(true);
+  const { email: currentEmail } = useCurrentUser();
+
+  const ownerEmail = process.env.NEXT_PUBLIC_OWNER_EMAIL?.toLowerCase().trim();
+  const isOwner = !!ownerEmail && currentEmail?.toLowerCase().trim() === ownerEmail;
+  const navItems = isOwner ? [...navigation, ADMIN_NAV] : navigation;
 
   return (
     <>
@@ -155,7 +171,7 @@ export function Sidebar() {
 
         {/* Navigation */}
         <nav className="mt-2 flex flex-1 flex-col gap-1 px-3">
-          {navigation.map((item) => {
+          {navItems.map((item) => {
             const isActive =
               pathname === item.href ||
               (item.href !== "/dashboard" && pathname.startsWith(item.href));
