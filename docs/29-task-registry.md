@@ -61,4 +61,4 @@
 | redesign-lead-detail-modal | B | Redesign LeadDetailDrawer — side drawer → cente... | Stream B | - | code-complete | 2026-04-29 | docs/30-task-records/redesign-lead-detail-modal.md, docs/11-change-log.md, docs/29-task-registry.md | crm-frontend |
 | visual-restyle-dark-futuristic-pr1 | B | Visual restyle — dark futuristic premium SaaS l... | Stream B | - | code-complete | 2026-04-29 | docs/30-task-records/visual-restyle-dark-futuristic-pr1.md, docs/11-change-log.md, docs/29-task-registry.md | crm-frontend |
 
-*51 tasks total.*
+*52 tasks total.*
