@@ -51,8 +51,6 @@ Hybrid model: 1 centralni inbox + 3 osobni senders.
 | `s.fridrich@autosmartweb.cz` | Osobni obchodni sender (Sebastián Fridrich) | ANO |
 | `t.maixner@autosmartweb.cz` | Osobni obchodni sender (Tomáš Maixner) | ANO |
 | `j.bezemek@autosmartweb.cz` | Osobni obchodni sender / owner (Honza / Jan Bezemek) — **primarni outbound adresa Honzy** | ANO |
-| `jan.bezemek@autosmartweb.cz` | **Konfliktni / starsi adresa** zobrazena na live marketing webu — ma byt nahrazena za `j.bezemek@autosmartweb.cz` nebo overena jako alias na `j.bezemek@`. Marketing-web concern (mimo tento repo). | (legacy) |
-| `sebastian@`, `tomas@`, `honza@autosmartweb.cz` | **Drive navrhovane friendly aliasy, NEPOUZIVANE.** Finalni rozhodnuti: pouzivame `<initial>.<lastname>@` formu (login id forma). | — |
 
 ### From / Reply-To nastaveni pro outbound pilot
 

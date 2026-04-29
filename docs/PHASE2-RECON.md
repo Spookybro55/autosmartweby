@@ -237,7 +237,7 @@ Zadání: "Fallback na 5 mock fixtures (preview-brief.*.json) zachovat pro dev/t
 
 ### Q3: Kde uložit assignee_email pro reply-to při preview generation?
 
-Při `processPreviewQueue` (cron) lead nemá assignee přidělený. Kdo dostane reply? Dnes default je `sebastian@autosmartweb.cz`. To je OK pro pilot. Phase 2 nezavádí auto-assignment per round-robin (mimo scope).
+Při `processPreviewQueue` (cron) lead nemá assignee přidělený. Kdo dostane reply? Dnes default je `s.fridrich@autosmartweb.cz`. To je OK pro pilot. Phase 2 nezavádí auto-assignment per round-robin (mimo scope).
 
 ### Q4: Co dělat, když lead.qualified_for_preview je 'false', ale operator chce preview?
 

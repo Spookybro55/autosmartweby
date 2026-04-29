@@ -38,7 +38,6 @@ function onOpen() {
     .addItem('Setup email templates', 'setupEmailTemplates')
     .addItem('Setup scrape history', 'setupScrapeHistory')
     .addItem('Reap stuck scrape jobs', 'manualReapStuckJob')
-    .addItem('Migrate legacy assignees → bootstrap', 'migrateAndBootstrap')
     .addItem('Bootstrap no-website v1 (only)', 'bootstrapNoWebsiteV1')
     .addItem('Ensure lead IDs', 'ensureLeadIds')
     .addSeparator()

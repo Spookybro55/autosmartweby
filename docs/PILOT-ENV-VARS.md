@@ -56,7 +56,7 @@ Všechny zaškrtnout pro **Production + Preview + Development**.
 |------|------|----------------------|----------|----------|
 | `NEXTAUTH_SECRET` | HMAC signing key pro session cookie. KROK 3 zavede fail-fast pokud je prázdný/<32 znaků. | `openssl rand -base64 32` | ✅ ANO | `src/middleware.ts:4`, `src/app/api/auth/login/route.ts:7` |
 | `AUTH_PASSWORD` | Sdílené heslo pro 4 pilot uživatele. Min. 16 znaků doporučeno. | `openssl rand -base64 18` | ✅ ANO | `src/app/api/auth/login/route.ts:6` |
-| `ALLOWED_EMAILS` | Comma-separated allowlist 4 pilot emailů (žádné mezery kolem čárek). | `sfridrich@unipong.cz,sebastian@autosmartweb.cz,tomas@autosmartweb.cz,jan.bezemek@autosmartweb.cz` | ✅ ANO | `src/lib/config.ts:75`, `src/app/api/auth/login/route.ts:5` |
+| `ALLOWED_EMAILS` | Comma-separated allowlist 3 canonical pilot emailů (žádné mezery kolem čárek). Musí přesně odpovídat klíčům v `ASSIGNEE_NAMES` (viz `src/lib/config.ts`). | `s.fridrich@autosmartweb.cz,t.maixner@autosmartweb.cz,j.bezemek@autosmartweb.cz` | ✅ ANO | `src/lib/config.ts:75`, `src/app/api/auth/login/route.ts:5` |
 | `APPS_SCRIPT_WEB_APP_URL` | URL deployed Apps Script Web App. Vyplnit po AKCE 3 v KROKu 8 (končí `/exec`). | `https://script.google.com/macros/s/.../exec` | ✅ ANO | `src/lib/config.ts:7` |
 | `APPS_SCRIPT_SECRET` | Shared secret pro auth voláním Apps Scriptu. **MUSÍ být stejný jako `FRONTEND_API_SECRET` v Apps Script Properties** (viz Section C). | `openssl rand -base64 32` | ✅ ANO | `src/lib/google/apps-script-writer.ts:56` |
 | `PREVIEW_WEBHOOK_SECRET` | Shared secret pro `/api/preview/render` webhook. **MUSÍ být stejný jako `PREVIEW_WEBHOOK_SECRET` v Apps Script Properties** (viz Section C). | `openssl rand -base64 32` | ✅ ANO | `src/app/api/preview/render/route.ts:62` |
@@ -173,6 +173,6 @@ Ve chvíli, kdy Sebastian otvírá Vercel/Apps Script UI:
 ## G. Cross-reference
 
 - Audit findings: BLD-001 (.env.example PROD ID), BLD-003 (chybějící env vars), BLD-004 (zombie env vars), SEC-016 (NEXTAUTH_SECRET fallback), IN-016 (Config.gs hardcoded SPREADSHEET_ID).
-- Apps Script projekt: `1SjdUXQc4i2RzYkRVKldp8q6Z7JtGrsY5TQwaBl4b_93hj8aD4_p-ScrT` (vlastník `sfridrich@unipong.cz`).
+- Apps Script projekt: `1SjdUXQc4i2RzYkRVKldp8q6Z7JtGrsY5TQwaBl4b_93hj8aD4_p-ScrT` (vlastník = deployer Google účet).
 - Sheet: `14U9CC0q5gpFr2p7CD1s4rf3i0lCettIVYIqrO8lsj9c` (workspace `unipong.cz`).
 - Detailní inventury env varů ze setupu se aplikují v KROK 2 (`.env.example` hygiene) a KROK 8 (live deploy).

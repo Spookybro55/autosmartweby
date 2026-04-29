@@ -63,6 +63,41 @@ is captured in the FINDINGS.md status note.
 - **Code:** `0)`, `1)`, `5`, `crm-frontend/100)`, `crm-frontend/500)`, `crm-frontend/void`, `limit)`, `maxVersion)`, ``setupPreviewExtension` `` (deleted), docs/audits/FINDINGS.md (modified), docs/audits/12-summary.md (modified)
 - **Docs:** docs/30-task-records/cleanup-and-sec-016.md, docs/audits/FINDINGS.md, docs/audits/12-summary.md, docs/11-change-log.md, docs/29-task-registry.md
 
+### [B/email-cleanup-eliminate-legacy] Eliminate all 4 legacy assignee email forms — canonical-only state — CODE-COMPLETE
+- **Scope:** Project had 4 legacy assignee email forms scattered across code, config, and
+docs (specific addresses redacted as `<legacy>` per Option A — concrete
+strings live only in git history before this PR).
+
+3 canonical replacements (login-id form `<initial>.<lastname>@autosmartweb.cz`):
+- `s.fridrich@autosmartweb.cz`
+- `t.maixner@autosmartweb.cz`
+- `j.bezemek@autosmartweb.cz`
+
+**Active production bug:** When operator logged in as
+`s.fridrich@autosmartweb.cz` (canonical), the `/leads` "Mé leady" filter
+showed empty because LEADS sheet still had rows with one of the `<legacy>`
+forms AND frontend `ASSIGNEE_NAMES` had never been migrated to the new keys
+(Apps Script side was migrated only partially on 2026-04-27).
+
+Operator decision: **eliminate all legacy references everywhere** — no
+fallback, no migration map, no historical compatibility. Clean state.
+
+This task was 3 phases:
+
+- **Phase A (operator pre-step, doc only):** run `migrateLegacyAssigneeEmails_`
+  one last time before merge so Sheet data is clean before the migration code
+  is deleted.
+- **Phase B (this PR — code):** delete migration apparatus, flip
+  `DEFAULT_REPLY_TO_EMAIL`, rewrite frontend `ASSIGNEE_NAMES`, fix one
+  hardcoded fallback in `lead-detail-drawer.tsx`.
+- **Phase C (this PR — docs):** purge legacy email references from active
+  20-29 canonical docs, all PILOT-* docs, README.md, and source task records
+  via Option A redaction (`<legacy>` placeholder preserves narrative; canonical
+  3 stay visible).
+- **Owner:** Stream B
+- **Code:** apps-script/Config.gs (modified), apps-script/EmailTemplateStore.gs (modified), apps-script/Menu.gs (modified), crm-frontend/src/lib/config.ts (modified), crm-frontend/src/components/leads/lead-detail-drawer.tsx (modified), scripts/test-email-cleanup.mjs (new)
+- **Docs:** README.md, docs/22-technical-architecture.md, docs/PHASE2-RECON.md, docs/PILOT-SMOKE-TEST.md, docs/PILOT-OPERATIONS.md, docs/PILOT-INCIDENT-RESPONSE.md, docs/PILOT-ENV-VARS.md, docs/30-task-records/B-13.md, docs/30-task-records/B-11.md, docs/30-task-records/email-cleanup-eliminate-legacy.md, docs/11-change-log.md, docs/29-task-registry.md
+
 ## 2026-04-28
 
 ### [A/A-11-followup-rate-limit] Rate limit on scrape job dispatch — hourly per-user + daily global caps — CODE-COMPLETE
@@ -249,7 +284,7 @@ T3.5 race fix:
 - Ostatni 2 LEADS-side call sites (`buildEmailDrafts:712`, `refreshProcessedPreviewCopy:1398`) cetly `hr.row(row)` ktery uz obsahuje LEADS row data vc. preview_url, takze tam fix neni potreba.
 
 T4a — assignee profile extension + legacy migration:
-- `ASSIGNEE_NAMES` zmena ze stareho `email→name` literal mapy na IIFE-derived map z noveho `ASSIGNEE_PROFILES`. Domena konsolidovana na `autosmartweb.cz`: 4 stare emaily (`sfridrich@unipong.cz`, `sebastian@autosmartweb.cz`, `tomas@autosmartweb.cz`, `jan.bezemek@autosmartweb.cz`) → 3 nove (`s.fridrich@autosmartweb.cz`, `t.maixner@autosmartweb.cz`, `j.bezemek@autosmartweb.cz`).
+- `ASSIGNEE_NAMES` zmena ze stareho `email→name` literal mapy na IIFE-derived map z noveho `ASSIGNEE_PROFILES`. Domena konsolidovana na `autosmartweb.cz`: 4 stare emaily (`<legacy>`, `<legacy>`, `<legacy>`, `<legacy>`) → 3 nove (`s.fridrich@autosmartweb.cz`, `t.maixner@autosmartweb.cz`, `j.bezemek@autosmartweb.cz`).
 - `ASSIGNEE_PROFILES` ma `{name, role, phone, email_display, web}` per assignee. `DEFAULT_ASSIGNEE_PROFILE` pro empty/unknown fallback.
 - `getAssigneeProfile_(email)` always returns valid profile object.
 - `LEGACY_ASSIGNEE_EMAIL_MAP` map starych klicu na nove + `migrateLegacyAssigneeEmails_` funkce: scanuje LEADS `assignee_email` column, rewritne legacy keys, prazdne cells nikdy nemodifikuje, LockService 10s, vraci pocet upravenych radku.
@@ -261,12 +296,12 @@ T4b — first published template:
 - `migrateAndBootstrap`: convenience wrapper migrace → `setupEmailTemplates` → `bootstrapNoWebsiteV1`. Single-click cutover z menu.
 
 Po spusteni `migrateAndBootstrap` v Apps Script editoru:
-- 3 rows v TEST sheetu maji `tomas@autosmartweb.cz` -> remapnuto na `t.maixner@autosmartweb.cz` (per-mapping count: tomas: 3).
+- 3 rows v TEST sheetu maji `<legacy>` -> remapnuto na `t.maixner@autosmartweb.cz` (per-mapping count: 3).
 - `_email_templates` rozšireno o 4 LEADS sloupce (idempotent, run #2 bude no-op).
 - `no-website` v1 publikovana s template_id `ASW-TPL-...`, status='active'. Empty placeholder `no-website` row smazana per `publishTemplate_` step 4.
 - Od te chvile `composeDraft_` pro NO_WEBSITE leady prestane padat do fallbacku → vsechny novy drafty jsou template-rendered + maji `email_template_*` metadata.
 
-T4 NEMENI `OutboundEmail.gs:resolveSenderIdentity_` (per spec). `DEFAULT_REPLY_TO_*` zustavaji na legacy `sebastian@autosmartweb.cz` — viz Known Limits.
+T4 NEMENI `OutboundEmail.gs:resolveSenderIdentity_` (per spec). `DEFAULT_REPLY_TO_*` zustavaji na legacy `<legacy>` — viz Known Limits. (Note 2026-04-29: `DEFAULT_REPLY_TO_EMAIL` flipped na `s.fridrich@autosmartweb.cz` v rámci email-cleanup-eliminate-legacy task.)
 
 **T5 update (commit ve stejnem PR):** backend doPost endpoints + live analytics aggregation. ZADNY behavioural change v existujicim flow — pure additive surface area pro frontend (T6+).
 

@@ -12,7 +12,7 @@
 ## Login & access (3 body)
 
 ### 1. Login s validním pilot emailem + heslem
-- **Co dělat:** Otevři Vercel URL → login formulář → email `sfridrich@unipong.cz`, heslo = `AUTH_PASSWORD` z Vercel env.
+- **Co dělat:** Otevři Vercel URL → login formulář → email `s.fridrich@autosmartweb.cz`, heslo = `AUTH_PASSWORD` z Vercel env.
 - **Očekáváno:** Redirect na `/dashboard`, vidím lištu se 4 widgety.
 - **Pokud selže:** [PILOT-OPERATIONS.md → A](PILOT-OPERATIONS.md#a-login-odmítnut-email-mám-v-allowed_users).
 
@@ -74,8 +74,8 @@
 - **Pokud selže:** Pokud projde → `assertSendability_` se nevolá → ověř, že KROK 4 commit (`assertSendability_`) je v deployed verzi (clasp push ran?).
 
 ### 11. APPROVE-d lead se odešle s Reply-To
-- **Co dělat:** Vyber lead, `review_decision = APPROVE`, `assignee_email = jan.bezemek@autosmartweb.cz`. Spusť send.
-- **Očekáváno:** Confirmation dialog ukáže "Reply-To: Jan Bezemek <jan.bezemek@autosmartweb.cz>". Po potvrzení email odeslán z `sfridrich@unipong.cz` (deployer), v Gmailu příjemce v hlavičce uvidí Reply-To: jan.bezemek@. Apps Script Executions log: INFO `sendGmailMessage_ replyTo=jan.bezemek@...`.
+- **Co dělat:** Vyber lead, `review_decision = APPROVE`, `assignee_email = j.bezemek@autosmartweb.cz`. Spusť send.
+- **Očekáváno:** Confirmation dialog ukáže "Reply-To: Jan Bezemek <j.bezemek@autosmartweb.cz>". Po potvrzení email odeslán z deployer Google účtu, v Gmailu příjemce v hlavičce uvidí Reply-To: j.bezemek@. Apps Script Executions log: INFO `sendGmailMessage_ replyTo=j.bezemek@...`.
 - **Pokud selže:** [PILOT-OPERATIONS.md → D](PILOT-OPERATIONS.md#d-email-nedošel-není-v-sent-items).
 
 ### 12. "Import raw → LEADS" menu projede bez erroru

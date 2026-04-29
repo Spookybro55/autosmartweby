@@ -2,7 +2,7 @@
 
 > **Audience:** Sebastian (operátor + deploy owner) a budoucí dev / ops.
 > **Scope:** pilot-grade — krátké akční postupy, ne enterprise runbook.
-> **Eskalace:** [sfridrich@unipong.cz](mailto:sfridrich@unipong.cz)
+> **Eskalace:** [s.fridrich@autosmartweb.cz](mailto:s.fridrich@autosmartweb.cz)
 
 ---
 
@@ -11,7 +11,7 @@
 ### Apps Script
 ```bash
 cd apps-script
-npx clasp login              # jednou; otevře browser, přihlas se jako sfridrich@unipong.cz
+npx clasp login              # jednou; otevře browser, přihlas se jako owner Google účet
 npx clasp push --force       # pushne aktuální .gs do projektu 1SjdUXQc...
 ```
 Po push v Apps Script Console:
@@ -80,7 +80,7 @@ Spusť plný [PILOT-SMOKE-TEST.md](PILOT-SMOKE-TEST.md) (15 bodů, ~10 minut). P
 ### D. "Email nedošel, není v Sent items"
 1. `review_decision != APPROVE` — KROK 4 sendability gate (FF-006) odmítl. V Sheet zkontroluj sloupec `review_decision` na daném řádku; musí být přesně `APPROVE`.
 2. Apps Script Executions: filtr na `assertSendability_` failures — jasná hláška kde k odmítnutí došlo.
-3. Pokud `lead.assignee_email` je orphaned (typo, ne v ALLOWED_USERS) → Reply-To padá na fallback `sebastian@autosmartweb.cz` (`OutboundEmail.gs:resolveSenderIdentity_`). Email se odešle, ale operator může být zmaten.
+3. Pokud `lead.assignee_email` je orphaned (typo, ne v ALLOWED_USERS) → Reply-To padá na fallback `s.fridrich@autosmartweb.cz` (`OutboundEmail.gs:resolveSenderIdentity_`). Email se odešle, ale operator může být zmaten.
 4. Apps Script musí mít OAuth scope `gmail.modify` granted při deployi (Web app → Authorize Access). Pokud chybí, `GmailApp.sendEmail` throw `Authorization required`.
 
 ## 6. Frequency cheat-sheet
