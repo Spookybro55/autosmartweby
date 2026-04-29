@@ -1,0 +1,85 @@
+{
+  "name": "Agent Team — Weekly Digest",
+  "description": "Monday 9:00 AM Europe/Prague. Summary of past week's agent activity: PRs merged by role, patterns added, cost (manual update reference).",
+  "scheduling": {
+    "type": "cron",
+    "cron": "0 9 * * 1",
+    "timezone": "Europe/Prague"
+  },
+  "flow": [
+    {
+      "id": 1,
+      "module": "github:ListPullRequests",
+      "version": 1,
+      "parameters": {
+        "owner": "Spookybro55",
+        "repo": "autosmartweby",
+        "state": "closed",
+        "per_page": 100
+      }
+    },
+    {
+      "id": 2,
+      "module": "builtin:Filter",
+      "version": 1,
+      "parameters": {
+        "condition": "({{1.head.ref}} starts with 'agent/' OR {{1.head.ref}} starts with 'agent-team/') AND {{1.merged_at}} > now - 604800000 AND {{1.merged}} == true"
+      }
+    },
+    {
+      "id": 3,
+      "module": "builtin:Aggregator",
+      "version": 1,
+      "parameters": {
+        "operation": "group_by",
+        "groupBy": "head.ref",
+        "extractRole": "match({{2.head.ref}}; 'agent/([^/]+)/'; 1)"
+      }
+    },
+    {
+      "id": 4,
+      "module": "github:GetCommits",
+      "version": 1,
+      "parameters": {
+        "owner": "Spookybro55",
+        "repo": "autosmartweby",
+        "path": "docs/agents/PATTERNS.md",
+        "since": "now - 7d",
+        "per_page": 50
+      }
+    },
+    {
+      "id": 5,
+      "module": "builtin:Aggregator",
+      "version": 1,
+      "parameters": {
+        "operation": "count",
+        "input": "{{4}}",
+        "filter": "message starts with 'chore(agents): learning loop — pattern'"
+      }
+    },
+    {
+      "id": 6,
+      "module": "http:MakeRequest",
+      "version": 1,
+      "parameters": {
+        "url": "https://ntfy.sh/{{TODO_SEBASTIAN_TOPIC}}",
+        "method": "POST",
+        "headers": [
+          {"name": "Title", "value": "Agent Team — Weekly Digest"},
+          {"name": "Tags", "value": "bar_chart,calendar"},
+          {"name": "Priority", "value": "default"}
+        ],
+        "body": "Past week (Mon-Sun):\n\n• Merged: {{2.length}} agent PRs\n• By role: {{3.summary}}\n• New patterns added: {{5.count}}\n\nReview backlog: https://github.com/Spookybro55/autosmartweby/pulls\nQueue: https://github.com/Spookybro55/autosmartweby/blob/main/docs/agents/QUEUE.md\n\nManual cost check: https://console.anthropic.com/settings/usage"
+      }
+    }
+  ],
+  "_setup_notes": [
+    "REQUIRES: Make GitHub connection.",
+    "REPLACE: TODO_SEBASTIAN_TOPIC.",
+    "OPS estimate: ~4/měs (4 Mondays).",
+    "MANUAL: cost from Anthropic Console (no API for billing aggregation in MVP).",
+    "OPTIONAL EXTENSION: include task records analytics (count of done vs blocked from QUEUE.md / RUN-LOG.md)."
+  ],
+  "_phase_3_only": true
+}

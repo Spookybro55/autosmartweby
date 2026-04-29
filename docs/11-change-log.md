@@ -76,6 +76,42 @@ Phase 2 does NOT include:
 - **Code:** docs/agents/roles/security-engineer.md (new), docs/agents/roles/qa-engineer.md (new), docs/agents/roles/docs-guardian.md (new), .github/workflows/agent-pr-validation.yml (new), scripts/agent/triage.mjs (new), scripts/agent/validate-task-record.mjs (new), scripts/docs/build-task-registry.mjs (modified)
 - **Docs:** docs/30-task-records/AGENT-TEAM-PHASE-2.md, docs/agents/roles/security-engineer.md, docs/agents/roles/qa-engineer.md, docs/agents/roles/docs-guardian.md, docs/11-change-log.md, docs/29-task-registry.md
 
+### [B/AGENT-TEAM-PHASE-3-PREREQUISITES] Phase 3 prerequisites — Make blueprints + IMPORT-GUIDE + autonomous setup actions — CODE-COMPLETE
+- **Scope:** Autonomous setup of Phase 3 prerequisites per admin prompt. Sebastián
+explicitly requested "udělej co nejvíc autonomně, ptej se JEN když nejde
+jinak". This task records what was done autonomously vs deferred to manual
+Sebastián steps.
+
+**Done autonomously:**
+- Merge of PR #89 (Phase 2) via `gh pr merge 89 --squash --delete-branch --admin`
+- GitHub branch protection PATCH: required_status_checks contexts now
+  `["docs-governance", "validate-agent-pr"]` (strict=true)
+- Vercel CLI install (`npm install -g vercel`) + login (browser device flow)
+- Vercel project re-link from auto-created orphan `crm-frontend` to actual
+  pilot project `autosmartweby`
+- Vercel env: `OWNER_EMAIL=s.fridrich@autosmartweb.cz` added to production
+  + development on `autosmartweby` project (preview blocked — see Known Limits)
+- 5 Make scenario blueprint JSON files (`docs/agents/make/0{1,2,3,4,5}-*.json`)
+- `docs/agents/make/IMPORT-GUIDE.md` (~250 LOC step-by-step manual setup guide)
+- `docs/agents/SETUP-CHECKLIST.md` updated with auto-setup status
+- `docs/agents/QUESTIONS-FOR-HUMAN.md` populated with 3 entries (QFH-0001..0003)
+
+**Deferred to Sebastián manual** (documented in QFH + SETUP-CHECKLIST):
+- Anthropic API key creation (`/tmp/anthropic-key-instructions.md`) — requires
+  browser session at console.anthropic.com
+- Make plan upgrade Free → Core ($9/měs) — billing decision
+- Make scenarios import (5 blueprints) — Make API doesn't support auto-import,
+  must be UI-driven
+- ntfy topic creation — privacy decision (topic name leaks = anyone subscribes)
+- GitHub webhook configuration for learning loop — depends on Make webhook URL
+  (created post-import)
+- Vercel preview env OWNER_EMAIL — blocked by missing Git repo connection
+  to Vercel project (open in QFH-0002)
+- Cleanup orphan `crm-frontend` Vercel project (open in QFH-0003)
+- **Owner:** Claude Code (Sonnet 4.6, autonomous admin run)
+- **Code:** docs/agents/make/01-daily-triage.json (new), docs/agents/make/02-pr-review-reminder.json (new), docs/agents/make/03-learning-loop.json (new), docs/agents/make/04-backpressure-check.json (new), docs/agents/make/05-weekly-digest.json (new), docs/agents/make/IMPORT-GUIDE.md (new), docs/agents/SETUP-CHECKLIST.md (modified), docs/agents/QUESTIONS-FOR-HUMAN.md (modified), crm-frontend/.gitignore (modified)
+- **Docs:** docs/30-task-records/AGENT-TEAM-PHASE-3-PREREQUISITES.md, docs/agents/SETUP-CHECKLIST.md, docs/agents/QUESTIONS-FOR-HUMAN.md, docs/11-change-log.md, docs/29-task-registry.md
+
 ### [B/audit-reconciliation-2026-04] Audit reconciliation pass — verify all FINDINGS against current code — CODE-COMPLETE
 - **Scope:** PR #83 revealed audit drift (SEC-016 marked Open but actually fixed in `24e3d65`).
 This pass systematically verifies every Open finding in `docs/audits/FINDINGS.md`
