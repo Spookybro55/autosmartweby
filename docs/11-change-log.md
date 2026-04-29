@@ -43,6 +43,39 @@ Discovery report Sekce 9 — answers from Sebastián applied:
 - **Code:** docs/agents/README.md (new), docs/agents/ARCHITECTURE.md (new), docs/agents/PATTERNS.md (new), docs/agents/GOTCHAS.md (new), docs/agents/REGRESSION-LOG.md (new), docs/agents/DECISIONS.md (new), docs/agents/PLAYBOOKS.md (new), docs/agents/QUEUE.md (new), docs/agents/QUESTIONS-FOR-HUMAN.md (new), docs/agents/RUN-LOG.md (new), docs/agents/roles/tech-lead.md (new), docs/agents/roles/bug-hunter.md (new), docs/agents/SETUP-CHECKLIST.md (new), CLAUDE.md (modified), docs/30-task-records/_template.md (modified), docs/14-definition-of-done.md (modified)
 - **Docs:** docs/30-task-records/AGENT-TEAM-PHASE-1.md, docs/agents/*, CLAUDE.md, docs/30-task-records/_template.md, docs/14-definition-of-done.md, docs/11-change-log.md, docs/29-task-registry.md
 
+### [B/AGENT-TEAM-PHASE-2] AI Agent Team — Phase 2: remaining roles + CI workflow + triage scripts — CODE-COMPLETE
+- **Scope:** Phase 2 of 3 — completes the agent role layer (3 remaining SKILLs), adds CI
+guardrails for agent-driven PRs, and ships triage + task-record validation
+helpers. Builds on Phase 1 vault structure (PR #88 merged as `2b03ed1`).
+
+Phase 2 includes:
+- `roles/security-engineer.md` — SEC-* / CC-SEC-* findings, secrets handling,
+  threat modeling, GDPR/PII-aware writeups. Includes irreversible-action
+  escalation rule (P0 + rotate Sheet IDs / change auth model → MUST escalate
+  to QFH even when "SEC autonomně" was approved).
+- `roles/qa-engineer.md` — test authoring (unit, integration, smoke), regression
+  suite maintenance, test gap detection, CC-QA-* findings.
+- `roles/docs-guardian.md` — task record completeness, stream-doc mapping
+  enforcement (per docs/13), build-changelog/build-task-registry orchestration,
+  FINDINGS.md `**Resolved**` annotation convention. **Najčastěji invokovaná
+  role** — every Track A task ends with Docs Guardian step.
+- `.github/workflows/agent-pr-validation.yml` — CI gate for `agent/*` and
+  `agent-team/*` branches. Runs tsc, build, tests, docs:check, task-record
+  validation, diff size enforcement (Track A 500 LOC), gitleaks scan.
+- `scripts/agent/triage.mjs` — parses FINDINGS.md, classifies findings into
+  roles + streams, produces ranked candidate list for QUEUE.md "Ready" section.
+- `scripts/agent/validate-task-record.mjs` — used by CI; validates that task
+  record exists for PR branch, all metadata fields filled, valid enums.
+
+Phase 2 does NOT include:
+- CRM `/admin/dev-team` dashboard (Phase 3)
+- Make scenarios (daily triage, learning loop, weekly digest, review reminder, backpressure) — Phase 3
+- Anthropic API key + Make secret store wiring — Phase 3 prerequisite
+- First real autonomous agent run — separate task post-Phase-2 merge
+- **Owner:** Sebastián Fridrich
+- **Code:** docs/agents/roles/security-engineer.md (new), docs/agents/roles/qa-engineer.md (new), docs/agents/roles/docs-guardian.md (new), .github/workflows/agent-pr-validation.yml (new), scripts/agent/triage.mjs (new), scripts/agent/validate-task-record.mjs (new), scripts/docs/build-task-registry.mjs (modified)
+- **Docs:** docs/30-task-records/AGENT-TEAM-PHASE-2.md, docs/agents/roles/security-engineer.md, docs/agents/roles/qa-engineer.md, docs/agents/roles/docs-guardian.md, docs/11-change-log.md, docs/29-task-registry.md
+
 ### [B/audit-reconciliation-2026-04] Audit reconciliation pass — verify all FINDINGS against current code — CODE-COMPLETE
 - **Scope:** PR #83 revealed audit drift (SEC-016 marked Open but actually fixed in `24e3d65`).
 This pass systematically verifies every Open finding in `docs/audits/FINDINGS.md`

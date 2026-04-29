@@ -1,0 +1,220 @@
+#!/usr/bin/env node
+// scripts/agent/triage.mjs
+//
+// Parses docs/audits/FINDINGS.md, classifies Open findings by prefix into
+// role + stream + priority, and updates docs/agents/QUEUE.md "Ready" section.
+//
+// Phase 1 seeded QUEUE.md manually with top 10 P2 + 2 P1 entries. From Phase 2
+// onwards, this script regenerates the "Ready" section deterministically.
+// Other sections in QUEUE.md (Backlog, In Progress, Blocked, queue status
+// header) are PRESERVED.
+//
+// CLI:
+//   node scripts/agent/triage.mjs              # update QUEUE.md
+//   node scripts/agent/triage.mjs --dry-run    # print what would change, don't write
+//   node scripts/agent/triage.mjs --top 5      # only top 5 (default 20)
+
+import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(__dirname, '..', '..');
+const FINDINGS = join(ROOT, 'docs', 'audits', 'FINDINGS.md');
+const QUEUE = join(ROOT, 'docs', 'agents', 'QUEUE.md');
+
+// --- CLI ---
+const args = process.argv.slice(2);
+const dryRun = args.includes('--dry-run');
+const topIdx = args.indexOf('--top');
+const TOP_N = topIdx >= 0 && args[topIdx + 1] ? parseInt(args[topIdx + 1], 10) : 20;
+
+// --- Classification rules ---
+// Prefix → { role, defaultStream }. Stream may be overridden by per-finding
+// derivation when affected docs are clear.
+const PREFIX_RULES = {
+  SEC: { role: 'security-engineer', defaultStream: 'B' },
+  'CC-SEC': { role: 'security-engineer', defaultStream: 'B' },
+  FF: { role: 'bug-hunter', defaultStream: 'A' }, // funnel flow — A unless FE-side
+  AS: { role: 'bug-hunter', defaultStream: 'A' },
+  IN: { role: 'bug-hunter', defaultStream: 'B' },
+  FE: { role: 'bug-hunter', defaultStream: 'B' },
+  DM: { role: 'bug-hunter', defaultStream: 'A' },
+  DP: { role: 'docs-guardian', defaultStream: 'B' }, // mostly docs-fix; can be bug-hunter for runtime DP
+  BLD: { role: 'docs-guardian', defaultStream: 'B' }, // README + tooling — docs-side
+  DOC: { role: 'docs-guardian', defaultStream: 'B' }, // pure docs
+  'CC-NEW': { role: 'docs-guardian', defaultStream: 'B' },
+  'CC-OPS': { role: 'docs-guardian', defaultStream: 'B' },
+  'CC-QA': { role: 'qa-engineer', defaultStream: 'A' },
+};
+
+const PRIORITY_ORDER = { P0: 0, P1: 1, P2: 2, P3: 3 };
+
+// --- Parser ---
+// FINDINGS.md uses a markdown table with columns:
+// | ID | Domain | Description | Severity | Evidence | Impact | Recommendation | Status |
+// We match rows starting with `| <PREFIX>-<NNN>` and extract minimum:
+// id, severity (P0..P3), status (Open / **Resolved**... / — / N/A).
+function parseFindings(content) {
+  const rows = [];
+  const lines = content.split(/\r?\n/);
+  // Match `| ID-NNN |` at start of line. Allow CC-XXX double-prefix.
+  const rowRegex = /^\|\s*([A-Z]+(?:-[A-Z]+)?)-(\d+)\s*\|/;
+  // Severity & status are positional columns. Use a forgiving split-by-pipe.
+  for (const raw of lines) {
+    const m = raw.match(rowRegex);
+    if (!m) continue;
+    const [, prefix, num] = m;
+    const id = `${prefix}-${num.padStart(3, '0')}`;
+    // Split row into columns; trim each. Keep raw for debug.
+    const cols = raw.split('|').map((c) => c.trim());
+    // cols[0] = '' (before first pipe), cols[1] = ID, cols[2] = Domain, cols[3] = Description,
+    // cols[4] = Severity, cols[5] = Evidence, cols[6] = Impact, cols[7] = Recommendation,
+    // cols[8] = Status (or related-findings)
+    const severity = (cols[4] || '').match(/P[0-3]/)?.[0] ?? null;
+    // Status is typically last meaningful column. Some rows have related-findings sloupec
+    // before status. Look from the end backwards for known status patterns.
+    let status = null;
+    for (let i = cols.length - 1; i >= 0; i--) {
+      const c = cols[i];
+      if (!c) continue;
+      if (/^Open$/i.test(c)) {
+        status = 'Open';
+        break;
+      }
+      if (/\*\*Resolved\*\*/.test(c)) {
+        status = 'Resolved';
+        break;
+      }
+      if (/^Closed$/i.test(c)) {
+        status = 'Closed';
+        break;
+      }
+    }
+    if (!severity) continue; // skip rows we can't classify
+    // Title: short summary derived from Description column, capped at 70 chars.
+    const description = cols[3] || '';
+    const title = description.length > 70 ? description.slice(0, 67) + '...' : description;
+    rows.push({ id, prefix, severity, status, title });
+  }
+  return rows;
+}
+
+function classify(finding) {
+  // Try double-prefix first (CC-SEC, CC-QA, ...)
+  const doublePrefix = finding.id.match(/^([A-Z]+-[A-Z]+)-/)?.[1];
+  if (doublePrefix && PREFIX_RULES[doublePrefix]) {
+    return PREFIX_RULES[doublePrefix];
+  }
+  return PREFIX_RULES[finding.prefix] ?? { role: 'tech-lead', defaultStream: 'B' };
+}
+
+// --- Render Ready section ---
+function renderReady(findings) {
+  if (findings.length === 0) {
+    return `### Ready (auto-generated by triage.mjs)\n\n*No Open findings classifiable for Track A right now.*\n`;
+  }
+  const lines = [];
+  lines.push('### Ready (auto-generated by triage.mjs)');
+  lines.push('');
+  lines.push(`> Last refresh: ${new Date().toISOString().slice(0, 10)}`);
+  lines.push('> Regenerate: `node scripts/agent/triage.mjs`');
+  lines.push('> Top entries by priority (P0 → P1 → P2 → P3). Status: Open only.');
+  lines.push('');
+  lines.push('| Rank | Finding | Severity | Suggested role | Default stream |');
+  lines.push('|---|---|---|---|---|');
+  findings.forEach((f, i) => {
+    const cls = classify(f);
+    lines.push(`| ${i + 1} | ${f.id}: ${f.title} | ${f.severity} | ${cls.role} | ${cls.defaultStream} |`);
+  });
+  lines.push('');
+  return lines.join('\n');
+}
+
+// --- Update QUEUE.md preserving other sections ---
+function updateQueue(currentQueue, readyBlock) {
+  // Replace block between markers, or insert after queue status header if markers missing.
+  const startMarker = '<!-- triage:ready-start -->';
+  const endMarker = '<!-- triage:ready-end -->';
+  const startIdx = currentQueue.indexOf(startMarker);
+  const endIdx = currentQueue.indexOf(endMarker);
+  const wrapped = `${startMarker}\n\n${readyBlock}\n${endMarker}`;
+  if (startIdx >= 0 && endIdx >= 0 && endIdx > startIdx) {
+    return (
+      currentQueue.slice(0, startIdx) +
+      wrapped +
+      currentQueue.slice(endIdx + endMarker.length)
+    );
+  }
+  // No markers yet — append before first `## Active queue` or at end.
+  const insertAt = currentQueue.indexOf('## Active queue');
+  if (insertAt >= 0) {
+    return (
+      currentQueue.slice(0, insertAt) +
+      wrapped +
+      '\n\n' +
+      currentQueue.slice(insertAt)
+    );
+  }
+  return currentQueue + '\n\n' + wrapped + '\n';
+}
+
+// --- Main ---
+function main() {
+  if (!existsSync(FINDINGS)) {
+    console.error(`FATAL: ${FINDINGS} does not exist.`);
+    process.exit(2);
+  }
+  if (!existsSync(QUEUE)) {
+    console.error(`FATAL: ${QUEUE} does not exist. Run Phase 1 setup first.`);
+    process.exit(2);
+  }
+
+  const findingsContent = readFileSync(FINDINGS, 'utf-8');
+  const allFindings = parseFindings(findingsContent);
+
+  const open = allFindings.filter((f) => f.status === 'Open');
+  open.sort((a, b) => {
+    const pa = PRIORITY_ORDER[a.severity] ?? 99;
+    const pb = PRIORITY_ORDER[b.severity] ?? 99;
+    if (pa !== pb) return pa - pb;
+    return a.id.localeCompare(b.id);
+  });
+  const top = open.slice(0, TOP_N);
+
+  const readyBlock = renderReady(top);
+
+  // Summary
+  const byRole = {};
+  for (const f of top) {
+    const cls = classify(f);
+    byRole[cls.role] = (byRole[cls.role] ?? 0) + 1;
+  }
+  console.log('Triage complete:');
+  console.log(`  Total findings parsed: ${allFindings.length}`);
+  console.log(`  Open findings: ${open.length}`);
+  console.log(`  Top ${TOP_N} selected (by priority):`);
+  for (const [role, n] of Object.entries(byRole)) {
+    console.log(`    ${role}: ${n}`);
+  }
+  const byPrio = { P0: 0, P1: 0, P2: 0, P3: 0 };
+  for (const f of top) byPrio[f.severity] = (byPrio[f.severity] ?? 0) + 1;
+  console.log(`  By severity: P0=${byPrio.P0} P1=${byPrio.P1} P2=${byPrio.P2} P3=${byPrio.P3}`);
+
+  if (dryRun) {
+    console.log('\n--- DRY RUN — would write to QUEUE.md ---\n');
+    console.log(readyBlock);
+    return;
+  }
+
+  const currentQueue = readFileSync(QUEUE, 'utf-8');
+  const updatedQueue = updateQueue(currentQueue, readyBlock);
+  if (updatedQueue === currentQueue) {
+    console.log('\nQUEUE.md unchanged (markers absent and no insertion point found).');
+    process.exit(1);
+  }
+  writeFileSync(QUEUE, updatedQueue, 'utf-8');
+  console.log(`\nQUEUE.md updated: top ${top.length} entries written to "Ready" section.`);
+}
+
+main();

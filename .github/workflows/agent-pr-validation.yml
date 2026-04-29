@@ -1,0 +1,183 @@
+name: Agent PR Validation
+
+# Runs on PRs from `agent/*` and `agent-team/*` branches.
+# Adds CI guardrails specific to agent-driven work on top of existing
+# `docs-governance.yml` (always-on) and `pilot-ci.yml` (frontend + apps-script
+# logic tests). This workflow's job name is `validate-agent-pr` — different
+# from existing `docs-governance` / `frontend-checks` / `apps-script-checks`,
+# so no collision with required status checks.
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - 'docs/archive/**'
+
+jobs:
+  validate-agent-pr:
+    name: validate-agent-pr
+    if: |
+      startsWith(github.head_ref, 'agent/') ||
+      startsWith(github.head_ref, 'agent-team/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Checkout (full history for diff base)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: crm-frontend/package-lock.json
+
+      # Frontend checks — only if frontend was touched (avoid unnecessary npm ci on
+      # docs-only PRs). Uses paths filter via git diff.
+      - name: Detect frontend changes
+        id: detect
+        run: |
+          BASE="origin/${{ github.base_ref }}"
+          if git diff --name-only "$BASE...HEAD" | grep -q '^crm-frontend/'; then
+            echo "frontend_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "frontend_changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install crm-frontend deps
+        if: steps.detect.outputs.frontend_changed == 'true'
+        working-directory: crm-frontend
+        run: npm ci
+
+      - name: TypeScript check (frontend)
+        if: steps.detect.outputs.frontend_changed == 'true'
+        working-directory: crm-frontend
+        run: npx tsc --noEmit
+
+      - name: Lint (frontend)
+        if: steps.detect.outputs.frontend_changed == 'true'
+        working-directory: crm-frontend
+        run: npm run lint
+
+      - name: Build (frontend)
+        if: steps.detect.outputs.frontend_changed == 'true'
+        working-directory: crm-frontend
+        env:
+          # Mirror pilot-ci.yml — KROK 3 fail-fast in lib/auth/session-secret.ts
+          # requires NEXTAUTH_SECRET >=32 chars at build time.
+          NEXTAUTH_SECRET: ci-test-secret-not-for-production-32chars
+          MOCK_MODE: 'true'
+          GOOGLE_SERVICE_ACCOUNT_EMAIL: ci-mock@ci-mock.iam.gserviceaccount.com
+          GOOGLE_PRIVATE_KEY: |
+            -----BEGIN PRIVATE KEY-----
+            CI_MOCK_KEY_NOT_REAL
+            -----END PRIVATE KEY-----
+          GOOGLE_SPREADSHEET_ID: ci-mock-sheet-id
+        run: npm run build
+
+      # B-stream tests — these scripts live at repo root via root package.json.
+      # Use --if-present so a missing script doesn't fail the workflow.
+      - name: B-stream tests (root)
+        run: |
+          for script in test:b03 test:b04 test:b05 test:b06 test:b13; do
+            echo "::group::$script"
+            npm run "$script" --if-present || {
+              code=$?
+              echo "::endgroup::"
+              # If the script exists and fails, propagate.
+              # --if-present returns 0 if script doesn't exist, so non-zero = real failure.
+              if npm run | grep -qE "^\s*${script}\s*$"; then
+                echo "::error::$script failed with exit code $code"
+                exit $code
+              fi
+            }
+            echo "::endgroup::"
+          done
+
+      # A-stream / scrape regression — direct node script calls.
+      - name: A-stream regression
+        run: |
+          for script in \
+            scripts/test-ingest-runtime.mjs \
+            scripts/test-a08-preview-queue.mjs \
+            scripts/test-a09-ingest-report.mjs \
+            scripts/test-rate-limit.mjs \
+            scripts/test-stale-job-reaper.mjs \
+            scripts/test-resolve-review-idempotence.mjs \
+            scripts/test-email-cleanup.mjs ; do
+            if [ -f "$script" ]; then
+              echo "::group::$script"
+              node "$script"
+              echo "::endgroup::"
+            fi
+          done
+
+      - name: Docs sync
+        run: node scripts/docs/check-doc-sync.mjs
+
+      - name: Validate task record
+        run: node scripts/agent/validate-task-record.mjs --pr-branch "${{ github.head_ref }}"
+
+      - name: Diff size limit (Track A only)
+        run: |
+          PR_BODY=$(cat <<'PR_BODY_EOF'
+          ${{ github.event.pull_request.body }}
+          PR_BODY_EOF
+          )
+          BRANCH="${{ github.head_ref }}"
+
+          if echo "$PR_BODY" | grep -q '\[size-override\]'; then
+            echo "Size override flag detected — skipping diff size check."
+            exit 0
+          fi
+
+          if [[ "$BRANCH" == agent-team/* ]]; then
+            echo "Branch namespace agent-team/* — Track B setup, no diff size limit."
+            exit 0
+          fi
+
+          # Track A: enforce 500 LOC additions limit.
+          BASE="origin/${{ github.base_ref }}"
+          STAT=$(git diff "$BASE...HEAD" --shortstat || echo "")
+          INSERTIONS=$(echo "$STAT" | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || echo 0)
+
+          echo "Branch: $BRANCH"
+          echo "Insertions: $INSERTIONS"
+
+          if [ "$INSERTIONS" -gt 500 ]; then
+            echo "::error::Track A agent PR diff > 500 LOC ($INSERTIONS). Add [size-override] to PR body or split into smaller PRs."
+            exit 1
+          fi
+          echo "Diff size OK ($INSERTIONS LOC under 500)."
+
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # No config-path — gitleaks uses sensible defaults if .github/gitleaks.toml
+        # doesn't exist. Phase 3 may add custom config.
+        continue-on-error: false
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Agent PR Validation"
+            echo ""
+            echo "| Aspect | Value |"
+            echo "|---|---|"
+            echo "| Branch | ${{ github.head_ref }} |"
+            if [[ "${{ github.head_ref }}" == agent-team/* ]]; then
+              echo "| Track | B (agent-team setup) |"
+              echo "| Diff size limit | not enforced |"
+            else
+              echo "| Track | A (autonomous) |"
+              echo "| Diff size limit | 500 LOC (unless [size-override]) |"
+            fi
+            echo "| Frontend changed | ${{ steps.detect.outputs.frontend_changed }} |"
+          } >> $GITHUB_STEP_SUMMARY
