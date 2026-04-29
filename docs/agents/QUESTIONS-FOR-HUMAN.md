@@ -56,7 +56,42 @@
   OWNER_EMAIL preview via UI Settings → Environment Variables)_
 - **Resolved at:** —
 
-### QFH-0003: Vercel orphan project `crm-frontend` (cleanup recommended)
+### QFH-0004: Make blueprint format invalid — need reference template from UI export
+
+- **Date:** 2026-04-29 22:55 (Europe/Prague)
+- **From role:** docs-guardian (autonomous setup follow-up)
+- **Task:** AGENT-TEAM-PHASE-3-PREREQUISITES (PR #90)
+- **Track:** B
+- **Question:** 5 Make scenario JSONs v `docs/agents/make/0{1..5}-*.json`
+  failují import s "invalid blueprint" v Make UI. Použili jsme zjednodušený
+  JSON format. Make blueprint vyžaduje specifickou strukturu (top-level
+  metadata blok, flow array s mapper/parameters/metadata wrapping per modul,
+  exact module IDs z Make catalogu jako `github-app:listFiles` ne
+  `github:WatchFiles`, atd.).
+- **Tried:** Generated 5 JSONs based on Master plan §10 description + general
+  Make scenario understanding. Bez exported reference z Make UI nelze přesný
+  format zrekonstruovat — Claude Code CLI nemá Make UI access ani Make API
+  credentials.
+- **Status:** open — **blocking Phase 3 learning loop activation**
+- **Answer:** _(awaiting Sebastián)_
+  **Postup pro odblokování:**
+  1. V Make UI vytvoř prázdný scenario s 1 trigger + 1 HTTP action
+     (např. GitHub "Watch issues" + HTTP "Make a request" — nejjednodušší 2
+     moduly).
+  2. Save scenario.
+  3. Scenario menu (... vpravo nahoře) → **Export Blueprint**.
+  4. Stažený JSON pošli sem (paste do Claude Code session, nebo ulož do
+     `~/agent-team-setup-files/make-reference-blueprint.json`).
+  5. Claude pak přepíše všech 5 blueprintů per real format (3 PR estimated
+     `fix/make-blueprints-format`).
+
+  **Alternativní cesta (pokud Make export taky failí):** Sebastián vytvoří
+  v UI 5 cílových scenarios manuálně podle popisu v `IMPORT-GUIDE.md` +
+  `_setup_notes` v každém JSON souboru. JSON soubory pak slouží jen jako
+  reference description, ne jako import target. PR #90 by se v takovém
+  případě měl označit `Status: needs-rework` a JSON soubory přejmenovat
+  na `*-DESCRIPTION.md` (markdown s pseudokódem).
+- **Resolved at:** —
 
 - **Date:** 2026-04-29 22:42 (Europe/Prague)
 - **From role:** docs-guardian (autonomous setup)
