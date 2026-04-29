@@ -8,6 +8,41 @@
 
 ## 2026-04-29
 
+### [B/AGENT-TEAM-PHASE-1] AI Agent Team — Phase 1: knowledge base + Tech Lead + Bug Hunter — CODE-COMPLETE
+- **Scope:** Phase 1 of 3 — bootstrap AI agent team setup per `docs/agents/_discovery-report.md`
+(approved 2026-04-29) and `~/agent-team-setup-files/03-master-plan.md` v1.0.
+
+Creates the Obsidian-compatible knowledge base structure under `docs/agents/`,
+seeds it with project-specific patterns/gotchas, and ships the first 2 agent
+roles: **Tech Lead** (single entry point + role dispatcher) and **Bug Hunter**
+(reproduce-fix-test pattern for FF-* / AS-* findings).
+
+Phase 1 does **not** include:
+- Remaining 3 roles (security-engineer, qa-engineer, docs-guardian) — Phase 2
+- Automation scripts (triage.mjs, validate-task-record.mjs) — Phase 2
+- CI workflow (agent-pr-validation.yml) — Phase 2
+- CRM dashboard (`/admin/dev-team`) — Phase 3
+- Make scenarios + learning loop — Phase 3
+- Anthropic API key + Make secret store setup — Phase 3 prerequisite
+
+Discovery report Sekce 8 — all 8 architectural amendments are applied
+across the new files (Stream ⊥ Track, real audit prefixes not BUG-, ad-hoc
+task IDs, status enum extension, DoD harmonization with new "Agent Done"
+section, PATTERNS auto-append vs manual entries split, OWNER_EMAIL env,
+diff-size dichotomy).
+
+Discovery report Sekce 9 — answers from Sebastián applied:
+- Q1 backfill 46 records: NO (option c)
+- Q2 stream labeling: option (a) derive from affected docs
+- Q3 enforce_admins: false (keep)
+- Q4 dashboard: read-only
+- Q5 Make: Core plan ($9/měs)
+- Q6 Anthropic API: Sebastián creates manually before Phase 3
+- Q7 PR strategy: 3 separate PRs
+- **Owner:** Sebastián Fridrich
+- **Code:** docs/agents/README.md (new), docs/agents/ARCHITECTURE.md (new), docs/agents/PATTERNS.md (new), docs/agents/GOTCHAS.md (new), docs/agents/REGRESSION-LOG.md (new), docs/agents/DECISIONS.md (new), docs/agents/PLAYBOOKS.md (new), docs/agents/QUEUE.md (new), docs/agents/QUESTIONS-FOR-HUMAN.md (new), docs/agents/RUN-LOG.md (new), docs/agents/roles/tech-lead.md (new), docs/agents/roles/bug-hunter.md (new), docs/agents/SETUP-CHECKLIST.md (new), CLAUDE.md (modified), docs/30-task-records/_template.md (modified), docs/14-definition-of-done.md (modified)
+- **Docs:** docs/30-task-records/AGENT-TEAM-PHASE-1.md, docs/agents/*, CLAUDE.md, docs/30-task-records/_template.md, docs/14-definition-of-done.md, docs/11-change-log.md, docs/29-task-registry.md
+
 ### [B/audit-reconciliation-2026-04] Audit reconciliation pass — verify all FINDINGS against current code — CODE-COMPLETE
 - **Scope:** PR #83 revealed audit drift (SEC-016 marked Open but actually fixed in `24e3d65`).
 This pass systematically verifies every Open finding in `docs/audits/FINDINGS.md`

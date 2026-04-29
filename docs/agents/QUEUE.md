@@ -1,0 +1,168 @@
+# Queue — Track A Tasks
+
+> **Tech Lead spravuje.** Phase 2 `scripts/agent/triage.mjs` regeneruje tento
+> soubor z `docs/audits/FINDINGS.md` daily-cron (Phase 3 Make scenario).
+> Phase 1: tato verze je manuální seed (top 10 P2 + 2 P1 single-file fixes).
+>
+> **Status (queue-level):** ACTIVE / PAUSED. Tech Lead respects PAUSED.
+>
+> **Format per entry:**
+> ```
+> ### {priority} {finding-id}: {title}
+> - **Severity:** P0/P1/P2/P3
+> - **Stream:** A / B / C (derived from affected docs)
+> - **Track:** A (autonomous)
+> - **Role:** {tech-lead | bug-hunter | security-engineer | qa-engineer | docs-guardian}
+> - **Estimated diff:** ≤500 LOC (Track A hard limit)
+> - **Evidence:** docs/audits/FINDINGS.md row + file:line
+> - **Status:** unblocked / blocked: <reason>
+> - **Notes:** dependency or context
+> ```
+
+---
+
+## Queue status
+
+- **Status:** ACTIVE
+- **Last refresh:** 2026-04-29 (manual seed, Phase 1)
+- **Next refresh:** Phase 2 triage.mjs script (auto)
+
+---
+
+## Active queue (top 10 P2 + 2 P1)
+
+### 1. IN-003: Docs drift `/api/leads/[id]/update` POST→PATCH
+
+- **Severity:** P2
+- **Stream:** B (docs/12)
+- **Track:** A
+- **Role:** docs-guardian (Phase 2)
+- **Estimated diff:** ~5 LOC
+- **Evidence:** `docs/12-route-and-surface-map.md:27` vs `crm-frontend/src/app/api/leads/[id]/update/route.ts:49`
+- **Status:** unblocked
+- **Notes:** Easiest first task — single line in docs/12 says POST, code is PATCH.
+
+### 2. BLD-006: Add `typecheck` script to crm-frontend/package.json
+
+- **Severity:** P2
+- **Stream:** B (BLD = buildability, frontend)
+- **Track:** A
+- **Role:** docs-guardian or bug-hunter
+- **Estimated diff:** ~1 LOC
+- **Evidence:** `crm-frontend/package.json:5-9` — has dev/build/start/lint, no typecheck
+- **Status:** unblocked
+- **Notes:** Trivial — `"typecheck": "tsc --noEmit"`. Update README too.
+
+### 3. IN-013: Backend `sales_note.length` validation gap
+
+- **Severity:** P2
+- **Stream:** B (integration → docs/22 + docs/12)
+- **Track:** A
+- **Role:** bug-hunter
+- **Estimated diff:** ~10 LOC + test
+- **Evidence:** `apps-script/WebAppEndpoint.gs:30-113` (no length check) vs `crm-frontend/src/app/api/leads/[id]/update/route.ts:18,42-44` (5000 char cap on FE)
+- **Status:** unblocked
+- **Notes:** Defense in depth. Add `MAX_NOTE_LENGTH = 5000` const + check in handleUpdateLead_.
+
+### 4. BLD-016: crm-frontend/README.md missing deploy section + env list incomplete
+
+- **Severity:** P2 (cross-ref DP-016)
+- **Stream:** B (frontend doc)
+- **Track:** A
+- **Role:** docs-guardian
+- **Estimated diff:** ~30-50 LOC (markdown)
+- **Evidence:** `crm-frontend/README.md:5-39` (no deploy section); env list 7/10 (missing `APPS_SCRIPT_SECRET`, `PREVIEW_WEBHOOK_SECRET`, `PUBLIC_BASE_URL`)
+- **Status:** blocked: cross-ref DP-016 should be resolved together
+- **Notes:** Wait until DP-016 is also actionable, then bundle.
+
+### 5. SEC-013: Apps Script Web App URL — defense in depth
+
+- **Severity:** P2
+- **Stream:** B (security → docs/22, docs/27)
+- **Track:** A
+- **Role:** security-engineer (Phase 2)
+- **Estimated diff:** ~50-100 LOC (rotation runbook DOC + minor code annotation)
+- **Evidence:** `crm-frontend/src/lib/config.ts:7`, `crm-frontend/src/lib/google/apps-script-writer.ts:20`
+- **Status:** blocked: depends on SEC-017 token rotation runbook (not yet drafted)
+- **Notes:** Wait for SEC-017 / DOC-020 (SECRETS-ROTATION.md) to land first.
+
+### 6. FF-020: OutboundEmail.executeCrmOutbound_ missing LockService
+
+- **Severity:** P2
+- **Stream:** A (apps-script automation → docs/24)
+- **Track:** A
+- **Role:** bug-hunter
+- **Estimated diff:** ~30 LOC + test
+- **Evidence:** `apps-script/OutboundEmail.gs:47` — no `LockService.tryLock`
+- **Status:** unblocked
+- **Notes:** Pattern exists in `ContactSheet.gs` B-06 (5s lock). Mirror that. Test scenario: 2 simulated concurrent operator clicks.
+
+### 7. DP-015: docs/22-technical-architecture.md stale (CI/CD claim)
+
+- **Severity:** P2
+- **Stream:** B (canonical doc Stream B)
+- **Track:** A
+- **Role:** docs-guardian
+- **Estimated diff:** ~20-30 LOC
+- **Evidence:** `docs/22-technical-architecture.md:46,52,53` — "Zadny CI/CD, zadne testy", "Frontend bezi lokalne", "Zadny hosting nakonfigurovan". Reality: 3× CI workflows + Vercel pilot deploy + B-06 tests.
+- **Status:** unblocked
+- **Notes:** Cross-ref DP-014 (docs/27 same drift) — bundle if cheap.
+
+### 8. DOC-013: docs/22 + docs/27 cross-domain stale (rolls up DP-014 + DP-015)
+
+- **Severity:** P2
+- **Stream:** B
+- **Track:** A
+- **Role:** docs-guardian
+- **Estimated diff:** ~40-60 LOC (rolls up #7 + sister doc)
+- **Evidence:** see DP-014, DP-015 evidence
+- **Status:** blocked: prefer to do DP-015 first (#7) and roll up.
+
+### 9. DOC-019: Create docs/ROLLBACK.md (P1, but small + standalone)
+
+- **Severity:** P1
+- **Stream:** B
+- **Track:** A
+- **Role:** docs-guardian
+- **Estimated diff:** ~150-250 LOC (new file, mostly procedure)
+- **Evidence:** `find docs/ -iname "ROLLBACK*"` empty; cross-ref DP-018
+- **Status:** unblocked
+- **Notes:** P1 but isolated docs-only task. Use existing `docs/PILOT-OPERATIONS.md` as template (rollback section is sketchy, DOC-021 backlog). Tech Lead may need to ask Sebastián clarifying questions about exact PROD rollback steps (escalate to QFH if unclear).
+
+### 10. DOC-020: Create docs/SECRETS-ROTATION.md (P1, but small + standalone)
+
+- **Severity:** P1
+- **Stream:** B
+- **Track:** A
+- **Role:** docs-guardian + security-engineer collaboration
+- **Estimated diff:** ~150-300 LOC
+- **Evidence:** `find docs/ -iname "*ROTATION*" -o -iname "*SECRETS*"` empty; cross-ref SEC-017, DP-019
+- **Status:** unblocked
+- **Notes:** Inventory secrets per `docs/22-technical-architecture.md` env table + Apps Script Script Properties + Vercel envs. Document rotation procedure for each. Order matters: this unblocks #5 SEC-013.
+
+### 11. (P2) FF-010 / FF-011: SPEC-only → runtime (deferred)
+
+- **Severity:** P2 (each)
+- **Stream:** A (Apps Script automation)
+- **Track:** **B** (NOT A — these are full-feature implementations of C-05/C-06 SPECs, requires plan)
+- **Status:** blocked: Track B, needs plan in `plans/BACKLOG/c05-c06-runtime.md` first.
+- **Notes:** Listed here for awareness — Tech Lead must NOT pick these as Track A. They go into BACKLOG plans.
+
+---
+
+## Backlog (not yet classified or out of Track A scope)
+
+- **CC-QA-002 (P0):** E2E pipeline not testable. Out of scope for Track A — needs FF-001/FF-002 fixes first.
+- **SEC-001 (P0):** Sheet IDs rotation — requires Sebastián manual rotation in Google + Vercel. Track A agent can prep runbook (rolled into DOC-020) but cannot rotate.
+- **CC-QA-004 (P1):** Preview store loss regression test — Track A candidate but needs Phase 2 QA Engineer SKILL.
+- **CC-QA-005 (P1):** processPreviewQueue concurrency test — Track A candidate, Phase 2.
+- All P3: deferred until queue gets thin.
+
+---
+
+## How Tech Lead picks next task
+
+1. Read this file from top.
+2. Skip entries with `Status: blocked: ...`.
+3. Pick first unblocked.
+4. If all blocked → pause queue (set Status: PAUSED), escalate aggregate to QFH.
