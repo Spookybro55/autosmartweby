@@ -51,5 +51,6 @@
 | CS3 | C | Definovat idempotency keys, retry politiku a de... | Claude | done | 2026-04-05 | docs/24-automation-workflows.md, docs/20-current-state.md | *(zadne code changes)* |
 | audit-reconciliation-2026-04 | B | Audit reconciliation pass — verify all FINDINGS... | Stream B | code-complete | 2026-04-29 | docs/30-task-records/audit-reconciliation-2026-04.md, docs/audits/FINDINGS.md, docs/audits/12-summary.md, docs/11-change-log.md, docs/29-task-registry.md | docs |
 | cleanup-and-sec-016 | B | Cleanup junk files + audit-doc reconciliation f... | Stream B | code-complete | 2026-04-29 | docs/30-task-records/cleanup-and-sec-016.md, docs/audits/FINDINGS.md, docs/audits/12-summary.md, docs/11-change-log.md, docs/29-task-registry.md | `0)`, `1)`, `5`, `crm-frontend, docs |
+| email-cleanup-eliminate-legacy | B | Eliminate all 4 legacy assignee email forms — c... | Stream B | code-complete | 2026-04-29 | README.md, docs/22-technical-architecture.md, docs/PHASE2-RECON.md, docs/PILOT-SMOKE-TEST.md, docs/PILOT-OPERATIONS.md, docs/PILOT-INCIDENT-RESPONSE.md, docs/PILOT-ENV-VARS.md, docs/30-task-records/B-13.md, docs/30-task-records/B-11.md, docs/30-task-records/email-cleanup-eliminate-legacy.md, docs/11-change-log.md, docs/29-task-registry.md | apps-script, crm-frontend, scripts |
 
-*43 tasks total.*
+*44 tasks total.*

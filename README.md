@@ -6,7 +6,7 @@ Jednostránkový rozcestník pro 4 audience (operátor, dev, ops, owner).
 > **Status:** 🟢 PHASE 2 LAUNCHED (preview pipeline + CRM email send) · `git tag phase2-v1.0`
 > **Pilot v1.0:** 4 internal users since 2026-04-25 · `git tag pilot-v1.0`
 > **Last hotfix:** brief field aliases (#73) — 2026-04-27
-> **Owner:** [sfridrich@unipong.cz](mailto:sfridrich@unipong.cz)
+> **Owner:** [s.fridrich@autosmartweb.cz](mailto:s.fridrich@autosmartweb.cz)
 > **Repo:** github.com/Spookybro55/autosmartweby (private)
 
 ---
@@ -35,9 +35,9 @@ Scraper (firmy.cz) ──► Sheet "_raw_import" ──► Apps Script (processR
               (Next.js)                        (assignLead, updateLead)
 ```
 
-- **Sheet & Apps Script** běží pod účtem `sfridrich@unipong.cz` (Workspace `unipong.cz`).
+- **Sheet & Apps Script** běží pod deployujícím Google účtem owner-a (Workspace).
 - **Frontend** je Vercel projekt; auth = email allowlist + sdílené heslo (4 pilot uživatelé).
-- **Reply-To** každého odeslaného mailu se odvíjí od `assignee_email` na leadu (mapa v [apps-script/Config.gs](apps-script/Config.gs) `ASSIGNEE_NAMES`); fallback `sebastian@autosmartweb.cz`.
+- **Reply-To** každého odeslaného mailu se odvíjí od `assignee_email` na leadu (mapa v [apps-script/Config.gs](apps-script/Config.gs) `ASSIGNEE_NAMES`); fallback `s.fridrich@autosmartweb.cz`.
 - **"Mé leady"** je default frontendový filtr (current user session email vs `assignee_email`).
 
 Detail viz [docs/22-technical-architecture.md](docs/22-technical-architecture.md) a [docs/24-automation-workflows.md](docs/24-automation-workflows.md).

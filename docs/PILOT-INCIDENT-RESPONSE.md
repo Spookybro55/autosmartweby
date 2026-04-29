@@ -1,7 +1,7 @@
 # PILOT-INCIDENT-RESPONSE
 
 > **Audience:** Sebastian + cokoliv kdo zachytí incident.
-> **Eskalace:** [sfridrich@unipong.cz](mailto:sfridrich@unipong.cz) (volat kdykoliv).
+> **Eskalace:** [s.fridrich@autosmartweb.cz](mailto:s.fridrich@autosmartweb.cz) (volat kdykoliv).
 > **Scope:** 3 nejpravděpodobnější pilot-grade incidenty. Konkrétní akce, ne procesní popisy.
 
 ---
@@ -42,12 +42,12 @@
 **Symptom:** Operátor po Send zjistí: "to nemělo jít", nebo přišel reply od cizí osoby.
 
 **Akce (po pořadí, časově citlivé):**
-1. **Gmail Undo Send window = 30 sekund.** Pokud jsi v Gmailu (`sfridrich@unipong.cz`) v okně "Email sent ✓" → klik **Undo** ihned. Email se zachytí v Drafts, nedoručí se.
+1. **Gmail Undo Send window = 30 sekund.** Pokud jsi v Gmailu (deployer Google účtu) v okně "Email sent ✓" → klik **Undo** ihned. Email se zachytí v Drafts, nedoručí se.
 2. Pokud > 30 s ale ještě nejsou žádné replies: otevři Gmail → Sent → najdi email → otevři. Pokud klient používá Gmail/Outlook a email se ještě nestáhl, recall je nemožný; ale **odešli omluvný email IHNED** se subject `Re: <původní subject>` + krátké:
    > Dobrý den, omlouvám se, předchozí email byl odeslán omylem. Prosím ignorujte. — [tvé jméno]
 3. Apps Script Sheet metadata: v Sheet `LEADS` najdi řádek (přes `last_email_sent_at` recent), nastav `email_sync_status = ERROR` a do `email_last_error` napiš "Sent by mistake YYYY-MM-DD, follow-up sent at HH:MM". Tím lead nepoběží do následných automatik dokud manuálně neresetuješ.
 4. Pokud byl email **personální / GDPR-citlivý** chybný (špatná osoba dostala data jiné firmy):
-   - Eskalace na sfridrich@unipong.cz okamžitě (telefon, ne email).
+   - Eskalace na s.fridrich@autosmartweb.cz okamžitě (telefon, ne email).
    - Záznam do `docs/audits/FINDINGS.md` jako `INCIDENT-<datum>` s impactem.
    - Klient kontakt: omluva + smazání jejich kopie + nabídka follow-up call.
 5. **Root cause:** zkontroluj jestli sendability gate (`assertSendability_` v `OutboundEmail.gs`) byl aktivní — pokud `review_decision` byl `APPROVE` ale obsah byl chybný, problém je v review fázi (operator chyba), ne v gate. Pokud gate selhal pustit REJECT → **kritický bug**, otevři P0 issue.
@@ -62,9 +62,9 @@
 |---|---|---|
 | Frontend down | Vercel Promote previous to Production | Sebastian |
 | Apps Script down | Apps Script Promote previous to active | Sebastian |
-| Data corrupt | Stop triggers + backup + restore from Version history | Sebastian + sfridrich |
+| Data corrupt | Stop triggers + backup + restore from Version history | Sebastian (operátor) |
 | Email mistake (< 30 s) | Gmail Undo Send | Whoever clicked Send |
-| Email mistake (> 30 s) | Apology reply + Sheet metadata + escalate if PII | Sebastian + sfridrich |
-| Anything else | Volat sfridrich@unipong.cz | Whoever |
+| Email mistake (> 30 s) | Apology reply + Sheet metadata + escalate if PII | Sebastian (operátor) |
+| Anything else | Volat s.fridrich@autosmartweb.cz | Whoever |
 
-Velikost pilotu (4 uživatelé, 1 týden) znamená, že incident pravděpodobnost je nízká, ale **detekce je manuální** — nejsou alerts. Spoléháme na operátorský feedback. Pokud operátor něco vidí divného, **lepší zavolat sfridrich než ignorovat**.
+Velikost pilotu (4 uživatelé, 1 týden) znamená, že incident pravděpodobnost je nízká, ale **detekce je manuální** — nejsou alerts. Spoléháme na operátorský feedback. Pokud operátor něco vidí divného, **lepší zavolat než ignorovat**.

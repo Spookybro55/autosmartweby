@@ -689,7 +689,7 @@ export function LeadDetailDrawer({
                   const senderEmail =
                     lead.assigneeEmail && ASSIGNEE_NAMES[lead.assigneeEmail]
                       ? lead.assigneeEmail
-                      : "sebastian@autosmartweb.cz";
+                      : "s.fridrich@autosmartweb.cz";
 
                   // Disable reasons (most-specific first)
                   let disabledReason: string | null = null;

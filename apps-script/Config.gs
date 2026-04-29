@@ -398,26 +398,6 @@ var EMERGENCY_SEGMENTS = [
   'havarijni','zamecnik','locksmith','nonstop'
 ];
 
-/* ── B-13 T4: legacy assignee email migration map ───────────
- * Maps historical assignee_email values found in LEADS rows
- * (and ASSIGNEE_NAMES at various points in time) to their
- * canonical autosmartweb.cz domain replacement.
- *
- * Used by migrateLegacyAssigneeEmails_ (one-shot menu run)
- * to rewrite assignee_email cells before ALLOWED_USERS
- * membership tightens to the 3 new keys only.
- *
- * Add new mappings here if more historical emails surface.
- * Empty/null assignees are NEVER touched (None means
- * unassigned, valid state).
- * ──────────────────────────────────────────────────────────── */
-var LEGACY_ASSIGNEE_EMAIL_MAP = {
-  'sfridrich@unipong.cz':         's.fridrich@autosmartweb.cz',
-  'sebastian@autosmartweb.cz':    's.fridrich@autosmartweb.cz',
-  'tomas@autosmartweb.cz':        't.maixner@autosmartweb.cz',
-  'jan.bezemek@autosmartweb.cz':  'j.bezemek@autosmartweb.cz'
-};
-
 /* ── B-13 T4: extended assignee profiles ────────────────────
  * ASSIGNEE_PROFILES is the new canonical structure with full
  * contact info per assignee. Used by composeDraft_ to populate
@@ -500,7 +480,7 @@ function getAssigneeProfile_(assigneeEmail) {
   return DEFAULT_ASSIGNEE_PROFILE;
 }
 
-var DEFAULT_REPLY_TO_EMAIL = 'sebastian@autosmartweb.cz';
+var DEFAULT_REPLY_TO_EMAIL = 's.fridrich@autosmartweb.cz';
 var DEFAULT_REPLY_TO_NAME  = 'Sebastián Fridrich';
 
 /* ── KROK 5: allowlist of pilot users that may own a lead ─────

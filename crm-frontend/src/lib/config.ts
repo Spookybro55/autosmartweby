@@ -78,10 +78,9 @@ export const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || '').split(',').map(
 // Keep keys + display names in sync between this file and apps-script/Config.gs ASSIGNEE_NAMES.
 // Diakritika (Sebastián, Tomáš) zachována — soubor je UTF-8.
 export const ASSIGNEE_NAMES: Record<string, string> = {
-  'sfridrich@unipong.cz':       'Sebastián Fridrich',
-  'sebastian@autosmartweb.cz':  'Sebastián Fridrich',
-  'tomas@autosmartweb.cz':      'Tomáš Maixner',
-  'jan.bezemek@autosmartweb.cz':'Jan Bezemek',
+  's.fridrich@autosmartweb.cz': 'Sebastián Fridrich',
+  't.maixner@autosmartweb.cz':  'Tomáš Maixner',
+  'j.bezemek@autosmartweb.cz':  'Jan Bezemek',
 };
 
 export const ALLOWED_USERS = Object.keys(ASSIGNEE_NAMES);
