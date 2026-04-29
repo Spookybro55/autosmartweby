@@ -90,6 +90,16 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
+  // Admin routes (Phase 3 agent team dashboard) require OWNER_EMAIL.
+  // Single-user gate — Sebastián only. Redirect to dashboard for others.
+  if (pathname.startsWith('/admin/')) {
+    const ownerEmail = process.env.OWNER_EMAIL?.toLowerCase().trim();
+    const userEmail = payload.email?.toLowerCase().trim();
+    if (!ownerEmail || userEmail !== ownerEmail) {
+      return NextResponse.redirect(new URL('/dashboard', request.url));
+    }
+  }
+
   return NextResponse.next();
 }
 
