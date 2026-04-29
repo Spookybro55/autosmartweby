@@ -26,6 +26,7 @@ function parseTaskRecord(filePath) {
   const status = get('Status');
   const date = get('Date');
   const stream = get('Stream');
+  const agentRole = get('Agent Role'); // optional — added in Phase 1; legacy records return ''
 
   // Extract affected docs
   const docsUpdated = [];
@@ -55,7 +56,7 @@ function parseTaskRecord(filePath) {
     }
   }
 
-  return { taskId, title, owner, status, date, stream, docsUpdated, codeAreas };
+  return { taskId, title, owner, status, date, stream, agentRole, docsUpdated, codeAreas };
 }
 
 const files = readdirSync(RECORDS_DIR)
@@ -74,19 +75,20 @@ const lines = [
   '',
   '---',
   '',
-  '| Task ID | Stream | Title | Owner | Status | Date | Affected Docs | Code Areas |',
-  '|---------|--------|-------|-------|--------|------|---------------|------------|',
+  '| Task ID | Stream | Title | Owner | Role | Status | Date | Affected Docs | Code Areas |',
+  '|---------|--------|-------|-------|------|--------|------|---------------|------------|',
 ];
 
 for (const r of records) {
   const docs = r.docsUpdated.length > 0 ? r.docsUpdated.join(', ') : '-';
   const code = r.codeAreas.length > 0 ? r.codeAreas.join(', ') : '-';
   const title = r.title.length > 50 ? r.title.substring(0, 47) + '...' : r.title;
-  lines.push(`| ${r.taskId} | ${r.stream} | ${title} | ${r.owner} | ${r.status} | ${r.date} | ${docs} | ${code} |`);
+  const role = r.agentRole && r.agentRole.length > 0 ? r.agentRole : '-';
+  lines.push(`| ${r.taskId} | ${r.stream} | ${title} | ${r.owner} | ${role} | ${r.status} | ${r.date} | ${docs} | ${code} |`);
 }
 
 if (records.length === 0) {
-  lines.push('| - | - | *No task records yet* | - | - | - | - | - |');
+  lines.push('| - | - | *No task records yet* | - | - | - | - | - | - |');
 }
 
 lines.push('');
