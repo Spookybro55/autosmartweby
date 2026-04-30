@@ -78,3 +78,43 @@
 ### 2026-04-30 11:21 | docs-guardian | DP-001 | dod-check | OK
 - **Notes:** `node scripts/docs/check-doc-sync.mjs` → 43 pass / 0 warn / 0 fail. `node scripts/agent/validate-task-record.mjs --pr-branch agent/docs-guardian/DP-001-prod-sheet-id-test-fixture` → PASSED.
 - **Refs:** `docs/agents/QUEUE.md` (DP-001 removed from ready table by triage regen).
+
+### 2026-04-30 14:00 | tech-lead | DP-001 | complete | OK
+- **Notes:** PR #96 squash-merged 2026-04-30T02:17:17Z by Spookybro55. Merge `4a42e7b`. Local + remote branch deleted. Stop conditions §6 verified clear (1 open PR, 0 cascade, 4 agent PRs in 30d). Bundled here per QFH-0005 (d.2) — first time this policy is exercised in real workflow.
+- **Refs:** PR #96 → `4a42e7b`.
+
+### 2026-04-30 14:02 | tech-lead | agent-team-frontend-wiring-v1 | complete | OK
+- **Notes:** PR #97 (plan activation, doc-only) squash-merged by Spookybro55. Merge `eeb657f`. Branch `chore/activate-frontend-wiring-plan` deleted local + remote. Plan now lives in `docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md`. Bundled closure entry per QFH-0005 (d.2). Track B execution unblocked.
+- **Refs:** PR #97 → `eeb657f`, `docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md`.
+
+### 2026-04-30 14:04 | tech-lead | frontend-wiring-task-1 | claim | OK
+- **Notes:** First task of plan `agent-team-frontend-wiring-v1`. Owner-instructed start ("Začni T1"). Standard Track A workflow nested inside Track B plan envelope.
+- **Refs:** `docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md` § Tasks — Task 1.
+
+### 2026-04-30 14:05 | tech-lead | frontend-wiring-task-1 | classify | OK
+- **Notes:** Stream B (frontend infrastructure — `crm-frontend/src/components/layout/sidebar.tsx`). Track B (plan-driven). Role: bug-hunter (UI binding code, not security-sensitive). Branch convention `agent/bug-hunter/frontend-wiring-task-1` per plan instruction.
+- **Refs:** plan task table.
+
+### 2026-04-30 14:08 | tech-lead | frontend-wiring-task-1 | dispatch | OK
+- **Notes:** Re-read `crm-frontend/src/components/layout/sidebar.tsx` full (258 LOC at HEAD). Re-read `crm-frontend/src/lib/config.ts:74-99` for `ASSIGNEE_NAMES` + `formatAssignee`. **Discovery:** plan referenced `getAssigneeDisplayName` but actual function is `formatAssignee`, with a `"Neznámý: <email>"` fallback that's incompatible with the plan's 2-row orphan UX. Decision: import `ASSIGNEE_NAMES` map directly + implement orphan logic inline per plan's Decisions table. Documented in task record `## Contracts Changed`.
+- **Refs:** `crm-frontend/src/lib/config.ts:80,94` (ASSIGNEE_NAMES + formatAssignee), `crm-frontend/src/components/layout/sidebar.tsx:236-251` (the section being replaced).
+
+### 2026-04-30 14:18 | bug-hunter | frontend-wiring-task-1 | fix | OK
+- **Notes:** Three edits to `sidebar.tsx`: (1) added `Loader2` to lucide-react imports + `ASSIGNEE_NAMES` from `@/lib/config`; (2) added file-private `deriveUserDisplay(email)` helper above `Sidebar()` — covers known + orphan + edge-case empty-local-part; (3) destructured `loading: userLoading` from useCurrentUser; (4) computed `userDisplay = currentEmail ? deriveUserDisplay(currentEmail) : null`; (5) replaced JSX user section with conditional `{userLoading ? skeleton : userDisplay ? avatar+name+email : null}` wrapped in `{(userLoading || userDisplay) && ...}`. Net +57 / -16 LOC.
+- **Refs:** `crm-frontend/src/components/layout/sidebar.tsx`.
+
+### 2026-04-30 14:22 | bug-hunter | frontend-wiring-task-1 | test | OK
+- **Notes:** `npx tsc --noEmit` clean. `npm run build` Compiled successfully (all routes built including `/dashboard`, `/admin/dev-team`, middleware). `npx eslint src/components/layout/sidebar.tsx` 0 errors / 0 warnings. Adjacent regression: `npm run test:b04` 16/16, `npm run test:b06` 105/105. No tests in repo specifically target sidebar render — Playwright/RTL out of scope per plan.
+- **Refs:** all green.
+
+### 2026-04-30 14:25 | bug-hunter | frontend-wiring-task-1 | self-review | OK
+- **Notes:** Re-read full diff fresh. Checks: (a) `JN`, `Jan Novák`, `Sales Manager` strings gone from `sidebar.tsx` — confirmed grep 0 hits; (b) `useCurrentUser` contract unchanged (still imports `{ email, loading }`); (c) `isOwner` derivation untouched at lines 102-104; (d) collapsed-state class behavior preserved (skeleton + avatar both honor `lg:hidden` / `lg:px-0` patterns); (e) no regression in nav rendering — `navItems` derivation unchanged; (f) ThemeToggle untouched; (g) `Loader2` icon import added cleanly; (h) `ASSIGNEE_NAMES` import is correct path `@/lib/config`. 0 issues.
+- **Refs:** `git diff main`.
+
+### 2026-04-30 14:27 | tech-lead | frontend-wiring-task-1 | cross-review | OK
+- **Notes:** Tech Lead re-read full diff. All 4 sub-DoDs verified: Code Done (tsc + build + eslint clean, no regressions). Documentation Done (task record full + RUN-LOG bundled). Test Done (b04 16/16, b06 105/105, check-doc-sync 43/0/0, validate-task-record PASSED). Agent Done (diff small, branch convention OK, no `.clasp.json` / `.env*` / archive change, plan checkbox correctly NOT ticked here per Track B post-merge convention). Plan-vs-actual function name discrepancy resolved + documented. PR ready.
+- **Refs:** `docs/14-definition-of-done.md` §1-4.
+
+### 2026-04-30 14:28 | bug-hunter | frontend-wiring-task-1 | dod-check | OK
+- **Notes:** All gates green: `check-doc-sync` 43/0/0, `validate-task-record --pr-branch agent/bug-hunter/frontend-wiring-task-1` PASSED, `tsc` clean, `build` OK, `eslint` clean, b04 16/16, b06 105/105. Diff staged.
+- **Refs:** ready for owner review.
