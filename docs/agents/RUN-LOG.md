@@ -270,3 +270,39 @@
 ### 2026-04-30 22:03 | docs-guardian | make-activation-task-1 | dod-check | OK
 - **Notes:** All gates green: `check-doc-sync` 0 fail, `validate-task-record --pr-branch agent/docs-guardian/make-activation-task-1` PASSED, grep clean, all 5 JSON.parse OK. Diff staged.
 - **Refs:** ready for owner review.
+
+### 2026-04-30 22:30 | tech-lead | make-activation-task-1 | complete | OK
+- **Notes:** PR #105 merged 2026-04-30, commit `1cd92bf`. Initial CI fail on `validate-agent-pr` (Track A 500-LOC limit hit by 5568 insertions of mostly-verbatim blueprint JSON); resolved via `[size-override]` flag in PR body + empty-commit re-trigger. Plan `agent-team-make-activation-v1` PR #104 also merged (`b6f858e`). Bundled into T2.
+- **Refs:** PR #105, #104.
+
+### 2026-04-30 22:32 | tech-lead | make-activation-task-2 | claim | OK
+- **Notes:** Second task of plan `agent-team-make-activation-v1`. Owner confirmation "mergnuto" (both #104 plan + #105 T1). Standard Track A workflow nested inside Track B plan envelope.
+- **Refs:** plan task table — Task 2.
+
+### 2026-04-30 22:32 | tech-lead | make-activation-task-2 | classify | OK
+- **Notes:** Stream B (operator docs for Make scenarios). Track B (plan-driven). Role: docs-guardian. Branch `agent/docs-guardian/make-activation-task-2` per CLAUDE.md.
+- **Refs:** plan task table — Task 2 role field.
+
+### 2026-04-30 22:33 | tech-lead | make-activation-task-2 | dispatch | OK
+- **Notes:** Read existing IMPORT-GUIDE.md (235 lines) — references deleted `0{1..5}-*.json` filenames + claims wrong module counts (e.g. "02-pr-review-reminder | 4 modules"; new export has 2). Identified the 5 sections needing rewrite: file inventory, architecture table, prereqs, import procedure, scenario-specific completion. Decided to rewrite end-to-end rather than patch-edit (cleaner diff for reviewers, single source of truth).
+- **Refs:** `docs/agents/make/IMPORT-GUIDE.md` (pre-rewrite).
+
+### 2026-04-30 22:40 | docs-guardian | make-activation-task-2 | fix | OK
+- **Notes:** Wrote new IMPORT-GUIDE.md (~280 lines). Key additions vs prior: (a) § "Post-export sanitization recipe" with copy-paste Node script + verification grep — the missing piece that would have prevented the 2026-04-30 token-leak incident; (b) § "Maintenance pattern" formalizing the "repo blueprints = `TODO_*` placeholders, Make UI = real tokens" rule from `feedback_make_blueprints_token_placeholders.md`; (c) Push-Protection troubleshooting entry; (d) ntfy topic prereq explicitly forbids predictable names like `123456789`. Also: ticked T1 checkbox in plan + corrected branch convention `agent-team/...` → `agent/{role}/...` (5 occurrences).
+- **Refs:** `docs/agents/make/IMPORT-GUIDE.md`, `docs/agents/plans/ACTIVE/agent-team-make-activation-v1.md`.
+
+### 2026-04-30 22:42 | docs-guardian | make-activation-task-2 | test | OK
+- **Notes:** `node scripts/docs/check-doc-sync.mjs` 43 pass / 0 fail. `validate-task-record --pr-branch agent/docs-guardian/make-activation-task-2` PASSED. Token grep on `docs/agents/make/` returns 0. Manual cold-read of rewrite confirms: would-have-prevented test passes (prereqs → import → 3-placeholder swap → schedule → activate → smoke flow with no dangling refs).
+- **Refs:** all green.
+
+### 2026-04-30 22:43 | docs-guardian | make-activation-task-2 | self-review | OK
+- **Notes:** Re-read full diff fresh. Checks: (a) no broken references to old `0{1..5}-*.json`; (b) module counts in architecture table (1, 2, 9, 2, 2) match `flow.length` of the 5 committed blueprints; (c) post-export recipe uses `String.split + join` pattern matching what T1 used (proven approach); (d) ntfy topic prereq is explicit about predictability + non-commit; (e) plan T1 checkbox correctly references PR #105 + commit `1cd92bf`; (f) branch convention corrected in 5 places. 0 issues.
+- **Refs:** `git diff main`.
+
+### 2026-04-30 22:43 | tech-lead | make-activation-task-2 | cross-review | OK
+- **Notes:** Tech Lead read full diff. All 4 sub-DoDs verified. Documentation Done (IMPORT-GUIDE rewrite + plan tick + RUN-LOG bundling). Test Done (check-doc-sync 0 fail, validate-task-record PASSED, grep clean). Code Done (no code; docs only). Agent Done (small diff in editing-by-line terms; no `.clasp.json` / `.env*` / archive change; canonical branch convention). PR ready.
+- **Refs:** `docs/14-definition-of-done.md` §1-4.
+
+### 2026-04-30 22:43 | docs-guardian | make-activation-task-2 | dod-check | OK
+- **Notes:** All gates green. Diff staged.
+- **Refs:** ready for owner review.

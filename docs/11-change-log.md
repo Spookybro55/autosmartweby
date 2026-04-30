@@ -135,6 +135,14 @@ Branch convention adjusted from plan-prescribed `agent-team/make-activation-task
 - **Code:** `docs/agents/make/Agent Team — Daily Triage.blueprint.json` (new (committed)), `docs/agents/make/Agent Team — PR Review Reminder.blueprint.json` (new (committed)), `docs/agents/make/Agent Team — Backpressure Check.blueprint.json` (new (committed)), `docs/agents/make/Agent Team — Weekly Digest.blueprint.json` (new (committed)), `docs/agents/make/Agent Team — Learning Loop.blueprint.json` (new (committed)), `docs/agents/make/01-daily-triage.json` (deleted), `docs/agents/make/02-pr-review-reminder.json` (deleted), `docs/agents/make/03-learning-loop.json` (deleted), `docs/agents/make/04-backpressure-check.json` (deleted), `docs/agents/make/05-weekly-digest.json` (deleted)
 - **Docs:** `docs/30-task-records/make-activation-task-1.md`, `docs/agents/RUN-LOG.md`, `docs/11-change-log.md`, `docs/29-task-registry.md`, `docs/agents/plans/ACTIVE/agent-team-make-activation-v1.md`
 
+### [B/make-activation-task-2] Rewrite `docs/agents/make/IMPORT-GUIDE.md` to match new blueprints + add post-export sanitization recipe — CODE-COMPLETE
+- **Scope:** T2 of plan `agent-team-make-activation-v1`. After T1 (PR #105) committed the 5 sanitized blueprints + dropped the 5 old hand-written templates, the existing `IMPORT-GUIDE.md` now references files that no longer exist (`0{1..5}-*.json`) and module counts that don't match the new exports (e.g. it claimed PR Review Reminder had 4 modules; the new blueprint has 2 thanks to GitHub Search API server-side filtering).
+
+This task rewrites the IMPORT-GUIDE end-to-end to match the new reality, adds a post-export sanitization recipe (the missing piece that would have prevented the 2026-04-30 token-leak incident), formalizes the "Maintenance pattern" section pointing at the feedback memory record, and ticks T1's checkbox in the plan file (post-merge per Track B convention) with a note about the branch-convention adjustment.
+- **Owner:** Stream B
+- **Code:** `docs/agents/make/IMPORT-GUIDE.md` (rewritten), `docs/agents/plans/ACTIVE/agent-team-make-activation-v1.md` (modified)
+- **Docs:** `docs/agents/make/IMPORT-GUIDE.md`, `docs/agents/plans/ACTIVE/agent-team-make-activation-v1.md`, `docs/30-task-records/make-activation-task-2.md`, `docs/agents/RUN-LOG.md`, `docs/11-change-log.md`, `docs/29-task-registry.md`
+
 ## 2026-04-29
 
 ### [B/AGENT-TEAM-FIX-MAKE-BLUEPRINTS] Rewrite 5 Make blueprints in valid format + Playwright verifier (resolves QFH-0004) — CODE-COMPLETE

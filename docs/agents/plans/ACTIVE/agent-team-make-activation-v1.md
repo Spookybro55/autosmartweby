@@ -71,13 +71,13 @@ What ships here is therefore a **commit + verify + close-out plan, not an integr
 
 Each task ships as **its own PR** following Track A workflow nested in Track B (claim → classify → dispatch → fix → test → self-review → cross-review → dod-check → pr-open). T1, T2, T6 are agent-driven (no real-world Make UI work needed). T3, T4, T5 are owner-driven (require Make UI / GitHub UI / mobile ntfy app access — agent has neither).
 
-**Branch convention (consistent with prior plan):** `agent-team/make-activation-task-N`
+**Branch convention:** `agent/{role}/make-activation-task-N` per `CLAUDE.md` § Branch naming. (Plan v1 originally proposed `agent-team/...` but T1 hit branch-protection rules and was adjusted; this plan now uses the canonical `agent/{role}/...` form for all subsequent tasks.)
 
 ### Task 1 — Sanitize + commit 5 blueprints, drop old 5
 
-- [ ] **Status:** todo
+- [x] **Status:** complete (PR #105, merged 2026-04-30, commit `1cd92bf`)
 - **Role:** docs-guardian
-- **Branch:** `agent-team/make-activation-task-1`
+- **Branch:** `agent/docs-guardian/make-activation-task-1` (branch convention adjusted from plan-prescribed `agent-team/...` to `agent/{role}/...` per `CLAUDE.md` § Branch naming)
 - **Depends on:** none
 - **Estimated LOC:** medium-ish in additions (5 blueprints, total ~210 KB, mostly preserved verbatim) + 5 deletions of old files. Net diff is in the "lots of new files" category, but **modifications to existing files are 15 surgical token replacements**. Track B has no LOC limit; this is documentation/templates, not code.
 - **Files:**
@@ -109,7 +109,7 @@ Each task ships as **its own PR** following Track A workflow nested in Track B (
 
 - [ ] **Status:** todo
 - **Role:** docs-guardian
-- **Branch:** `agent-team/make-activation-task-2`
+- **Branch:** `agent/docs-guardian/make-activation-task-2`
 - **Depends on:** T1 merged (so the IMPORT-GUIDE references files that actually exist on `main` post-T1)
 - **Estimated LOC:** ~150 — full rewrite of `docs/agents/make/IMPORT-GUIDE.md`.
 - **Files:** `docs/agents/make/IMPORT-GUIDE.md`
@@ -128,7 +128,7 @@ Each task ships as **its own PR** following Track A workflow nested in Track B (
 
 - [ ] **Status:** todo
 - **Role:** human (Sebastián) + light agent assist
-- **Branch:** `agent-team/make-activation-task-3` (only used if any docs need updating; if no docs change, the cleanup is invisible to git)
+- **Branch:** `agent/docs-guardian/make-activation-task-3` (only used if any docs need updating; if no docs change, the cleanup is invisible to git)
 - **Depends on:** none (independent of T1/T2; can run in parallel)
 - **Files:** likely none in repo; this is a GitHub repo Settings change. If we discover something noteworthy (e.g. one of the webhooks is for a non-Make destination), record it in `RUN-LOG.md` only.
 - **Change (manual, owner-driven):**
@@ -179,7 +179,7 @@ Each task ships as **its own PR** following Track A workflow nested in Track B (
 
 - [ ] **Status:** todo
 - **Role:** docs-guardian
-- **Branch:** `agent-team/make-activation-task-6`
+- **Branch:** `agent/docs-guardian/make-activation-task-6`
 - **Depends on:** T1, T2, T3, T4, T5 all complete (this task documents that the activation loop is operational)
 - **Files:**
   - `docs/agents/SETUP-CHECKLIST.md` — tick rows 1, 2, 8, 9.
@@ -196,7 +196,7 @@ Each task ships as **its own PR** following Track A workflow nested in Track B (
 
 ## Branch + commit convention
 
-- **Per-task branches:** `agent-team/make-activation-task-N` (consistent with prior plan's `agent-team/...` and `agent/{role}/...` conventions; this plan uses the team-prefix because some tasks are owner-driven, not strictly role-tagged).
+- **Per-task branches:** `agent/{role}/make-activation-task-N` per `CLAUDE.md` § Branch naming. Owner-driven tasks (T3, T4, T5) don't ship branches at all — they're Make-UI / GitHub-UI work that produces no git diff (T3 is webhook cleanup; T4 is Make Run-Once smoke; T5 ships a separate test PR on branch `agent-team/learning-loop-smoke` outside the per-task numbering).
 - **Commit messages** per `docs/agents/ARCHITECTURE.md` §9 — `{type}(make-activation-task-N): summary` with `[role]`, `[track]: B`, `[plan]: agent-team-make-activation-v1` trailers.
 - **Plan activation PR (this PR):** `chore(plans): activate agent-team-make-activation-v1` on branch `agent-team/plan-make-activation-v1`.
 
