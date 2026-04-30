@@ -125,6 +125,16 @@ This task **does not** modify the data-loading `useEffect`, the stats/leads fetc
 - **Code:** `crm-frontend/src/app/dashboard/page.tsx` (modified)
 - **Docs:** `docs/30-task-records/frontend-wiring-task-4.md`, `docs/agents/RUN-LOG.md`, `docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md`, `docs/11-change-log.md`, `docs/29-task-registry.md`
 
+### [B/make-activation-task-1] Sanitize 5 Make blueprint exports + drop old hand-written templates — CODE-COMPLETE
+- **Scope:** T1 of plan `agent-team-make-activation-v1` (`docs/agents/plans/ACTIVE/agent-team-make-activation-v1.md`, currently in PR #104). Sanitizes the 5 Make blueprint exports owner created 2026-04-30 (`docs/agents/make/Agent Team — *.blueprint.json`, currently untracked) by replacing all literal-token-shaped strings with `TODO_*` placeholders, and removes the prior hand-written 5 templates (`0{1..5}-*.json`) that owner judged useless.
+
+Real production tokens already live in Make UI (per owner statement 2026-04-30); the literal strings in the exports were live secrets at export time. Owner has revoked + regenerated all 3 (GitHub PAT, Anthropic API key, ntfy topic), so the strings in the working tree are post-revocation placeholders, but they visually look like live secrets — and per `feedback_make_blueprints_token_placeholders.md` the right pattern is `TODO_*` placeholders in repo, real tokens in Make UI only.
+
+Branch convention adjusted from plan-prescribed `agent-team/make-activation-task-N` to `agent/{role}/make-activation-task-N` per `CLAUDE.md` § Branch naming. Plan file's branch convention will be amended when the plan PR (#104) lands; T1 task ships with the corrected convention.
+- **Owner:** Stream B
+- **Code:** `docs/agents/make/Agent Team — Daily Triage.blueprint.json` (new (committed)), `docs/agents/make/Agent Team — PR Review Reminder.blueprint.json` (new (committed)), `docs/agents/make/Agent Team — Backpressure Check.blueprint.json` (new (committed)), `docs/agents/make/Agent Team — Weekly Digest.blueprint.json` (new (committed)), `docs/agents/make/Agent Team — Learning Loop.blueprint.json` (new (committed)), `docs/agents/make/01-daily-triage.json` (deleted), `docs/agents/make/02-pr-review-reminder.json` (deleted), `docs/agents/make/03-learning-loop.json` (deleted), `docs/agents/make/04-backpressure-check.json` (deleted), `docs/agents/make/05-weekly-digest.json` (deleted)
+- **Docs:** `docs/30-task-records/make-activation-task-1.md`, `docs/agents/RUN-LOG.md`, `docs/11-change-log.md`, `docs/29-task-registry.md`, `docs/agents/plans/ACTIVE/agent-team-make-activation-v1.md`
+
 ## 2026-04-29
 
 ### [B/AGENT-TEAM-FIX-MAKE-BLUEPRINTS] Rewrite 5 Make blueprints in valid format + Playwright verifier (resolves QFH-0004) — CODE-COMPLETE

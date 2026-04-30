@@ -234,3 +234,39 @@
 ### 2026-04-30 18:40 | tech-lead | agent-team-frontend-wiring-v1 | plan-close | OK
 - **Notes:** Plan housekeeping (per plan Done definition): (a) ticked T4 checkbox in plan file post-merge; (b) updated Status header `ACTIVE` → `COMPLETED`; (c) `git mv docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md → docs/agents/plans/COMPLETED/`; (d) ran `check-doc-sync` 0 fail. Bundled into chore branch `chore/complete-frontend-wiring-plan`. Memory record `project_frontend_wiring_plan_pause.md` flagged for deletion (no longer load-bearing once this PR merges).
 - **Refs:** `docs/agents/plans/COMPLETED/agent-team-frontend-wiring-v1.md`.
+
+### 2026-04-30 21:50 | tech-lead | agent-team-make-activation-v1 | plan-activate | OK
+- **Notes:** New Track B plan written + activation PR #104 opened on branch `chore/activate-make-activation-plan`. 6 tasks (T1-T6) covering blueprint sanitization, IMPORT-GUIDE rewrite, GitHub webhook orphan cleanup, cron smoke tests, Learning Loop end-to-end smoke, and close-out docs. GitHub Push Protection caught a literal token reference in plan v1 body — redacted to `ghp_***` form before re-push (good incident-response signal: secret-scanning works repo-wide). Closes the Phase 3 learning-loop activation gap pending since prior session.
+- **Refs:** `docs/agents/plans/ACTIVE/agent-team-make-activation-v1.md`, PR #104.
+
+### 2026-04-30 22:00 | tech-lead | make-activation-task-1 | claim | OK
+- **Notes:** First task of plan `agent-team-make-activation-v1`. Owner-instructed start ("nejdřív upravit at tam nejsou ty tokeny" — sanitize first, before plan PR merges). Standard Track A workflow nested inside Track B plan envelope. Branch convention adjusted from plan-prescribed `agent-team/make-activation-task-1` to `agent/docs-guardian/make-activation-task-1` per `CLAUDE.md` § Branch naming (plan file will be amended when #104 lands).
+- **Refs:** `docs/agents/plans/ACTIVE/agent-team-make-activation-v1.md` Task 1.
+
+### 2026-04-30 22:00 | tech-lead | make-activation-task-1 | classify | OK
+- **Notes:** Stream B (infrastructure / dev velocity — `docs/agents/make/`). Track B (plan-driven). Role: docs-guardian (template/template-policy hygiene, not security-engineering — security-engineer would have been the role for actual auth surface changes which this isn't).
+- **Refs:** plan task table — Task 1 role field.
+
+### 2026-04-30 22:01 | tech-lead | make-activation-task-1 | dispatch | OK
+- **Notes:** Inventoried 5 untracked new blueprints + 5 deleted (in working tree) old templates. Counted token occurrences via grep: 10 PAT (1 in PR Review Reminder, 1 in Backpressure Check, 1 in Weekly Digest, 7 in Learning Loop), 1 Anthropic key (Learning Loop M3), 5 ntfy topic (1 each across Daily Triage + 4 cron scenarios; Learning Loop has no ntfy module). Sanitization plan: 3 `String.split + join` passes per file (no regex escape concerns), JSON.parse post-write to confirm no structural damage.
+- **Refs:** `docs/agents/make/Agent Team — *.blueprint.json` (5 files).
+
+### 2026-04-30 22:02 | docs-guardian | make-activation-task-1 | fix | OK
+- **Notes:** Wrote a temporary `sanitize.mjs` Node script (not committed) that loops over the 5 blueprints, applies the 3 `String.split + join` passes per file (PAT → `TODO_GITHUB_TOKEN`, Anthropic → `TODO_ANTHROPIC_API_KEY`, ntfy → `TODO_NTFY_TOPIC`), and `JSON.parse`s the result. Output: 15 total replacements (Daily Triage 1, PR Review Reminder 2, Backpressure Check 2, Weekly Digest 2, Learning Loop 8 = 15), all 5 JSON.parse succeeded. Script deleted post-run. Old `0{1..5}-*.json` already showing as deleted in working tree from prior session — staged as deletions.
+- **Refs:** `docs/agents/make/*.blueprint.json` (5 sanitized).
+
+### 2026-04-30 22:02 | docs-guardian | make-activation-task-1 | test | OK
+- **Notes:** Final-state verification: `grep -nE 'ghp_[A-Za-z0-9]{15,}|sk-ant-api03-[A-Za-z0-9_-]{15,}|autosmartweby-agents-[0-9]{6,}' docs/agents/make/` returns 0. `node scripts/docs/check-doc-sync.mjs` 43 pass / 0 fail. `validate-task-record --pr-branch agent/docs-guardian/make-activation-task-1` PASSED. JSON.parse verified during fix step.
+- **Refs:** all green.
+
+### 2026-04-30 22:03 | docs-guardian | make-activation-task-1 | self-review | OK
+- **Notes:** Re-read full diff fresh (5 new files + 5 deletions + 1 task record). Checks: (a) every PAT location in the 4 affected blueprints now shows `Bearer TODO_GITHUB_TOKEN` instead of literal; (b) Learning Loop M3 `x-api-key` header now shows `TODO_ANTHROPIC_API_KEY`; (c) all ntfy `url` fields point at `https://ntfy.sh/TODO_NTFY_TOPIC`; (d) `flow` array length / module IDs / module types preserved in each blueprint (no accidental structural edit); (e) old `0{1..5}-*.json` cleanly deleted; (f) IMPORT-GUIDE.md untouched (T2's concern). 0 issues.
+- **Refs:** `git diff main`.
+
+### 2026-04-30 22:03 | tech-lead | make-activation-task-1 | cross-review | OK
+- **Notes:** Tech Lead re-read full diff. All 4 sub-DoDs verified: Code Done (no code; secret-scan grep clean; JSON.parse clean × 5). Documentation Done (task record full + RUN-LOG appended; plan checkbox correctly NOT ticked here since plan PR #104 not yet merged). Test Done (grep + JSON parse + check-doc-sync 0 fail). Agent Done (no `.clasp.json` / `.env*` / archive change; branch convention adjusted to per-CLAUDE.md but documented in task record). Push Protection will be final gate.
+- **Refs:** `docs/14-definition-of-done.md` §1-4.
+
+### 2026-04-30 22:03 | docs-guardian | make-activation-task-1 | dod-check | OK
+- **Notes:** All gates green: `check-doc-sync` 0 fail, `validate-task-record --pr-branch agent/docs-guardian/make-activation-task-1` PASSED, grep clean, all 5 JSON.parse OK. Diff staged.
+- **Refs:** ready for owner review.

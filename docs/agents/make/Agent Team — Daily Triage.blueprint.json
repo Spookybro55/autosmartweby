@@ -1,0 +1,84 @@
+{
+    "name": "Agent Team — Daily Triage",
+    "flow": [
+        {
+            "id": 1,
+            "module": "http:MakeRequest",
+            "version": 4,
+            "parameters": {
+                "tlsType": "",
+                "proxyKeychain": "",
+                "authenticationType": "noAuth"
+            },
+            "mapper": {
+                "url": "https://ntfy.sh/TODO_NTFY_TOPIC",
+                "data": "Daily triage time.\n\nCheck QUEUE.md, then run Claude Code locally:\n  cd autosmartweby && claude\n  > vezmi další task z queue\n\nQUEUE.md: https://github.com/Spookybro55/autosmartweby/blob/main/docs/agents/QUEUE.md\nFINDINGS.md: https://github.com/Spookybro55/autosmartweby/blob/main/docs/audits/FINDINGS.md",
+                "method": "post",
+                "headers": [
+                    {
+                        "name": "Title",
+                        "value": "Agent Team - Daily Triage"
+                    },
+                    {
+                        "name": "Tags",
+                        "value": "robot,calendar"
+                    },
+                    {
+                        "name": "Priority",
+                        "value": "default"
+                    },
+                    {
+                        "name": "Content-Type",
+                        "value": "text/plain; charset=utf-8"
+                    }
+                ],
+                "useMtls": false,
+                "bodyType": "raw",
+                "shareCookies": false,
+                "parseResponse": true,
+                "allowRedirects": true,
+                "stopOnHttpError": true,
+                "useNumberAsString": false,
+                "requestCompressedContent": false
+            },
+            "metadata": {
+                "designer": {
+                    "x": 0,
+                    "y": 0
+                }
+            }
+        }
+    ],
+    "metadata": {
+        "instant": false,
+        "version": 1,
+        "scenario": {
+            "roundtrips": 1,
+            "maxErrors": 3,
+            "autoCommit": true,
+            "autoCommitTriggerLast": true,
+            "sequential": false,
+            "slots": null,
+            "confidential": false,
+            "dataloss": false,
+            "dlq": false,
+            "freshVariables": false
+        },
+        "designer": {
+            "orphans": []
+        },
+        "zone": "eu2.make.com",
+        "notes": [
+            {
+                "moduleIds": [
+                    1
+                ],
+                "content": "<p><strong>HTTP → ntfy</strong>: Tento import-ready blueprint už obsahuje cílový ntfy topic. Po importu jen spusť test a nastav plánování scénáře.</p>",
+                "isFilterNote": false,
+                "metadata": {
+                    "color": "#9138FE"
+                }
+            }
+        ]
+    }
+}
