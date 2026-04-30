@@ -118,3 +118,39 @@
 ### 2026-04-30 14:28 | bug-hunter | frontend-wiring-task-1 | dod-check | OK
 - **Notes:** All gates green: `check-doc-sync` 43/0/0, `validate-task-record --pr-branch agent/bug-hunter/frontend-wiring-task-1` PASSED, `tsc` clean, `build` OK, `eslint` clean, b04 16/16, b06 105/105. Diff staged.
 - **Refs:** ready for owner review.
+
+### 2026-04-30 18:10 | tech-lead | frontend-wiring-task-1 | complete | OK
+- **Notes:** PR #98 merged 2026-04-30 03:03 UTC, commit `605a9bc`. All status checks green (`validate-agent-pr`, `docs-governance`, `frontend-checks`, `apps-script-checks`, Vercel preview). Plan T1 checkbox ticked here (post-merge per ARCHITECTURE.md §7 step 5; PR #98 itself left it open by Track B convention). Bundled into T2 run per QFH-0005 (d.2).
+- **Refs:** `docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md` Task 1 row.
+
+### 2026-04-30 18:11 | tech-lead | frontend-wiring-task-2 | claim | OK
+- **Notes:** Second task of plan `agent-team-frontend-wiring-v1`. Owner-instructed continue ("zkontroluj a kdyžtak pokračujem" after PR #98 merge confirmation). Standard Track A workflow nested inside Track B plan envelope.
+- **Refs:** plan task table — Task 2.
+
+### 2026-04-30 18:11 | tech-lead | frontend-wiring-task-2 | classify | OK
+- **Notes:** Stream B (frontend, same file as T1). Track B (plan-driven). Role: bug-hunter (UI-visual swap, not security-sensitive). Branch convention `agent/bug-hunter/frontend-wiring-task-2` per plan instruction.
+- **Refs:** plan task table — Task 2.
+
+### 2026-04-30 18:11 | tech-lead | frontend-wiring-task-2 | dispatch | OK
+- **Notes:** Re-read `crm-frontend/src/components/layout/sidebar.tsx` lines 5-19 (lucide-react imports) and lines 63-67 (`ADMIN_NAV` const) at HEAD `605a9bc` (post-T1). Confirmed `ShieldCheck` is the only token to swap (one in import, one in `icon:` field). `Bot` exported by lucide-react (verified post-build).
+- **Refs:** `crm-frontend/src/components/layout/sidebar.tsx:15,66`.
+
+### 2026-04-30 18:12 | bug-hunter | frontend-wiring-task-2 | fix | OK
+- **Notes:** Two edits: (1) `ShieldCheck,` → `Bot,` in lucide-react import block; (2) `icon: ShieldCheck,` → `icon: Bot,` in `ADMIN_NAV` const. Net +2 / -2 LOC. Existing `h-5 w-5 shrink-0` class on the icon usage is unchanged, so collapsed-state rendering can't regress.
+- **Refs:** `crm-frontend/src/components/layout/sidebar.tsx`.
+
+### 2026-04-30 18:12 | bug-hunter | frontend-wiring-task-2 | test | OK
+- **Notes:** `npx tsc --noEmit` clean (no output, exit 0). `npm run build` Compiled successfully in 11.1s — all routes built including `/admin/dev-team`, middleware. No new test surface needed for icon swap.
+- **Refs:** all green.
+
+### 2026-04-30 18:13 | bug-hunter | frontend-wiring-task-2 | self-review | OK
+- **Notes:** Re-read full diff fresh. Checks: (a) `ShieldCheck` removed from imports — confirmed; (b) no other usage of `ShieldCheck` in the file — confirmed (single grep hit was the import + the `icon:` line, both swapped); (c) `Bot` icon usage path: `ADMIN_NAV.icon` is rendered via `navItems.map(item => <item.icon className="h-5 w-5 shrink-0" />)` — class preserved; (d) T1's `useCurrentUser` wiring untouched; (e) `isOwner` derivation untouched. 0 issues.
+- **Refs:** `git diff main`.
+
+### 2026-04-30 18:13 | tech-lead | frontend-wiring-task-2 | cross-review | OK
+- **Notes:** Tech Lead re-read full diff. All 4 sub-DoDs verified: Code Done (tsc + build clean, +2/-2 LOC). Documentation Done (task record full + RUN-LOG bundled + T1 plan checkbox ticked). Test Done (build is de-facto coverage for icon swap, check-doc-sync 0 fail, validate-task-record PASSED). Agent Done (tiny diff, branch convention OK, no `.clasp.json` / `.env*` / archive change). PR ready.
+- **Refs:** `docs/14-definition-of-done.md` §1-4.
+
+### 2026-04-30 18:13 | bug-hunter | frontend-wiring-task-2 | dod-check | OK
+- **Notes:** All gates green: `check-doc-sync` 0 fail, `validate-task-record --pr-branch agent/bug-hunter/frontend-wiring-task-2` PASSED, `tsc` clean, `build` OK. Diff staged.
+- **Refs:** ready for owner review.

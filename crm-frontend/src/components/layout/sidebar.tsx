@@ -12,7 +12,7 @@ import {
   Settings,
   BarChart3,
   Search,
-  ShieldCheck,
+  Bot,
   Sun,
   Moon,
   Loader2,
@@ -63,7 +63,7 @@ const navigation = [
 const ADMIN_NAV = {
   label: "Dev Team",
   href: "/admin/dev-team",
-  icon: ShieldCheck,
+  icon: Bot,
 } as const;
 
 // Inline theme toggle — small enough to live in sidebar.tsx without
