@@ -46,6 +46,12 @@ import type { TemplateFamily } from '../../crm-frontend/src/lib/domain/template-
 // Fixtures
 // ----------------------------------------------------------------------------
 
+// Fake placeholder used in payload `spreadsheet_id`. The handler never calls
+// Sheets API in this suite — it only serializes/validates the payload — so
+// any non-empty string works. Keeping a recognisable fake prevents real PROD
+// or TEST sheet IDs from leaking into test fixtures (DP-001 / SEC-001).
+const TEST_SHEET_ID_FAKE_FOR_FIXTURES_ONLY = 'TEST_SHEET_ID_FAKE_FOR_FIXTURES_ONLY';
+
 const VALID_BRIEF: PreviewBrief = {
   business_name: 'Novak Malir',
   contact_name: 'Jan Novak',
@@ -71,7 +77,7 @@ const VALID_SLUG = 'novak-malir-praha';
 
 function buildValidPayload(overrides: Record<string, unknown> = {}) {
   return {
-    spreadsheet_id: '1RBcLZkn3AruiqaQdJ7PHIxvCcoO5SC9Qnlw_NiLnpYc',
+    spreadsheet_id: TEST_SHEET_ID_FAKE_FOR_FIXTURES_ONLY,
     sheet_name: 'leads',
     row_number: 42,
     company_key: 'novak-malir-praha',

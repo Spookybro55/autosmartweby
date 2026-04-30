@@ -85,6 +85,14 @@ scenario 03 once Sebastián completes the manual setup per SETUP-CHECKLIST.md).
 - **Code:** crm-frontend/src/lib/agent-team/types.ts (new), crm-frontend/src/lib/agent-team/source.ts (new), crm-frontend/src/lib/agent-team/parse-queue.ts (new), crm-frontend/src/lib/agent-team/parse-run-log.ts (new), crm-frontend/src/lib/agent-team/list-prs.ts (new), crm-frontend/src/lib/agent-team/list-plans.ts (new), crm-frontend/src/lib/agent-team/knowledge-stats.ts (new), crm-frontend/src/app/admin/dev-team/page.tsx (new), crm-frontend/src/app/admin/dev-team/components/now-panel.tsx (new), crm-frontend/src/app/admin/dev-team/components/queue-panel.tsx (new), crm-frontend/src/app/admin/dev-team/components/plans-panel.tsx (new), crm-frontend/src/app/admin/dev-team/components/review-queue-panel.tsx (new), crm-frontend/src/app/admin/dev-team/components/knowledge-panel.tsx (new), crm-frontend/src/app/admin/dev-team/components/stats-cost-health-panels.tsx (new), crm-frontend/src/app/admin/dev-team/api/queue/route.ts (new), crm-frontend/src/app/admin/dev-team/api/prs/route.ts (new), crm-frontend/src/middleware.ts (modified), crm-frontend/src/components/layout/sidebar.tsx (modified), crm-frontend/.env.example (modified)
 - **Docs:** docs/30-task-records/AGENT-TEAM-PHASE-3.md, docs/11-change-log.md, docs/29-task-registry.md
 
+### [B/DP-001] Replace hardcoded PROD Sheet ID in `preview-render-endpoint.test.ts` with fake fixture constant — CODE-COMPLETE
+- **Scope:** DP-001 (P0) per `docs/audits/FINDINGS.md:30`: the B-04 unit-test fixture `scripts/tests/preview-render-endpoint.test.ts` shipped with the full plain-text PROD Sheet ID `1RBcLZkn3AruiqaQdJ7PHIxvCcoO5SC9Qnlw_NiLnpYc` baked into the `buildValidPayload()` helper. The handler under test never calls the Sheets API in this suite — it only serializes and validates the payload — so any non-empty string works. Keeping a real PROD ID in tracked test code added a fifth file path to the SEC-001 PROD-ID exposure surface for zero functional reason.
+
+**This task addresses ONLY the DP-001 narrow scope** — the single test-file fixture replacement. SEC-001 in `docs/audits/FINDINGS.md:51` consolidates the broader cleanup across **five other tracked locations** (`apps-script/Config.gs:14`, `apps-script/EnvConfig.gs:13,18,28`, `docs/09-project-control-tower.md:66`, `docs/20-current-state.md:45`, `docs/30-task-records/B6.md:118,179`) plus the open question of git-history rewrite. **SEC-001 stays Open** and will be resolved by Sebastián separately.
+- **Owner:** Stream B
+- **Code:** `scripts/tests/preview-render-endpoint.test.ts` (modified)
+- **Docs:** `docs/audits/FINDINGS.md`, `docs/30-task-records/DP-001-prod-sheet-id-test-fixture.md`, `docs/agents/QUEUE.md`, `docs/11-change-log.md`, `docs/29-task-registry.md`
+
 ## 2026-04-29
 
 ### [B/AGENT-TEAM-FIX-MAKE-BLUEPRINTS] Rewrite 5 Make blueprints in valid format + Playwright verifier (resolves QFH-0004) — CODE-COMPLETE
