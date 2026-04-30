@@ -112,7 +112,7 @@ Each task ships as **its own PR** following Track A workflow (claim → classify
 
 ### Task 3 — Middleware `/admin/*` redirect adds `?error=forbidden` query
 
-- [ ] **Status:** todo
+- [x] **Status:** complete (PR #100, merged 2026-04-30 18:26 UTC, commit `8f3667d`)
 - **Role:** security-engineer
 - **Branch:** `agent/security-engineer/frontend-wiring-task-3`
 - **Depends on:** none (independent of Tasks 1, 2; explicitly **does not depend on Task 4** — the query param is informational, dashboard-side handler can land later)
