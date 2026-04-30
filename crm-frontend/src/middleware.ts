@@ -91,12 +91,17 @@ export async function middleware(request: NextRequest) {
   }
 
   // Admin routes (Phase 3 agent team dashboard) require OWNER_EMAIL.
-  // Single-user gate — Sebastián only. Redirect to dashboard for others.
+  // Single-user gate — Sebastián only. Non-owners are redirected to
+  // /dashboard with `?error=forbidden` so the dashboard can surface a
+  // sonner toast (T4); the query param is informational only and does
+  // not loosen the gate above.
   if (pathname.startsWith('/admin/')) {
     const ownerEmail = process.env.OWNER_EMAIL?.toLowerCase().trim();
     const userEmail = payload.email?.toLowerCase().trim();
     if (!ownerEmail || userEmail !== ownerEmail) {
-      return NextResponse.redirect(new URL('/dashboard', request.url));
+      const forbiddenUrl = new URL('/dashboard', request.url);
+      forbiddenUrl.searchParams.set('error', 'forbidden');
+      return NextResponse.redirect(forbiddenUrl);
     }
   }
 

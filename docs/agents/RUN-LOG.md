@@ -154,3 +154,39 @@
 ### 2026-04-30 18:13 | bug-hunter | frontend-wiring-task-2 | dod-check | OK
 - **Notes:** All gates green: `check-doc-sync` 0 fail, `validate-task-record --pr-branch agent/bug-hunter/frontend-wiring-task-2` PASSED, `tsc` clean, `build` OK. Diff staged.
 - **Refs:** ready for owner review.
+
+### 2026-04-30 18:19 | tech-lead | frontend-wiring-task-2 | complete | OK
+- **Notes:** PR #99 merged 2026-04-30 18:18 UTC, commit `f16ae68`. Plan T2 checkbox ticked here (post-merge per ARCHITECTURE.md §7 step 5). Bundled into T3 run per QFH-0005 (d.2).
+- **Refs:** `docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md` Task 2 row.
+
+### 2026-04-30 18:20 | tech-lead | frontend-wiring-task-3 | claim | OK
+- **Notes:** Third task of plan `agent-team-frontend-wiring-v1`. Owner-instructed continue ("pokračujem na T3, mergnnuto" after PR #99 merge confirmation).
+- **Refs:** plan task table — Task 3.
+
+### 2026-04-30 18:20 | tech-lead | frontend-wiring-task-3 | classify | OK
+- **Notes:** Stream B (frontend infrastructure — `crm-frontend/src/middleware.ts`). Track B (plan-driven). Role: **security-engineer** (per plan task table — middleware redirect touches the auth-adjacent path, even though the security boundary itself is unchanged). Branch convention `agent/security-engineer/frontend-wiring-task-3` per plan.
+- **Refs:** plan task table — Task 3 role field.
+
+### 2026-04-30 18:20 | tech-lead | frontend-wiring-task-3 | dispatch | OK
+- **Notes:** Re-read `crm-frontend/src/middleware.ts:85-108` at HEAD `f16ae68`. Confirmed admin gate at `:95-101` matches plan's described shape. Single-line redirect at `:99` is the only change locus.
+- **Refs:** `crm-frontend/src/middleware.ts:99`.
+
+### 2026-04-30 18:21 | security-engineer | frontend-wiring-task-3 | fix | OK
+- **Notes:** Replaced single-line `return NextResponse.redirect(new URL('/dashboard', request.url));` with 3-line construction (`forbiddenUrl` + `searchParams.set('error', 'forbidden')` + redirect). Updated inline comment block at `:93-94` to mention the query param + explicitly note it does not loosen the gate. Net +6 / -1 LOC. Security boundary condition `if (!ownerEmail || userEmail !== ownerEmail)` byte-identical.
+- **Refs:** `crm-frontend/src/middleware.ts`.
+
+### 2026-04-30 18:21 | security-engineer | frontend-wiring-task-3 | test | OK
+- **Notes:** `npx tsc --noEmit` clean (no output, exit 0). `npm run build` Compiled successfully in 9.2s — middleware (`ƒ Proxy (Middleware)`) rebuilt cleanly, all routes built. No middleware unit-test in repo; tsc + build is de-facto coverage proportional to a 7-LOC URL-construction change.
+- **Refs:** all green.
+
+### 2026-04-30 18:21 | security-engineer | frontend-wiring-task-3 | self-review | OK
+- **Notes:** Re-read full diff fresh. Checks: (a) gate condition `if (!ownerEmail || userEmail !== ownerEmail)` byte-identical; (b) `searchParams.set` runs only inside deny branch — no path through gate is loosened; (c) `URL` constructor with `request.url` as base correctly preserves origin; (d) cookie-clearing branch at `:88-91` (session-expiry) untouched; (e) `config.matcher` at `:107` untouched; (f) HTTP status remains 307 (Next.js default for `NextResponse.redirect`); (g) no user-controlled input flows into URL construction → no open-redirect concern; (h) literal `'forbidden'` token introduces no high-entropy material. 0 issues.
+- **Refs:** `git diff main`.
+
+### 2026-04-30 18:21 | tech-lead | frontend-wiring-task-3 | cross-review | OK
+- **Notes:** Tech Lead re-read full diff. All 4 sub-DoDs verified: Code Done (tsc + build clean, security gate unchanged). Documentation Done (task record full + RUN-LOG bundled + T2 plan checkbox ticked). Test Done (build is de-facto coverage, check-doc-sync 0 fail, validate-task-record PASSED). Agent Done (small diff, branch convention OK, no `.clasp.json` / `.env*` / archive change). PR ready. T4 unblocked.
+- **Refs:** `docs/14-definition-of-done.md` §1-4.
+
+### 2026-04-30 18:21 | security-engineer | frontend-wiring-task-3 | dod-check | OK
+- **Notes:** All gates green: `check-doc-sync` 0 fail, `validate-task-record --pr-branch agent/security-engineer/frontend-wiring-task-3` PASSED, `tsc` clean, `build` OK. Diff staged.
+- **Refs:** ready for owner review.

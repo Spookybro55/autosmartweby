@@ -109,6 +109,14 @@ This task **does not** touch any other icon, the `ADMIN_NAV` href, the runtime `
 - **Code:** `crm-frontend/src/components/layout/sidebar.tsx` (modified)
 - **Docs:** `docs/30-task-records/frontend-wiring-task-2.md`, `docs/agents/RUN-LOG.md`, `docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md`, `docs/11-change-log.md`, `docs/29-task-registry.md`
 
+### [B/frontend-wiring-task-3] Middleware `/admin/*` redirect adds `?error=forbidden` query param — CODE-COMPLETE
+- **Scope:** T3 of plan `agent-team-frontend-wiring-v1` (`docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md`). Adds an informational `?error=forbidden` query param to the existing `/admin/*` non-owner redirect in `crm-frontend/src/middleware.ts` (at `main` HEAD `f16ae68`). The dashboard (T4) will read this param and surface a sonner toast so the user understands why they were bounced — currently the redirect is silent.
+
+This task **does not** modify the security boundary itself. The owner-gate condition `if (!ownerEmail || userEmail !== ownerEmail)` is byte-identical before and after; only the redirect URL construction changes (now carries a query string). The HTTP status remains `307` (Next.js default for `NextResponse.redirect`).
+- **Owner:** Stream B
+- **Code:** `crm-frontend/src/middleware.ts` (modified)
+- **Docs:** `docs/30-task-records/frontend-wiring-task-3.md`, `docs/agents/RUN-LOG.md`, `docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md`, `docs/11-change-log.md`, `docs/29-task-registry.md`
+
 ## 2026-04-29
 
 ### [B/AGENT-TEAM-FIX-MAKE-BLUEPRINTS] Rewrite 5 Make blueprints in valid format + Playwright verifier (resolves QFH-0004) — CODE-COMPLETE
