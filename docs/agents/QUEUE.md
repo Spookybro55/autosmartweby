@@ -40,25 +40,25 @@
 | Rank | Finding | Severity | Suggested role | Default stream |
 |---|---|---|---|---|
 | 1 | SEC-001: Hardcoded production Sheet ID (`1RBc…`, 44 znaků) v 5+ tracked soub... | P0 | security-engineer | B |
-| 2 | DP-003: `scripts/clasp-deploy.sh:74-87` swap-and-restore není atomic. Pokud... | P1 | docs-guardian | B |
-| 3 | DP-004: `apps-script/PreviewPipeline.gs:976,1561` posílá `spreadsheet_id: S... | P1 | docs-guardian | B |
-| 4 | DP-009: Vercel deploy je úplně mimo repo. Žádný `vercel.json`, žádný `.verc... | P1 | docs-guardian | B |
-| 5 | DP-010: Branch protection na `main` má `enforce_admins: false`. Repo admin ... | P1 | docs-guardian | B |
-| 6 | DP-014: `docs/27-infrastructure-storage.md` má multi-line drift: tvrdí "Fro... | P1 | docs-guardian | B |
-| 7 | DP-019: Žádná dokumentovaná secrets rotation procedura pro `FRONTEND_API_SE... | P1 | docs-guardian | B |
-| 8 | FF-003: `processPreviewQueue` (15-min cron trigger) **nepoužívá LockService... | P1 | bug-hunter | A |
-| 9 | FF-009: C-04 Sendability gate je SPEC-ONLY (per `docs/30-task-records/C-04.... | P1 | bug-hunter | A |
-| 10 | FF-012: C-07 Inbound event ingest SPEC-ONLY — žádný webhook listener / push... | P1 | bug-hunter | A |
-| 11 | FF-013: C-08 Follow-up engine SPEC-ONLY — `next_followup_at` operator manua... | P1 | bug-hunter | A |
-| 12 | FF-015: CS1 `lifecycle_state` SPEC-ONLY. Runtime má 4 separate state machin... | P1 | bug-hunter | A |
-| 13 | FF-019: Concurrency: cron `processPreviewQueue` (no lock) může batch-write ... | P1 | bug-hunter | A |
-| 14 | IN-001: Stale příklad `apps-script-endpoint.gs.example` diverguje od reálné... | P1 | bug-hunter | B |
-| 15 | IN-005: `apps-script-writer.ts` defaultuje `success` na **true** pokud pole... | P1 | bug-hunter | B |
-| 16 | IN-007: Backend identity check (`payload.businessName/city` vs sheet) je **... | P1 | bug-hunter | B |
-| 17 | IN-009: FE→GAS `updateLead` `fetch` nemá `signal` s timeoutem, retry policy... | P1 | bug-hunter | B |
-| 18 | IN-016: Hardcoded SPREADSHEET_ID v `apps-script/Config.gs:14`. Typ: `sheet_... | P1 | bug-hunter | B |
-| 19 | SEC-003: Apps Script Web App config: `executeAs: USER_DEPLOYING` + `access: ... | P1 | security-engineer | B |
-| 20 | SEC-004: OAuth scopes overclaim v `apps-script/appsscript.json:7-15`: `gmail... | P1 | security-engineer | B |
+| 2 | DP-004: `apps-script/PreviewPipeline.gs:976,1561` posílá `spreadsheet_id: S... | P1 | docs-guardian | B |
+| 3 | DP-009: Vercel deploy je úplně mimo repo. Žádný `vercel.json`, žádný `.verc... | P1 | docs-guardian | B |
+| 4 | DP-010: Branch protection na `main` má `enforce_admins: false`. Repo admin ... | P1 | docs-guardian | B |
+| 5 | DP-014: `docs/27-infrastructure-storage.md` má multi-line drift: tvrdí "Fro... | P1 | docs-guardian | B |
+| 6 | DP-019: Žádná dokumentovaná secrets rotation procedura pro `FRONTEND_API_SE... | P1 | docs-guardian | B |
+| 7 | FF-003: `processPreviewQueue` (15-min cron trigger) **nepoužívá LockService... | P1 | bug-hunter | A |
+| 8 | FF-009: C-04 Sendability gate je SPEC-ONLY (per `docs/30-task-records/C-04.... | P1 | bug-hunter | A |
+| 9 | FF-012: C-07 Inbound event ingest SPEC-ONLY — žádný webhook listener / push... | P1 | bug-hunter | A |
+| 10 | FF-013: C-08 Follow-up engine SPEC-ONLY — `next_followup_at` operator manua... | P1 | bug-hunter | A |
+| 11 | FF-015: CS1 `lifecycle_state` SPEC-ONLY. Runtime má 4 separate state machin... | P1 | bug-hunter | A |
+| 12 | FF-019: Concurrency: cron `processPreviewQueue` (no lock) může batch-write ... | P1 | bug-hunter | A |
+| 13 | IN-001: Stale příklad `apps-script-endpoint.gs.example` diverguje od reálné... | P1 | bug-hunter | B |
+| 14 | IN-005: `apps-script-writer.ts` defaultuje `success` na **true** pokud pole... | P1 | bug-hunter | B |
+| 15 | IN-007: Backend identity check (`payload.businessName/city` vs sheet) je **... | P1 | bug-hunter | B |
+| 16 | IN-009: FE→GAS `updateLead` `fetch` nemá `signal` s timeoutem, retry policy... | P1 | bug-hunter | B |
+| 17 | IN-016: Hardcoded SPREADSHEET_ID v `apps-script/Config.gs:14`. Typ: `sheet_... | P1 | bug-hunter | B |
+| 18 | SEC-003: Apps Script Web App config: `executeAs: USER_DEPLOYING` + `access: ... | P1 | security-engineer | B |
+| 19 | SEC-004: OAuth scopes overclaim v `apps-script/appsscript.json:7-15`: `gmail... | P1 | security-engineer | B |
+| 20 | SEC-005: Login `password !== AUTH_PASSWORD` (`crm-frontend/src/app/api/auth/... | P1 | security-engineer | B |
 
 <!-- triage:ready-end -->
 

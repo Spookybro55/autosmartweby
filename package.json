@@ -12,6 +12,7 @@
     "test:b04": "node --experimental-strip-types --test scripts/tests/preview-render-endpoint.test.ts",
     "test:b05": "node scripts/test-b05-preview-webhook.mjs",
     "test:b06": "node scripts/test-b06-review-writeback.mjs",
-    "test:b13": "node --experimental-strip-types --test scripts/tests/b13-render-drift.test.ts && node scripts/tests/b13-routes-smoke.mjs"
+    "test:b13": "node --experimental-strip-types --test scripts/tests/b13-render-drift.test.ts && node scripts/tests/b13-routes-smoke.mjs",
+    "test:clasp-deploy-trap": "node --test scripts/tests/clasp-deploy-trap.test.mjs"
   }
 }

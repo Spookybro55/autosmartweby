@@ -17,6 +17,28 @@ CLASP_PROD="$AS_DIR/.clasp.json.prod"
 CLASP_ACTIVE="$AS_DIR/.clasp.json"
 CLASP_BACKUP="$AS_DIR/.clasp.json.bak"
 
+# Restore TEST .clasp.json from backup. Wired as a trap on EXIT/INT/TERM
+# during the PROD push window (DP-003) so .clasp.json never lingers in
+# PROD state if the script is interrupted (Ctrl+C, kill, panic) between
+# the swap and the explicit restore. Idempotent — if BACKUP is gone the
+# explicit restore already ran and this is a no-op.
+restore_clasp_config() {
+  local exit_code=$?
+  if [ -f "$CLASP_BACKUP" ]; then
+    echo "Restoring .clasp.json to TEST config (trap)..."
+    cp "$CLASP_BACKUP" "$CLASP_ACTIVE"
+    rm -f "$CLASP_BACKUP"
+  fi
+  return $exit_code
+}
+
+# Allow tests to source this script for the helper functions without
+# triggering deploy logic. Tests set CLASP_DEPLOY_TEST_MODE=1 before
+# `source scripts/clasp-deploy.sh`.
+if [ "${CLASP_DEPLOY_TEST_MODE:-}" = "1" ]; then
+  return 0 2>/dev/null || exit 0
+fi
+
 TARGET="${1:-}"
 
 if [ -z "$TARGET" ]; then
@@ -71,9 +93,12 @@ case "$TARGET" in
       exit 1
     fi
 
-    # Swap .clasp.json to PROD, push, then swap back
+    # Swap .clasp.json to PROD, push, then swap back. The trap is the
+    # safety net for Ctrl+C / kill / panic between the swap and the
+    # explicit restore (DP-003). Order: register trap BEFORE the swap.
     echo ""
     echo "Swapping .clasp.json to PROD config..."
+    trap restore_clasp_config EXIT INT TERM
     cp "$CLASP_ACTIVE" "$CLASP_BACKUP"
     cp "$CLASP_PROD" "$CLASP_ACTIVE"
 
@@ -81,10 +106,9 @@ case "$TARGET" in
     PUSH_EXIT=0
     clasp push || PUSH_EXIT=$?
 
-    # Always restore TEST config
-    echo "Restoring .clasp.json to TEST config..."
-    cp "$CLASP_BACKUP" "$CLASP_ACTIVE"
-    rm -f "$CLASP_BACKUP"
+    # Happy-path restore. The trap will also fire on EXIT but
+    # restore_clasp_config is idempotent (no-op if backup is gone).
+    restore_clasp_config
 
     if [ $PUSH_EXIT -ne 0 ]; then
       echo "ERROR: clasp push failed (exit $PUSH_EXIT). .clasp.json restored to TEST."

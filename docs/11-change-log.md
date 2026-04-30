@@ -93,6 +93,14 @@ scenario 03 once Sebastián completes the manual setup per SETUP-CHECKLIST.md).
 - **Code:** `scripts/tests/preview-render-endpoint.test.ts` (modified)
 - **Docs:** `docs/audits/FINDINGS.md`, `docs/30-task-records/DP-001-prod-sheet-id-test-fixture.md`, `docs/agents/QUEUE.md`, `docs/11-change-log.md`, `docs/29-task-registry.md`
 
+### [B/DP-003] Make `scripts/clasp-deploy.sh` PROD swap atomic via `trap` on EXIT/INT/TERM — CODE-COMPLETE
+- **Scope:** DP-003 (P1) per `docs/audits/FINDINGS.md:32`: the prod deploy block in `scripts/clasp-deploy.sh` swapped `.clasp.json` from TEST to PROD config, ran `clasp push`, then restored TEST — but the restore was a sequential-execution best-effort. If the script was interrupted between the swap (cp PROD → ACTIVE) and the explicit restore (cp BACKUP → ACTIVE) — Ctrl+C, kill, terminal panic, OOM — `.clasp.json` would linger in PROD state. A subsequent innocent `./scripts/clasp-deploy.sh test` would then `clasp push` to PROD silently (TEST-mode skips the confirmation prompt; `set -e` doesn't help with signal aborts). This is the worst-case "TEST push goes to PROD" data-corruption scenario flagged by GOTCHA-001 (clasp swap risk).
+
+This run implements the recommendation directly from the FINDINGS row: **register a bash `trap` before the swap so the restore fires regardless of how execution exits.** The trap handler is idempotent — checks if `.clasp.json.bak` exists before restoring, so the explicit happy-path restore + the trap fire on EXIT compose without double-cp. Out of scope: alternative recommendations (`clasp push -P <prod-config>` and `clasp-deploy.sh test` hash-check) — those would be DP-003 *deluxe*, not the named fix.
+- **Owner:** Stream B
+- **Code:** `scripts/clasp-deploy.sh` (modified), `scripts/tests/clasp-deploy-trap.test.mjs` (new), `package.json` (modified)
+- **Docs:** `docs/audits/FINDINGS.md`, `docs/30-task-records/DP-003-clasp-deploy-trap-restore.md`, `docs/agents/QUEUE.md`, `docs/agents/RUN-LOG.md`, `docs/agents/QUESTIONS-FOR-HUMAN.md`, `docs/11-change-log.md`, `docs/29-task-registry.md`
+
 ## 2026-04-29
 
 ### [B/AGENT-TEAM-FIX-MAKE-BLUEPRINTS] Rewrite 5 Make blueprints in valid format + Playwright verifier (resolves QFH-0004) — CODE-COMPLETE

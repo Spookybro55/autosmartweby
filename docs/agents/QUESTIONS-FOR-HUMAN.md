@@ -114,3 +114,27 @@
   IMPORT-GUIDE.md popisů. JSON soubory pak žijí jako reference description,
   ne import target.
 - **Resolved at:** —
+
+### QFH-0005: Post-merge closure routine missing from `tech-lead.md` SKILL
+
+- **Date:** 2026-04-30 (Europe/Prague)
+- **From role:** tech-lead (self-retrospective from DP-001)
+- **Task:** DP-001 closure
+- **Track:** A
+- **Question:** Workflow §5 step 11–13 končí na `pr-open` + RUN-LOG `complete` + QUEUE update. Chybí explicit post-merge steps:
+  - **(a) Wait for merge confirmation** (no auto-assume) — agent runs to `pr-open` and reports; resumption after merge needs explicit signal from owner. Currently undocumented.
+  - **(b) `git pull origin main` + verify** — must happen before any next-task work to avoid stale-base branches. Not in the workflow diagram.
+  - **(c) Auto-delete remote branch** — `git push origin --delete <branch>` after squash-merge is **standard housekeeping, not "ask owner"**. SKILL currently doesn't mandate it; DP-001 closure had to ask.
+  - **(d) `complete` RUN-LOG entry placement** — chicken-egg: §5 step 11 says `complete` is the Final entry, but final entry only knows the merge SHA *post-merge*, which is *post-PR*. Two viable options:
+    - **(d.1)** Append `complete` entry inside the original PR using `at HEAD` placeholder, then post-merge follow-up commit bumps to actual SHA → 2 PRs per task.
+    - **(d.2)** Defer `complete` entry to *next* Track A run's RUN-LOG additions (first append at session start = `complete: previous-task (PR #N, merge {sha})` → `claim: next-task`) → 1 PR per task, slight async log lag.
+    - **Sebastián decided 2026-04-30:** option **(d.2)** is policy. Less PR noise. Encode in tech-lead.md.
+  - **(e) Re-run `triage.mjs` after merge** — current approach captures triage output **inside the resolving PR** (anticipates own merge → optimistic). After merge, the actual triage state is identical (DP-001 was already marked Resolved in the PR). But for tasks where merge introduces external changes (other PRs land in between), the in-PR triage snapshot is stale at merge time. Three options:
+    - **(e.1)** Bundle re-triage into the *next* Track A run's first commits (matches policy from (d.2)).
+    - **(e.2)** Open separate housekeeping PR per closure → overhead.
+    - **(e.3)** Direct push to main → blocked by branch protection per CLAUDE.md hard rule.
+  - **(d.2) + (e.1) implication:** the next Track A run's PR carries housekeeping for the *previous* run alongside its own work. Task records and commit messages need to acknowledge the pattern so reviewers don't see it as scope creep.
+- **Tried:** Followed §5 to step 10 (`pr-open`); paused at step 11 since `complete` requires merge SHA. Closure was orchestrated through ad-hoc Q&A with Sebastián this session — not from a documented routine.
+- **Status:** open — **policy partially decided (d.2), full SKILL update pending**
+- **Answer:** _(Sebastián fills in via Track B plan `agent-team-skill-improvements-v1`. Decision (d.2) already given 2026-04-30. Open items: encode (a)–(e) explicitly in `docs/agents/roles/tech-lead.md` §5 (extend to step 14 = `closure-bundle-into-next`); update `docs-guardian.md` §6 to note the bundled-housekeeping pattern; possibly add `git push origin --delete` + `git pull --ff-only origin main` to bug-hunter / docs-guardian close-out checklists; consider GitHub repo setting "Automatically delete head branches" to remove (c) from agent's plate entirely.)_
+- **Resolved at:** —
