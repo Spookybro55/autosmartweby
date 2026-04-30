@@ -190,3 +190,39 @@
 ### 2026-04-30 18:21 | security-engineer | frontend-wiring-task-3 | dod-check | OK
 - **Notes:** All gates green: `check-doc-sync` 0 fail, `validate-task-record --pr-branch agent/security-engineer/frontend-wiring-task-3` PASSED, `tsc` clean, `build` OK. Diff staged.
 - **Refs:** ready for owner review.
+
+### 2026-04-30 18:27 | tech-lead | frontend-wiring-task-3 | complete | OK
+- **Notes:** PR #100 merged 2026-04-30 18:26 UTC, commit `8f3667d`. Plan T3 checkbox ticked here (post-merge per ARCHITECTURE.md §7 step 5). Bundled into T4 run per QFH-0005 (d.2). T4 (final task) unblocked.
+- **Refs:** `docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md` Task 3 row.
+
+### 2026-04-30 18:28 | tech-lead | frontend-wiring-task-4 | claim | OK
+- **Notes:** Fourth (final) task of plan `agent-team-frontend-wiring-v1`. Owner-instructed continue ("mergnuto" after PR #100). Standard Track A workflow nested inside Track B plan envelope.
+- **Refs:** plan task table — Task 4.
+
+### 2026-04-30 18:28 | tech-lead | frontend-wiring-task-4 | classify | OK
+- **Notes:** Stream B (frontend, dashboard page). Track B (plan-driven). Role: bug-hunter (UI-binding code, sonner toast handler). Branch convention `agent/bug-hunter/frontend-wiring-task-4` per plan.
+- **Refs:** plan task table — Task 4 role field.
+
+### 2026-04-30 18:29 | tech-lead | frontend-wiring-task-4 | dispatch | OK
+- **Notes:** Re-read `crm-frontend/src/app/dashboard/page.tsx` (170 LOC at HEAD `8f3667d`). Re-read `crm-frontend/src/app/leads/page.tsx:119-128` for the established Suspense + InnerComponent pattern (required because `useSearchParams` inside "use client" page would deopt static prerender per Next.js 16). Re-read `crm-frontend/src/app/scrape/page.tsx:9` for the existing `import { toast } from 'sonner'` + `toast.error(...)` pattern. Re-confirmed `<Toaster ... />` is mounted at `app/layout.tsx:54` so `toast.error` calls land in a real renderer.
+- **Refs:** `crm-frontend/src/app/leads/page.tsx:119-128` (Suspense pattern), `crm-frontend/src/app/scrape/page.tsx:9` (toast usage), `crm-frontend/src/app/layout.tsx:54` (Toaster mount).
+
+### 2026-04-30 18:30 | bug-hunter | frontend-wiring-task-4 | fix | OK
+- **Notes:** Five-step edit to `dashboard/page.tsx`: (1) added imports `Suspense`, `useRef` (react), `useRouter`, `useSearchParams` (next/navigation), `toast` (sonner); (2) renamed default-export `DashboardPage` → `DashboardPageInner` and introduced new outer `DashboardPage` that returns `<Suspense><DashboardPageInner /></Suspense>` — matches `app/leads/page.tsx` convention; (3) added `router = useRouter()` + `searchParams = useSearchParams()` at top of `DashboardPageInner`; (4) added `handledForbiddenRef = useRef(false)` + a forbidden-toast useEffect placed BEFORE the existing data-loading useEffect; (5) the new useEffect reads `searchParams.get('error')`, if `=== 'forbidden'` flips the ref + fires `toast.error('Nemáš oprávnění k administraci')` + `router.replace('/dashboard', { scroll: false })`. Deps `[searchParams, router]` keep ESLint exhaustive-deps happy; ref guards one-shot semantics. Net +27 / -1 LOC. Existing data-loading useEffect, error banner, StatCards, widgets all untouched.
+- **Refs:** `crm-frontend/src/app/dashboard/page.tsx`.
+
+### 2026-04-30 18:31 | bug-hunter | frontend-wiring-task-4 | test | OK
+- **Notes:** `npx tsc --noEmit` clean (no output, exit 0). `npm run build` Compiled successfully in 33.1s — `/dashboard` still listed as `○` (static prerendered) in build output, confirming the Suspense boundary correctly absorbs the `useSearchParams` deopt. `npx eslint src/app/dashboard/page.tsx` 0 errors / 0 warnings. No tests in repo specifically target the dashboard page render — Playwright/RTL out of scope per plan.
+- **Refs:** all green.
+
+### 2026-04-30 18:31 | bug-hunter | frontend-wiring-task-4 | self-review | OK
+- **Notes:** Re-read full diff fresh. Checks: (a) Suspense wrapper matches `app/leads/page.tsx:119-128` pattern exactly (no fallback prop, single inner component); (b) `handledForbiddenRef` correctly initialised at `false` and flipped before side-effects, preventing double-fire if React invokes the effect twice in dev StrictMode; (c) `router.replace('/dashboard', { scroll: false })` strips the param without scroll jump (verified per Next.js 16 docs — `scroll: false` is the supported option name); (d) deps array `[searchParams, router]` matches what the hook reads; ESLint exhaustive-deps not triggered; (e) data-loading useEffect untouched at its original position (still uses AbortController, still cleans up); (f) Czech toast string matches dashboard UI tone ("Přehled", "Souhrn vašeho obchodního pipeline"); (g) static-prerender preserved per build output (`○ /dashboard`); (h) no high-entropy strings introduced. 0 issues.
+- **Refs:** `git diff main`.
+
+### 2026-04-30 18:32 | tech-lead | frontend-wiring-task-4 | cross-review | OK
+- **Notes:** Tech Lead re-read full diff. All 4 sub-DoDs verified: Code Done (tsc + build + eslint clean, /dashboard still static-prerendered, no regressions). Documentation Done (task record full + RUN-LOG bundled + T3 plan checkbox ticked). Test Done (build is de-facto coverage for UI binding, check-doc-sync 0 fail, validate-task-record PASSED). Agent Done (small diff, branch convention OK, no `.clasp.json` / `.env*` / archive change). PR ready. **Plan `agent-team-frontend-wiring-v1` is at 100% on PR merge** — owner action: tick T4 box + move plan file to COMPLETED/ (manual housekeeping post-merge per plan Done definition).
+- **Refs:** `docs/14-definition-of-done.md` §1-4.
+
+### 2026-04-30 18:32 | bug-hunter | frontend-wiring-task-4 | dod-check | OK
+- **Notes:** All gates green: `check-doc-sync` 0 fail, `validate-task-record --pr-branch agent/bug-hunter/frontend-wiring-task-4` PASSED, `tsc` clean, `build` OK, `eslint` clean. Diff staged.
+- **Refs:** ready for owner review — final task in plan.

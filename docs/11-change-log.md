@@ -117,6 +117,14 @@ This task **does not** modify the security boundary itself. The owner-gate condi
 - **Code:** `crm-frontend/src/middleware.ts` (modified)
 - **Docs:** `docs/30-task-records/frontend-wiring-task-3.md`, `docs/agents/RUN-LOG.md`, `docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md`, `docs/11-change-log.md`, `docs/29-task-registry.md`
 
+### [B/frontend-wiring-task-4] Dashboard handles `?error=forbidden` with sonner toast (Suspense-wrapped, one-shot, param-stripping) — CODE-COMPLETE
+- **Scope:** T4 of plan `agent-team-frontend-wiring-v1` (`docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md`) — **final task**, closes the plan. Wires `crm-frontend/src/app/dashboard/page.tsx` (at `main` HEAD `8f3667d`) to read the `?error=forbidden` query param set by T3's middleware redirect, surface a sonner `toast.error("Nemáš oprávnění k administraci")` once on mount, and strip the param via `router.replace('/dashboard', { scroll: false })` so refresh does not re-fire the toast.
+
+This task **does not** modify the data-loading `useEffect`, the stats/leads fetching, the existing `error` banner state, the StatCard rendering, or any widget. The change is bounded to imports, a Suspense wrapper, the new `handledForbiddenRef` + forbidden-toast `useEffect`, and the rename `DashboardPage` → `DashboardPageInner` to fit the repo's established Suspense pattern (mirrors `crm-frontend/src/app/leads/page.tsx:119-128`).
+- **Owner:** Stream B
+- **Code:** `crm-frontend/src/app/dashboard/page.tsx` (modified)
+- **Docs:** `docs/30-task-records/frontend-wiring-task-4.md`, `docs/agents/RUN-LOG.md`, `docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md`, `docs/11-change-log.md`, `docs/29-task-registry.md`
+
 ## 2026-04-29
 
 ### [B/AGENT-TEAM-FIX-MAKE-BLUEPRINTS] Rewrite 5 Make blueprints in valid format + Playwright verifier (resolves QFH-0004) — CODE-COMPLETE

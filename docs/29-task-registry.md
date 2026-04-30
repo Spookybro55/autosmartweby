@@ -63,7 +63,8 @@
 | frontend-wiring-task-1 | B | Sidebar bottom user section wired to `useCurren... | Stream B | bug-hunter | code-complete | 2026-04-30 | `docs/30-task-records/frontend-wiring-task-1.md`, `docs/agents/RUN-LOG.md`, `docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md`, `docs/11-change-log.md`, `docs/29-task-registry.md` | `crm-frontend |
 | frontend-wiring-task-2 | B | Sidebar Dev Team icon swap: `ShieldCheck` → `Bot` | Stream B | bug-hunter | code-complete | 2026-04-30 | `docs/30-task-records/frontend-wiring-task-2.md`, `docs/agents/RUN-LOG.md`, `docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md`, `docs/11-change-log.md`, `docs/29-task-registry.md` | `crm-frontend |
 | frontend-wiring-task-3 | B | Middleware `/admin/*` redirect adds `?error=for... | Stream B | security-engineer | code-complete | 2026-04-30 | `docs/30-task-records/frontend-wiring-task-3.md`, `docs/agents/RUN-LOG.md`, `docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md`, `docs/11-change-log.md`, `docs/29-task-registry.md` | `crm-frontend |
+| frontend-wiring-task-4 | B | Dashboard handles `?error=forbidden` with sonne... | Stream B | bug-hunter | code-complete | 2026-04-30 | `docs/30-task-records/frontend-wiring-task-4.md`, `docs/agents/RUN-LOG.md`, `docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md`, `docs/11-change-log.md`, `docs/29-task-registry.md` | `crm-frontend |
 | redesign-lead-detail-modal | B | Redesign LeadDetailDrawer — side drawer → cente... | Stream B | - | code-complete | 2026-04-29 | docs/30-task-records/redesign-lead-detail-modal.md, docs/11-change-log.md, docs/29-task-registry.md | crm-frontend |
 | visual-restyle-dark-futuristic-pr1 | B | Visual restyle — dark futuristic premium SaaS l... | Stream B | - | code-complete | 2026-04-29 | docs/30-task-records/visual-restyle-dark-futuristic-pr1.md, docs/11-change-log.md, docs/29-task-registry.md | crm-frontend |
 
-*57 tasks total.*
+*58 tasks total.*

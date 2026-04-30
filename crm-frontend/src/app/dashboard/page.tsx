@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
 import {
   Users,
   AlertTriangle,
@@ -18,9 +20,33 @@ import type { DashboardStats } from "@/lib/domain/stats";
 import type { LeadListItem } from "@/lib/domain/lead";
 
 export default function DashboardPage() {
+  return (
+    <Suspense>
+      <DashboardPageInner />
+    </Suspense>
+  );
+}
+
+function DashboardPageInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [stats, setStats] = useState<DashboardStats | undefined>();
   const [leads, setLeads] = useState<LeadListItem[] | undefined>();
   const [error, setError] = useState<string | null>(null);
+
+  // Surface a toast when the middleware redirected here from /admin/*
+  // for a non-owner (T3 sets `?error=forbidden`). Strip the param after
+  // firing so a refresh does not re-toast. The ref guards against
+  // double-fire if searchParams changes between fire and replace.
+  const handledForbiddenRef = useRef(false);
+  useEffect(() => {
+    if (handledForbiddenRef.current) return;
+    if (searchParams.get("error") === "forbidden") {
+      handledForbiddenRef.current = true;
+      toast.error("Nemáš oprávnění k administraci");
+      router.replace("/dashboard", { scroll: false });
+    }
+  }, [searchParams, router]);
 
   useEffect(() => {
     const controller = new AbortController();
