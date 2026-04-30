@@ -2,7 +2,7 @@
 
 > **Track:** B (plan-driven)
 > **Stream:** B (frontend infrastructure)
-> **Status:** ACTIVE — activated 2026-04-30
+> **Status:** COMPLETED — 2026-04-30 (4/4 tasks shipped, PRs #98/#99/#100/#101)
 > **Owner:** Sebastián
 > **Plan ID:** `agent-team-frontend-wiring-v1`
 
@@ -136,7 +136,7 @@ Each task ships as **its own PR** following Track A workflow (claim → classify
 
 ### Task 4 — Dashboard handles `?error=forbidden` with sonner toast
 
-- [ ] **Status:** todo
+- [x] **Status:** complete (PR #101, merged 2026-04-30 18:38 UTC, commit `8a650ad`)
 - **Role:** bug-hunter
 - **Branch:** `agent/bug-hunter/frontend-wiring-task-4`
 - **Depends on:** Task 3 merged (the query param has to exist for the handler to read it; landing this PR before Task 3 would make it a no-op until Task 3 lands, which is fine but introduces dead code into a release)
