@@ -5,10 +5,11 @@
             "id": 1,
             "module": "gateway:CustomWebHook",
             "version": 1,
-            "parameters": {"maxResults": 1},
+            "parameters": {
+                "maxResults": 1
+            },
             "metadata": {
                 "designer": {"x": 0, "y": 0},
-                "restore": {},
                 "parameters": [
                     {"name": "hook", "type": "hook:gateway-webhook", "label": "Webhook", "required": true},
                     {"name": "maxResults", "type": "number", "label": "Maximum number of results"}
@@ -17,17 +18,45 @@
         },
         {
             "id": 2,
-            "module": "util:GetVariables",
-            "version": 1,
-            "parameters": {},
+            "module": "http:MakeRequest",
+            "version": 4,
+            "parameters": {
+                "tlsType": "",
+                "proxyKeychain": "",
+                "authenticationType": "noAuth"
+            },
             "mapper": {
-                "variables": [
-                    {"name": "_replace_with", "value": "GitHub → Get a Pull Request (owner=Spookybro55, repo=autosmartweby, number={{1.pull_request.number}})"}
-                ]
+                "url": "https://api.github.com/repos/Spookybro55/autosmartweby/pulls/{{1.pull_request.number}}",
+                "method": "get",
+                "headers": [
+                    {"name": "Authorization", "value": "Bearer TODO_GITHUB_TOKEN"},
+                    {"name": "Accept", "value": "application/vnd.github.v3.diff"},
+                    {"name": "X-GitHub-Api-Version", "value": "2022-11-28"}
+                ],
+                "shareCookies": false,
+                "parseResponse": false,
+                "allowRedirects": true,
+                "stopOnHttpError": true,
+                "useNumberAsString": false,
+                "useMtls": false
             },
             "metadata": {
-                "designer": {"x": 300, "y": 0},
-                "restore": {}
+                "designer": {"x": 300, "y": 0}
+            },
+            "filter": {
+                "name": "Merged agent PR",
+                "conditions": [
+                    [
+                        {"a": "{{1.action}}", "o": "text:equal", "b": "closed"},
+                        {"a": "{{1.pull_request.merged}}", "o": "text:equal", "b": "true"},
+                        {"a": "{{1.pull_request.head.ref}}", "o": "text:startswith", "b": "agent/"}
+                    ],
+                    [
+                        {"a": "{{1.action}}", "o": "text:equal", "b": "closed"},
+                        {"a": "{{1.pull_request.merged}}", "o": "text:equal", "b": "true"},
+                        {"a": "{{1.pull_request.head.ref}}", "o": "text:startswith", "b": "agent-team/"}
+                    ]
+                ]
             }
         },
         {
@@ -43,13 +72,13 @@
                 "url": "https://api.anthropic.com/v1/messages",
                 "method": "post",
                 "headers": [
-                    {"name": "x-api-key", "value": "PASTE_ANTHROPIC_API_KEY_AFTER_IMPORT"},
+                    {"name": "x-api-key", "value": "TODO_ANTHROPIC_API_KEY"},
                     {"name": "anthropic-version", "value": "2023-06-01"},
                     {"name": "content-type", "value": "application/json"}
                 ],
                 "contentType": "application/json",
                 "bodyType": "raw",
-                "data": "{\"model\":\"claude-sonnet-4-6\",\"max_tokens\":1500,\"system\":\"Analyze a merged PR diff (Autosmartweby — Czech CRM, Apps Script + Next.js). Extract: PATTERN (reusable approach), GOTCHA (non-obvious pitfall), REGRESSION (risk note). 1-3 sentences each. Reference file paths and finding IDs (SEC-013, FF-020). Return JSON {pattern, gotcha, regression, references}. Use null for missing.\",\"messages\":[{\"role\":\"user\",\"content\":\"PR #{{1.pull_request.number}}: {{1.pull_request.title}}\"}]}",
+                "data": "{\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 1500,\n  \"system\": \"You analyze a merged PR diff (Autosmartweby — Czech CRM, Apps Script + Next.js). Extract project-specific knowledge and return ONLY a strict JSON object: {\\\"pattern\\\": string|null, \\\"gotcha\\\": string|null, \\\"regression\\\": string|null}. PATTERN = a reusable approach worth documenting. GOTCHA = a non-obvious pitfall future readers should know. REGRESSION = risk note (this fix could be undone by X). 1-3 sentences each. Reference file paths and finding IDs (SEC-013, FF-020). Use null for any field not applicable. Return JSON only, no markdown fences.\",\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"PR #{{1.pull_request.number}}: {{1.pull_request.title}}\\nBranch: {{1.pull_request.head.ref}}\\n\\nBody:\\n{{1.pull_request.body}}\\n\\nDiff (first 8000 chars):\\n{{substring(2.data; 0; 8000)}}\"\n  }]\n}",
                 "shareCookies": false,
                 "parseResponse": true,
                 "allowRedirects": true,
@@ -60,6 +89,164 @@
             "metadata": {
                 "designer": {"x": 600, "y": 0}
             }
+        },
+        {
+            "id": 4,
+            "module": "builtin:BasicRouter",
+            "version": 1,
+            "metadata": {"designer": {"x": 900, "y": 0}},
+            "routes": [
+                {
+                    "flow": [
+                        {
+                            "id": 5,
+                            "module": "http:MakeRequest",
+                            "version": 4,
+                            "parameters": {"tlsType": "", "proxyKeychain": "", "authenticationType": "noAuth"},
+                            "mapper": {
+                                "url": "https://api.github.com/repos/Spookybro55/autosmartweby/contents/docs/agents/PATTERNS.md",
+                                "method": "get",
+                                "headers": [
+                                    {"name": "Authorization", "value": "Bearer TODO_GITHUB_TOKEN"},
+                                    {"name": "Accept", "value": "application/vnd.github+json"}
+                                ],
+                                "shareCookies": false,
+                                "parseResponse": true,
+                                "allowRedirects": true,
+                                "stopOnHttpError": true,
+                                "useNumberAsString": false,
+                                "useMtls": false
+                            },
+                            "metadata": {"designer": {"x": 1200, "y": -300}}
+                        },
+                        {
+                            "id": 6,
+                            "module": "http:MakeRequest",
+                            "version": 4,
+                            "parameters": {"tlsType": "", "proxyKeychain": "", "authenticationType": "noAuth"},
+                            "mapper": {
+                                "url": "https://api.github.com/repos/Spookybro55/autosmartweby/contents/docs/agents/PATTERNS.md",
+                                "method": "put",
+                                "headers": [
+                                    {"name": "Authorization", "value": "Bearer TODO_GITHUB_TOKEN"},
+                                    {"name": "Accept", "value": "application/vnd.github+json"},
+                                    {"name": "content-type", "value": "application/json"}
+                                ],
+                                "contentType": "application/json",
+                                "bodyType": "raw",
+                                "data": "{\n  \"message\": \"chore(agents): learning loop from PR #{{1.pull_request.number}}\",\n  \"branch\": \"main\",\n  \"sha\": \"{{5.body.sha}}\",\n  \"content\": \"{{base64encode(replace(base64decode(5.body.content); '<!-- learning-loop-marker: PATTERN-AUTO-END -->'; concat('### PATTERN-AUTO-' + 1.pull_request.number + ': ' + 1.pull_request.title + chr(10) + '- **Source:** PR #' + 1.pull_request.number + chr(10) + '- **Pattern:** ' + parseJSON(3.body.content[0].text).pattern + chr(10) + chr(10) + '<!-- learning-loop-marker: PATTERN-AUTO-END -->')))}}\"\n}",
+                                "shareCookies": false,
+                                "parseResponse": true,
+                                "allowRedirects": true,
+                                "stopOnHttpError": true,
+                                "useNumberAsString": false,
+                                "useMtls": false
+                            },
+                            "metadata": {"designer": {"x": 1500, "y": -300}}
+                        }
+                    ]
+                },
+                {
+                    "flow": [
+                        {
+                            "id": 7,
+                            "module": "http:MakeRequest",
+                            "version": 4,
+                            "parameters": {"tlsType": "", "proxyKeychain": "", "authenticationType": "noAuth"},
+                            "mapper": {
+                                "url": "https://api.github.com/repos/Spookybro55/autosmartweby/contents/docs/agents/GOTCHAS.md",
+                                "method": "get",
+                                "headers": [
+                                    {"name": "Authorization", "value": "Bearer TODO_GITHUB_TOKEN"},
+                                    {"name": "Accept", "value": "application/vnd.github+json"}
+                                ],
+                                "shareCookies": false,
+                                "parseResponse": true,
+                                "allowRedirects": true,
+                                "stopOnHttpError": true,
+                                "useNumberAsString": false,
+                                "useMtls": false
+                            },
+                            "metadata": {"designer": {"x": 1200, "y": 0}}
+                        },
+                        {
+                            "id": 8,
+                            "module": "http:MakeRequest",
+                            "version": 4,
+                            "parameters": {"tlsType": "", "proxyKeychain": "", "authenticationType": "noAuth"},
+                            "mapper": {
+                                "url": "https://api.github.com/repos/Spookybro55/autosmartweby/contents/docs/agents/GOTCHAS.md",
+                                "method": "put",
+                                "headers": [
+                                    {"name": "Authorization", "value": "Bearer TODO_GITHUB_TOKEN"},
+                                    {"name": "Accept", "value": "application/vnd.github+json"},
+                                    {"name": "content-type", "value": "application/json"}
+                                ],
+                                "contentType": "application/json",
+                                "bodyType": "raw",
+                                "data": "{\n  \"message\": \"chore(agents): learning loop from PR #{{1.pull_request.number}}\",\n  \"branch\": \"main\",\n  \"sha\": \"{{7.body.sha}}\",\n  \"content\": \"{{base64encode(replace(base64decode(7.body.content); '<!-- learning-loop-marker: GOTCHA-AUTO-END -->'; concat('### GOTCHA-AUTO-' + 1.pull_request.number + ': ' + 1.pull_request.title + chr(10) + '- **Source:** PR #' + 1.pull_request.number + chr(10) + '- **Where it bites:** ' + parseJSON(3.body.content[0].text).gotcha + chr(10) + chr(10) + '<!-- learning-loop-marker: GOTCHA-AUTO-END -->')))}}\"\n}",
+                                "shareCookies": false,
+                                "parseResponse": true,
+                                "allowRedirects": true,
+                                "stopOnHttpError": true,
+                                "useNumberAsString": false,
+                                "useMtls": false
+                            },
+                            "metadata": {"designer": {"x": 1500, "y": 0}}
+                        }
+                    ]
+                },
+                {
+                    "flow": [
+                        {
+                            "id": 9,
+                            "module": "http:MakeRequest",
+                            "version": 4,
+                            "parameters": {"tlsType": "", "proxyKeychain": "", "authenticationType": "noAuth"},
+                            "mapper": {
+                                "url": "https://api.github.com/repos/Spookybro55/autosmartweby/contents/docs/agents/REGRESSION-LOG.md",
+                                "method": "get",
+                                "headers": [
+                                    {"name": "Authorization", "value": "Bearer TODO_GITHUB_TOKEN"},
+                                    {"name": "Accept", "value": "application/vnd.github+json"}
+                                ],
+                                "shareCookies": false,
+                                "parseResponse": true,
+                                "allowRedirects": true,
+                                "stopOnHttpError": true,
+                                "useNumberAsString": false,
+                                "useMtls": false
+                            },
+                            "metadata": {"designer": {"x": 1200, "y": 300}}
+                        },
+                        {
+                            "id": 10,
+                            "module": "http:MakeRequest",
+                            "version": 4,
+                            "parameters": {"tlsType": "", "proxyKeychain": "", "authenticationType": "noAuth"},
+                            "mapper": {
+                                "url": "https://api.github.com/repos/Spookybro55/autosmartweby/contents/docs/agents/REGRESSION-LOG.md",
+                                "method": "put",
+                                "headers": [
+                                    {"name": "Authorization", "value": "Bearer TODO_GITHUB_TOKEN"},
+                                    {"name": "Accept", "value": "application/vnd.github+json"},
+                                    {"name": "content-type", "value": "application/json"}
+                                ],
+                                "contentType": "application/json",
+                                "bodyType": "raw",
+                                "data": "{\n  \"message\": \"chore(agents): learning loop from PR #{{1.pull_request.number}}\",\n  \"branch\": \"main\",\n  \"sha\": \"{{9.body.sha}}\",\n  \"content\": \"{{base64encode(replace(base64decode(9.body.content); '<!-- learning-loop-marker: REGRESSION-AUTO-END -->'; concat('### REGRESSION-AUTO-' + 1.pull_request.number + ': ' + 1.pull_request.title + chr(10) + '- **First fixed in:** PR #' + 1.pull_request.number + chr(10) + '- **Re-introduction risk:** ' + parseJSON(3.body.content[0].text).regression + chr(10) + chr(10) + '<!-- learning-loop-marker: REGRESSION-AUTO-END -->')))}}\"\n}",
+                                "shareCookies": false,
+                                "parseResponse": true,
+                                "allowRedirects": true,
+                                "stopOnHttpError": true,
+                                "useNumberAsString": false,
+                                "useMtls": false
+                            },
+                            "metadata": {"designer": {"x": 1500, "y": 300}}
+                        }
+                    ]
+                }
+            ]
         }
     ],
     "metadata": {
@@ -79,27 +266,13 @@
         },
         "designer": {"orphans": []},
         "zone": "eu2.make.com",
-        "notes": [
-            {
-                "moduleIds": [1],
-                "content": "<p><strong>Module 1 — Webhooks → Custom webhook</strong> (REAL). After import: open module config → Create a webhook → save. Make assigns unique URL → copy to GitHub repo Settings → Webhooks → Add (Payload URL = Make webhook, Content-type = application/json, Events = Pull requests).</p>",
-                "isFilterNote": false
-            },
-            {
-                "moduleIds": [2],
-                "content": "<p><strong>Module 2 — REPLACE with GitHub → Get a Pull Request.</strong> Returns full PR metadata.</p>",
-                "isFilterNote": false
-            },
-            {
-                "moduleIds": [3],
-                "content": "<p><strong>Module 3 — HTTP fallback for Anthropic API</strong> (REAL). Replace 'PASTE_ANTHROPIC_API_KEY_AFTER_IMPORT' header value with key from <code>~/.config/anthropic/api-key</code>. <strong>Never commit the real key.</strong></p>",
-                "isFilterNote": false
-            },
-            {
-                "moduleIds": [],
-                "content": "<p><strong>Trigger:</strong> webhook (instant=true). <strong>Cost:</strong> ~$0.05/PR. <strong>Ops/měs:</strong> ~60. After import, Sebastián adds Tools → Parse JSON + 3× GitHub → Update file (PATTERNS / GOTCHAS / REGRESSION-LOG) per IMPORT-GUIDE.md.</p>",
-                "isFilterNote": false
-            }
-        ]
+        "notes": []
+    },
+    "_setup_notes": {
+        "github_token": "Replace TODO_GITHUB_TOKEN in modules 2, 5, 6, 7, 8, 9, 10 Authorization headers with a GitHub PAT (scope: repo, write needed for PUT /contents).",
+        "anthropic_key": "Replace TODO_ANTHROPIC_API_KEY in module 3 x-api-key header with key from ~/.config/anthropic/api-key. Never commit the real key.",
+        "webhook": "After import, open module 1 (Webhooks) → Create a webhook → save. Make assigns a URL. Copy URL → GitHub repo Settings → Webhooks → Add webhook (Payload URL = Make webhook URL, Content type = application/json, Events = Pull requests, Active = ✓).",
+        "scheduling": "instant=true (webhook trigger). No cron schedule.",
+        "cost": "~$0.05 per merged agent PR via Anthropic Sonnet 4.6 (~1500 tokens). Set Anthropic Console → Billing → Spend caps to monthly $20 as safety net."
     }
 }

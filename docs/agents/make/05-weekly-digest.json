@@ -3,21 +3,6 @@
     "flow": [
         {
             "id": 1,
-            "module": "util:GetVariables",
-            "version": 1,
-            "parameters": {},
-            "mapper": {
-                "variables": [
-                    {"name": "_replace_with", "value": "GitHub → List Pull Requests (owner=Spookybro55, repo=autosmartweby, state=closed, limit=100)"}
-                ]
-            },
-            "metadata": {
-                "designer": {"x": 0, "y": 0},
-                "restore": {}
-            }
-        },
-        {
-            "id": 2,
             "module": "http:MakeRequest",
             "version": 4,
             "parameters": {
@@ -26,16 +11,13 @@
                 "authenticationType": "noAuth"
             },
             "mapper": {
-                "url": "https://ntfy.sh/autosmartweby-agents-123456789",
-                "method": "post",
+                "url": "https://api.github.com/repos/Spookybro55/autosmartweby/pulls?state=closed&per_page=100&sort=updated&direction=desc",
+                "method": "get",
                 "headers": [
-                    {"name": "Title", "value": "Agent Team — Weekly Digest"},
-                    {"name": "Tags", "value": "bar_chart,calendar"},
-                    {"name": "Priority", "value": "default"}
+                    {"name": "Authorization", "value": "Bearer TODO_GITHUB_TOKEN"},
+                    {"name": "Accept", "value": "application/vnd.github+json"},
+                    {"name": "X-GitHub-Api-Version", "value": "2022-11-28"}
                 ],
-                "contentType": "text/plain",
-                "bodyType": "raw",
-                "data": "Past 7 days summary (configure aggregation in Make UI for per-role count).\n\nReview backlog: https://github.com/Spookybro55/autosmartweby/pulls\nQueue: https://github.com/Spookybro55/autosmartweby/blob/main/docs/agents/QUEUE.md\n\nManual cost: https://console.anthropic.com/settings/usage",
                 "shareCookies": false,
                 "parseResponse": true,
                 "allowRedirects": true,
@@ -44,7 +26,65 @@
                 "useMtls": false
             },
             "metadata": {
+                "designer": {"x": 0, "y": 0}
+            }
+        },
+        {
+            "id": 2,
+            "module": "builtin:ArrayAggregator",
+            "version": 1,
+            "parameters": {},
+            "mapper": {
+                "value": "{{get(split(1.head.ref; \"/\"); 2)}}"
+            },
+            "metadata": {
                 "designer": {"x": 300, "y": 0}
+            },
+            "filter": {
+                "name": "Merged agent PRs (past 7 days)",
+                "conditions": [
+                    [
+                        {"a": "{{1.merged_at}}", "o": "text:notequal", "b": ""},
+                        {"a": "{{1.head.ref}}", "o": "text:startswith", "b": "agent/"},
+                        {"a": "{{addDays(1.merged_at, 7)}}", "o": "date:greater", "b": "{{now}}"}
+                    ],
+                    [
+                        {"a": "{{1.merged_at}}", "o": "text:notequal", "b": ""},
+                        {"a": "{{1.head.ref}}", "o": "text:startswith", "b": "agent-team/"},
+                        {"a": "{{addDays(1.merged_at, 7)}}", "o": "date:greater", "b": "{{now}}"}
+                    ]
+                ]
+            }
+        },
+        {
+            "id": 3,
+            "module": "http:MakeRequest",
+            "version": 4,
+            "parameters": {
+                "tlsType": "",
+                "proxyKeychain": "",
+                "authenticationType": "noAuth"
+            },
+            "mapper": {
+                "url": "https://ntfy.sh/TODO_NTFY_TOPIC",
+                "method": "post",
+                "headers": [
+                    {"name": "Title", "value": "Agent Team — Weekly Digest"},
+                    {"name": "Tags", "value": "bar_chart,calendar"},
+                    {"name": "Priority", "value": "default"}
+                ],
+                "contentType": "text/plain",
+                "bodyType": "raw",
+                "data": "Past 7 days: {{length(2.array)}} agent PRs merged.\n\nBy role (head.ref segment): {{join(2.array; \", \")}}\n\nBacklog: https://github.com/Spookybro55/autosmartweby/pulls\nQueue: https://github.com/Spookybro55/autosmartweby/blob/main/docs/agents/QUEUE.md\nCost: https://console.anthropic.com/settings/usage",
+                "shareCookies": false,
+                "parseResponse": true,
+                "allowRedirects": true,
+                "stopOnHttpError": true,
+                "useNumberAsString": false,
+                "useMtls": false
+            },
+            "metadata": {
+                "designer": {"x": 600, "y": 0}
             }
         }
     ],
@@ -65,22 +105,12 @@
         },
         "designer": {"orphans": []},
         "zone": "eu2.make.com",
-        "notes": [
-            {
-                "moduleIds": [1],
-                "content": "<p><strong>Module 1 — REPLACE with GitHub → List Pull Requests</strong> (state=closed). Add edge filter <code>head.ref starts with agent/</code> AND <code>merged_at > now - 604800000 ms</code>.</p>",
-                "isFilterNote": false
-            },
-            {
-                "moduleIds": [2],
-                "content": "<p><strong>Module 2 — HTTP → ntfy</strong> (REAL). After import, Sebastián adds <strong>Tools → Aggregator (group_by head.ref)</strong> step BEFORE this HTTP for per-role breakdown.</p>",
-                "isFilterNote": false
-            },
-            {
-                "moduleIds": [],
-                "content": "<p><strong>Schedule:</strong> cron <code>0 9 * * 1</code> Monday 09:00 Europe/Prague. <strong>Ops/měs:</strong> ~4.</p>",
-                "isFilterNote": false
-            }
-        ]
+        "notes": []
+    },
+    "_setup_notes": {
+        "github_token": "Replace TODO_GITHUB_TOKEN in module 1 Authorization header.",
+        "ntfy_topic": "Replace TODO_NTFY_TOPIC in module 3 mapper.url.",
+        "schedule": "After import, in Make UI: cron 0 9 * * 1 Europe/Prague (Monday 09:00).",
+        "role_extraction": "Module 2 extracts role from head.ref of pattern 'agent/{role}/{task-id}' via split(...)[2]. For 'agent-team/{phase}' branches the second segment is the phase name (e.g. 'phase-2-roles-and-automation'); rendered as-is in the digest body."
     }
 }

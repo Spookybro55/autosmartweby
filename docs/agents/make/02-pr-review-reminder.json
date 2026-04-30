@@ -3,21 +3,6 @@
     "flow": [
         {
             "id": 1,
-            "module": "util:GetVariables",
-            "version": 1,
-            "parameters": {},
-            "mapper": {
-                "variables": [
-                    {"name": "_replace_with", "value": "GitHub → List Pull Requests (owner=Spookybro55, repo=autosmartweby, state=open, limit=50)"}
-                ]
-            },
-            "metadata": {
-                "designer": {"x": 0, "y": 0},
-                "restore": {}
-            }
-        },
-        {
-            "id": 2,
             "module": "http:MakeRequest",
             "version": 4,
             "parameters": {
@@ -26,16 +11,13 @@
                 "authenticationType": "noAuth"
             },
             "mapper": {
-                "url": "https://ntfy.sh/autosmartweby-agents-123456789",
-                "method": "post",
+                "url": "https://api.github.com/repos/Spookybro55/autosmartweby/pulls?state=open&per_page=100",
+                "method": "get",
                 "headers": [
-                    {"name": "Title", "value": "Agent PR awaiting review"},
-                    {"name": "Tags", "value": "warning,git"},
-                    {"name": "Priority", "value": "high"}
+                    {"name": "Authorization", "value": "Bearer TODO_GITHUB_TOKEN"},
+                    {"name": "Accept", "value": "application/vnd.github+json"},
+                    {"name": "X-GitHub-Api-Version", "value": "2022-11-28"}
                 ],
-                "contentType": "text/plain",
-                "bodyType": "raw",
-                "data": "Agent PR open > 24h.\n\nReview: https://github.com/Spookybro55/autosmartweby/pulls?q=is%3Aopen+head%3Aagent%2F",
                 "shareCookies": false,
                 "parseResponse": true,
                 "allowRedirects": true,
@@ -44,8 +26,88 @@
                 "useMtls": false
             },
             "metadata": {
-                "designer": {"x": 300, "y": 0}
+                "designer": {"x": 0, "y": 0}
             }
+        },
+        {
+            "id": 2,
+            "module": "builtin:NumericAggregator",
+            "version": 1,
+            "parameters": {},
+            "mapper": {
+                "value": "1",
+                "fn": "count"
+            },
+            "metadata": {
+                "designer": {"x": 300, "y": 0}
+            },
+            "filter": {
+                "name": "Agent PR > 24h",
+                "conditions": [
+                    [
+                        {"a": "{{1.head.ref}}", "o": "text:startswith", "b": "agent/"},
+                        {"a": "{{addMinutes(1.created_at, 1440)}}", "o": "date:less", "b": "{{now}}"}
+                    ],
+                    [
+                        {"a": "{{1.head.ref}}", "o": "text:startswith", "b": "agent-team/"},
+                        {"a": "{{addMinutes(1.created_at, 1440)}}", "o": "date:less", "b": "{{now}}"}
+                    ]
+                ]
+            }
+        },
+        {
+            "id": 3,
+            "module": "builtin:BasicRouter",
+            "version": 1,
+            "metadata": {
+                "designer": {"x": 600, "y": 0}
+            },
+            "routes": [
+                {
+                    "flow": [
+                        {
+                            "id": 4,
+                            "module": "http:MakeRequest",
+                            "version": 4,
+                            "parameters": {
+                                "tlsType": "",
+                                "proxyKeychain": "",
+                                "authenticationType": "noAuth"
+                            },
+                            "mapper": {
+                                "url": "https://ntfy.sh/TODO_NTFY_TOPIC",
+                                "method": "post",
+                                "headers": [
+                                    {"name": "Title", "value": "Agent PRs awaiting review"},
+                                    {"name": "Tags", "value": "warning,git"},
+                                    {"name": "Priority", "value": "high"},
+                                    {"name": "Click", "value": "https://github.com/Spookybro55/autosmartweby/pulls?q=is%3Aopen+head%3Aagent%2F"}
+                                ],
+                                "contentType": "text/plain",
+                                "bodyType": "raw",
+                                "data": "{{2.result}} agent PRs open > 24h.\n\nReview: https://github.com/Spookybro55/autosmartweby/pulls?q=is%3Aopen+head%3Aagent%2F",
+                                "shareCookies": false,
+                                "parseResponse": true,
+                                "allowRedirects": true,
+                                "stopOnHttpError": true,
+                                "useNumberAsString": false,
+                                "useMtls": false
+                            },
+                            "metadata": {
+                                "designer": {"x": 900, "y": 0}
+                            },
+                            "filter": {
+                                "name": "Has matches",
+                                "conditions": [
+                                    [
+                                        {"a": "{{2.result}}", "o": "number:greater", "b": "0"}
+                                    ]
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ]
         }
     ],
     "metadata": {
@@ -65,22 +127,11 @@
         },
         "designer": {"orphans": []},
         "zone": "eu2.make.com",
-        "notes": [
-            {
-                "moduleIds": [1],
-                "content": "<p><strong>Module 1 — REPLACE with GitHub → List Pull Requests.</strong> After import: right-click placeholder → Replace → search 'GitHub' → 'List Pull Requests'. Add edge filter <code>head.ref starts with agent/</code> AND <code>(now - created_at) > 86400000 ms</code>.</p>",
-                "isFilterNote": false
-            },
-            {
-                "moduleIds": [2],
-                "content": "<p><strong>Module 2 — HTTP → ntfy</strong> (REAL).</p>",
-                "isFilterNote": false
-            },
-            {
-                "moduleIds": [],
-                "content": "<p><strong>Schedule:</strong> cron <code>0 9,11,13,15,18,21 * * *</code> Europe/Prague. <strong>Ops/měs:</strong> ~180.</p>",
-                "isFilterNote": false
-            }
-        ]
+        "notes": []
+    },
+    "_setup_notes": {
+        "github_token": "Replace TODO_GITHUB_TOKEN in module 1 Authorization header with a GitHub PAT (scope: repo, read-only OK).",
+        "ntfy_topic": "Replace TODO_NTFY_TOPIC in module 4 mapper.url.",
+        "schedule": "After import, in Make UI: cron 0 9,11,13,15,18,21 * * * Europe/Prague (6× daily)."
     }
 }

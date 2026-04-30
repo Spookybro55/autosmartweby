@@ -8,18 +8,27 @@
 
 ## 2026-04-30
 
-### [B/AGENT-TEAM-MAKE-BLUEPRINTS-REAL-IDS] Make blueprints — replace placeholders with real module IDs where catalog known + Playwright import-and-save (5/5 saved in Make) — CODE-COMPLETE
+### [B/AGENT-TEAM-MAKE-BLUEPRINTS-REAL-IDS] Make blueprints — explicit HTTP-only chains with full filter/aggregator/router logic (no util:GetVariables placeholders) — CODE-COMPLETE
 - **Scope:** PR #93 shipped 5 blueprints with 100% `util:GetVariables` placeholders.
-Sebastián asked: build valid blueprints with real module IDs from Make's
-catalog and import them programmatically (skip UI clicking).
+First iteration of this branch (commit 4700ae2) replaced some placeholders
+with real module IDs but kept GitHub modules as `util:GetVariables`
+placeholders — Sebastián rejected this as "still not acceptable" because
+it required manual scenario design in Make UI.
 
-**Outcome:** mixed-fidelity blueprints — real module IDs where Make's
-catalog was confirmed via inspecting Sebastián's existing scenarios
-(`http:MakeRequest`, `gateway:CustomWebHook`, `builtin:BasicRouter`),
-`util:GetVariables` placeholder for unknown apps (GitHub Watch Commits /
-List Pull Requests / Get Pull Request — Make's GitHub module IDs are
-not in our extracted catalog yet, and one guess `github:WatchCommits`
-was rejected by Make's import validator with `Module not found`).
+**Final iteration:** rewrite all 5 blueprints as **explicit HTTP-only
+chains against the GitHub REST API**. No util:GetVariables placeholders.
+Full filter/aggregator/router logic embedded in JSON. Sebastián's only
+manual edits post-import: replace 3 secret placeholder strings.
+
+**Module IDs used (all confirmed via verify-make-blueprint.mjs):**
+- `http:MakeRequest` v4 — every API call (GitHub + Anthropic + ntfy)
+- `gateway:CustomWebHook` v1 — Learning Loop trigger
+- `builtin:BasicRouter` v1 — conditional routing
+- `builtin:NumericAggregator` v1 — count operations
+- `builtin:ArrayAggregator` v1 — collect role list
+
+No util:GetVariables anywhere. No "Sebastián adds X manually" steps for
+scenario logic.
 
 **All 5 blueprints PASS Make's import validator AND save successfully:**
 | Scenario | Make scenario id |
