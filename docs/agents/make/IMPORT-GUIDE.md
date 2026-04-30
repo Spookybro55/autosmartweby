@@ -21,7 +21,7 @@ ambiguity about Make's internal GitHub module IDs and makes auth explicit
 | 02-pr-review-reminder | 4 | HTTP GET /pulls?state=open → filter agent/* AND > 24h → NumericAggregator (count) → Router (count > 0) → HTTP POST ntfy. |
 | 03-learning-loop | 10 | Webhook trigger → filter merged-agent-PR → HTTP GET /pulls/{N} (Accept: vnd.github.v3.diff) → HTTP POST Anthropic → Router 3 routes (PATTERNS / GOTCHAS / REGRESSION-LOG): each = HTTP GET file → HTTP PUT file with base64-decode + replace marker + base64-encode. |
 | 04-backpressure-check | 4 | Same shape as 02 but route filter `count >= 5`. |
-| 05-weekly-digest | 3 | HTTP GET /pulls?state=closed → filter merged + agent + within 7d → ArrayAggregator (collect role from `split(head.ref, "/")[2]`) → HTTP POST ntfy with total + role list. |
+| 05-weekly-digest | 3 | HTTP GET /pulls?state=closed → filter merged + agent + within 7d → ArrayAggregator (collect role from `split(head.ref, "/")[2]`) → HTTP POST ntfy with total + role list. **MVP behavior:** the role list contains duplicates (one entry per merged PR, no de-duplication or per-role count). Sebastián sees frequency by counting occurrences in the rendered notification (e.g. `bug-hunter, bug-hunter, bug-hunter, security-engineer` = 3 bug-hunter + 1 security-engineer). True per-role aggregation in Make requires nested aggregator chain (ArrayAggregator with `groupBy` → iteration per group → second NumericAggregator) which is deferred as out-of-scope for MVP digest. |
 
 ## 3 placeholders to replace post-import
 
