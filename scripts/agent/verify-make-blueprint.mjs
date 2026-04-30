@@ -24,12 +24,14 @@ const TMP = tmpdir();
 const SHOT = (n, label) => join(TMP, `verify-step-${String(n).padStart(2, '0')}-${label}.png`);
 const log = (...args) => console.error('[verify]', ...args);
 
-const blueprintPath = process.argv[2];
+const args = process.argv.slice(2);
+const saveAfterImport = args.includes("--save");
+const blueprintPath = args.find((a) => !a.startsWith("--"));
 if (!blueprintPath || !existsSync(blueprintPath)) {
-  log(`Usage: node ${process.argv[1]} <blueprint.json>`);
+  log(`Usage: node ${process.argv[1]} [--save] <blueprint.json>`);
   process.exit(2);
 }
-log(`Blueprint: ${blueprintPath}`);
+log(`Blueprint: ${blueprintPath}${saveAfterImport ? " (will save after import)" : ""}`);
 
 const fail = async (page, n, label, err) => {
   const path = SHOT(n, label);
@@ -220,7 +222,49 @@ async function main() {
     }
 
     log('IMPORT SUCCESS — no error text detected');
-    console.log(JSON.stringify({ ok: true, blueprint: basename(blueprintPath), url, title: scenarioName }, null, 2));
+
+    // Optionally save the scenario. Click the floppy "Save" button in the
+    // bottom toolbar; Ctrl+S alone often doesn't fire if focus is wrong.
+    let savedScenarioId = null;
+    let savedUrl = url;
+    if (saveAfterImport) {
+      log('saving scenario via floppy Save button');
+      // Try aria-label / title-based locator first
+      const saveCandidates = [
+        page.locator('button[aria-label*="save" i]:not([aria-label*="run" i])').first(),
+        page.locator('button[title*="save" i]').first(),
+        page.locator('[data-testid*="save"]').first(),
+      ];
+      let clicked = false;
+      for (const loc of saveCandidates) {
+        if (await loc.count()) {
+          try {
+            await loc.click({ timeout: 4000, force: true });
+            clicked = true;
+            log('Save button clicked');
+            break;
+          } catch {}
+        }
+      }
+      if (!clicked) {
+        log('floppy Save button not found via aria/title — falling back to Ctrl+S');
+        await page.keyboard.press('Control+S');
+      }
+      await page.waitForTimeout(5000);
+      savedUrl = page.url();
+      const m = savedUrl.match(/\/scenarios\/(\d+)/);
+      savedScenarioId = m ? m[1] : null;
+      log(`post-save URL ${savedUrl}; id=${savedScenarioId ?? '?'}`);
+      try { await page.screenshot({ path: SHOT(8, 'after-save') }); } catch {}
+    }
+
+    console.log(JSON.stringify({
+      ok: true,
+      blueprint: basename(blueprintPath),
+      url: savedUrl,
+      title: scenarioName,
+      savedScenarioId,
+    }, null, 2));
     process.exit(0);
   } catch (e) {
     await fail(page, 5, 'detect-outcome', e);

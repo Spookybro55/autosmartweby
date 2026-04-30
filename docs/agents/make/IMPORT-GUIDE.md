@@ -8,6 +8,36 @@
 5 Make scenarios žije v `docs/agents/make/0{1,2,3,4,5}-*.json`. Make Core
 ($9/měs, 10k ops) plně podporuje všechny tyto scenarios; expected total ~1000 ops/měs.
 
+## Architecture (HTTP-only against GitHub REST API)
+
+These blueprints implement complete logic. They use **HTTP modules against
+GitHub REST API** instead of Make's native GitHub connector — this avoids
+ambiguity about Make's internal GitHub module IDs and makes auth explicit
+(GitHub PAT in Authorization header).
+
+| Scenario | Modules | Logic |
+|---|---|---|
+| 01-daily-triage | 1 | HTTP POST ntfy. Schedule fires daily, no GitHub query. |
+| 02-pr-review-reminder | 4 | HTTP GET /pulls?state=open → filter agent/* AND > 24h → NumericAggregator (count) → Router (count > 0) → HTTP POST ntfy. |
+| 03-learning-loop | 10 | Webhook trigger → filter merged-agent-PR → HTTP GET /pulls/{N} (Accept: vnd.github.v3.diff) → HTTP POST Anthropic → Router 3 routes (PATTERNS / GOTCHAS / REGRESSION-LOG): each = HTTP GET file → HTTP PUT file with base64-decode + replace marker + base64-encode. |
+| 04-backpressure-check | 4 | Same shape as 02 but route filter `count >= 5`. |
+| 05-weekly-digest | 3 | HTTP GET /pulls?state=closed → filter merged + agent + within 7d → ArrayAggregator (collect role from `split(head.ref, "/")[2]`) → HTTP POST ntfy with total + role list. **MVP behavior:** the role list contains duplicates (one entry per merged PR, no de-duplication or per-role count). Sebastián sees frequency by counting occurrences in the rendered notification (e.g. `bug-hunter, bug-hunter, bug-hunter, security-engineer` = 3 bug-hunter + 1 security-engineer). True per-role aggregation in Make requires nested aggregator chain (ArrayAggregator with `groupBy` → iteration per group → second NumericAggregator) which is deferred as out-of-scope for MVP digest. |
+
+## 3 placeholders to replace post-import
+
+After importing each blueprint, replace these strings in the imported scenario
+modules (search-replace via Make UI or edit module config dialog):
+
+| Placeholder | Where | Value |
+|---|---|---|
+| `TODO_GITHUB_TOKEN` | every HTTP request to api.github.com (Authorization header) | GitHub PAT (scope: `repo`). One token used by all scenarios. |
+| `TODO_ANTHROPIC_API_KEY` | 03-learning-loop module 3 (x-api-key header) | `cat ~/.config/anthropic/api-key` |
+| `TODO_NTFY_TOPIC` | every HTTP POST to ntfy.sh (URL path) | Random ntfy topic name (e.g. `openssl rand -hex 7`). NEVER commit to repo. |
+
+These are the only manual edits. All scenario logic (filters, routers,
+aggregators, base64 manipulation, ntfy bodies) is pre-built in the blueprint
+JSON.
+
 ---
 
 ## Předpoklady (před importem)
@@ -44,35 +74,19 @@ Bez něj nepojede `03-learning-loop` (ostatní 4 scenarios poběží OK).
 
 ---
 
-## Setup Make connections (jednou, společné)
+## No Make connections needed
 
-V Make UI → **Connections → Add**:
+These blueprints use **HTTP modules with token-in-header auth**, not Make's
+native GitHub/Anthropic connectors. So you do **NOT** need to set up Make
+connections — just replace the 3 placeholder strings (TODO_GITHUB_TOKEN,
+TODO_ANTHROPIC_API_KEY, TODO_NTFY_TOPIC) inside the imported scenario
+modules' configs.
 
-### Connection: GitHub
-
-- Name: `Spookybro55 GitHub`
-- Auth: Personal Access Token
-- Token: paste GitHub PAT z předchozího kroku
-- Test connection → ✓
-
-### Connection: Anthropic
-
-- Name: `Anthropic Production`
-- Auth: API Key
-- Key: paste contents of `~/.config/anthropic/api-key`
-- Test connection → ✓
-
-### HTTP module pro ntfy
-
-ntfy NENÍ v Make module library. Použij **HTTP module** (built-in):
-
-- Modul: `HTTP` → `Make a request`
-- URL: `https://ntfy.sh/<your_topic>` (replace v každém scenario)
-- Method: POST
-- Headers: `Title`, `Tags`, `Priority` (per scenario JSON)
-- Body: text/plain message
-
-(Není to "connection" v Make smyslu — HTTP je per-call.)
+This trades off:
+- ✅ Explicit (you see exactly which API endpoint + auth)
+- ✅ Future-proof (no dependency on Make's internal connector schema)
+- ✅ One PAT works across all scenarios
+- ❌ No Make-managed token rotation (manual rotation per `docs/SECRETS-ROTATION.md`)
 
 ---
 
@@ -80,14 +94,15 @@ ntfy NENÍ v Make module library. Použij **HTTP module** (built-in):
 
 Pro každý z 5 JSON souborů v `docs/agents/make/0*.json`:
 
-1. Make UI → **Scenarios → Create new scenario → Import blueprint**
+1. Make UI → **Scenarios → Create new scenario → ⋯ menu → Import Blueprint**
 2. Upload JSON file (např. `01-daily-triage.json`)
-3. Make zobrazí scenario diagram. Klikni postupně každý modul:
-   - **GitHub modul:** vyber `Spookybro55 GitHub` connection.
-   - **Anthropic modul** (jen v 03-learning-loop): vyber `Anthropic Production`.
-   - **HTTP modul:** replace `{{TODO_SEBASTIAN_TOPIC}}` v URL s tvým ntfy topic.
-4. **Save** scenario
-5. **Activate** scenario (přepínač top-right). NEAKTIVUJ 03-learning-loop dokud
+3. Make zobrazí scenario diagram. Open each HTTP module config:
+   - Replace `TODO_GITHUB_TOKEN` in any Authorization header with your PAT (`Bearer ghp_xxx...`)
+   - Replace `TODO_NTFY_TOPIC` in any ntfy URL with your topic suffix
+   - For 03-learning-loop module 3: replace `TODO_ANTHROPIC_API_KEY` in x-api-key header
+4. Configure scenario schedule (cron) per `_setup_notes.schedule` in JSON.
+5. **Save** scenario
+6. **Activate** scenario (toggle top-left). NEAKTIVUJ 03-learning-loop dokud
    neukončíš webhook setup níže.
 
 ### Scenario-specific dokončení

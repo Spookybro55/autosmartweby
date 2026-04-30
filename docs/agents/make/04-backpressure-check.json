@@ -3,79 +3,109 @@
     "flow": [
         {
             "id": 1,
-            "module": "util:GetVariables",
-            "version": 1,
+            "module": "http:MakeRequest",
+            "version": 4,
+            "parameters": {
+                "tlsType": "",
+                "proxyKeychain": "",
+                "authenticationType": "noAuth"
+            },
+            "mapper": {
+                "url": "https://api.github.com/repos/Spookybro55/autosmartweby/pulls?state=open&per_page=100",
+                "method": "get",
+                "headers": [
+                    {"name": "Authorization", "value": "Bearer TODO_GITHUB_TOKEN"},
+                    {"name": "Accept", "value": "application/vnd.github+json"},
+                    {"name": "X-GitHub-Api-Version", "value": "2022-11-28"}
+                ],
+                "shareCookies": false,
+                "parseResponse": true,
+                "allowRedirects": true,
+                "stopOnHttpError": true,
+                "useNumberAsString": false,
+                "useMtls": false
+            },
             "metadata": {
-                "designer": {
-                    "x": 0,
-                    "y": 0
-                },
-                "restore": {},
-                "expect": [
-                    {
-                        "name": "variables",
-                        "type": "array",
-                        "label": "Variables (replace with GitHub → List pull requests; state=open, per_page=50)"
-                    }
-                ]
+                "designer": {"x": 0, "y": 0}
             }
         },
         {
             "id": 2,
-            "module": "util:GetVariables",
+            "module": "builtin:NumericAggregator",
             "version": 1,
+            "parameters": {},
+            "mapper": {
+                "value": "1",
+                "fn": "count"
+            },
             "metadata": {
-                "designer": {
-                    "x": 300,
-                    "y": 0
-                },
-                "restore": {},
-                "expect": [
-                    {
-                        "name": "variables",
-                        "type": "array",
-                        "label": "Filter (replace with flow filter — head.ref starts with agent/ or agent-team/)"
-                    }
+                "designer": {"x": 300, "y": 0}
+            },
+            "filter": {
+                "name": "Agent branches only",
+                "conditions": [
+                    [
+                        {"a": "{{1.head.ref}}", "o": "text:startswith", "b": "agent/"}
+                    ],
+                    [
+                        {"a": "{{1.head.ref}}", "o": "text:startswith", "b": "agent-team/"}
+                    ]
                 ]
             }
         },
         {
             "id": 3,
-            "module": "util:GetVariables",
+            "module": "builtin:BasicRouter",
             "version": 1,
             "metadata": {
-                "designer": {
-                    "x": 600,
-                    "y": 0
-                },
-                "restore": {},
-                "expect": [
-                    {
-                        "name": "variables",
-                        "type": "array",
-                        "label": "Variables (replace with Tools → Aggregator; operation=count)"
-                    }
-                ]
-            }
-        },
-        {
-            "id": 4,
-            "module": "util:GetVariables",
-            "version": 1,
-            "metadata": {
-                "designer": {
-                    "x": 900,
-                    "y": 0
-                },
-                "restore": {},
-                "expect": [
-                    {
-                        "name": "variables",
-                        "type": "array",
-                        "label": "Variables (replace with HTTP → POST https://ntfy.sh/{TOPIC} when count >= 5; priority=urgent)"
-                    }
-                ]
-            }
+                "designer": {"x": 600, "y": 0}
+            },
+            "routes": [
+                {
+                    "flow": [
+                        {
+                            "id": 4,
+                            "module": "http:MakeRequest",
+                            "version": 4,
+                            "parameters": {
+                                "tlsType": "",
+                                "proxyKeychain": "",
+                                "authenticationType": "noAuth"
+                            },
+                            "mapper": {
+                                "url": "https://ntfy.sh/TODO_NTFY_TOPIC",
+                                "method": "post",
+                                "headers": [
+                                    {"name": "Title", "value": "Agent backpressure ⚠"},
+                                    {"name": "Tags", "value": "warning,no_entry"},
+                                    {"name": "Priority", "value": "urgent"},
+                                    {"name": "Click", "value": "https://github.com/Spookybro55/autosmartweby/pulls?q=is%3Aopen+head%3Aagent%2F"}
+                                ],
+                                "contentType": "text/plain",
+                                "bodyType": "raw",
+                                "data": "{{2.result}} agent PRs unmerged (≥ 5 = master plan §5 stop condition).\n\n1. Edit docs/agents/QUEUE.md → status PAUSED\n2. Triage open PRs\n3. Flip status → ACTIVE after drain\n\nhttps://github.com/Spookybro55/autosmartweby/pulls?q=is%3Aopen+head%3Aagent%2F",
+                                "shareCookies": false,
+                                "parseResponse": true,
+                                "allowRedirects": true,
+                                "stopOnHttpError": true,
+                                "useNumberAsString": false,
+                                "useMtls": false
+                            },
+                            "metadata": {
+                                "designer": {"x": 900, "y": 0}
+                            },
+                            "filter": {
+                                "name": "Threshold ≥ 5",
+                                "conditions": [
+                                    [
+                                        {"a": "{{2.result}}", "o": "number:greaterorequal", "b": "5"}
+                                    ]
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ]
         }
     ],
     "metadata": {
@@ -93,44 +123,14 @@
             "dlq": false,
             "freshVariables": false
         },
-        "designer": {
-            "orphans": []
-        },
+        "designer": {"orphans": []},
         "zone": "eu2.make.com",
-        "notes": [
-            {
-                "moduleIds": [
-                    1
-                ],
-                "content": "<p><strong>Module 1 (replace placeholder):</strong> GitHub → List pull requests. Owner: Spookybro55, repo: autosmartweby, state: open, per_page: 50.</p>",
-                "isFilterNote": false
-            },
-            {
-                "moduleIds": [
-                    2
-                ],
-                "content": "<p><strong>Module 2 (replace placeholder):</strong> Flow filter — <code>head.ref starts with 'agent/' OR head.ref starts with 'agent-team/'</code>.</p>",
-                "isFilterNote": true
-            },
-            {
-                "moduleIds": [
-                    3
-                ],
-                "content": "<p><strong>Module 3 (replace placeholder):</strong> Tools → Aggregator. Operation: count. Output: <code>{{count}}</code>.</p>",
-                "isFilterNote": false
-            },
-            {
-                "moduleIds": [
-                    4
-                ],
-                "content": "<p><strong>Module 4 (replace placeholder):</strong> Conditional HTTP request via Router. Condition: <code>{{3.count}} >= 5</code>. URL: https://ntfy.sh/{TODO_SEBASTIAN_TOPIC}. Method: POST. Headers: Title=Agent backpressure: {count} PRs unmerged, Priority=urgent. Body: backpressure stop condition reached, recommend QUEUE.md status flip to PAUSED.</p>",
-                "isFilterNote": false
-            },
-            {
-                "moduleIds": [],
-                "content": "<p><strong>Schedule:</strong> Cron 0 * * * * (hourly). Threshold: 5 PRs (master plan §5 stop condition). Does NOT auto-pause QUEUE.md — only notifies.</p><p><strong>Ops/měs:</strong> ~720 (24 × 30).</p>",
-                "isFilterNote": false
-            }
-        ]
+        "notes": []
+    },
+    "_setup_notes": {
+        "github_token": "Replace TODO_GITHUB_TOKEN in module 1 Authorization header.",
+        "ntfy_topic": "Replace TODO_NTFY_TOPIC in module 4 mapper.url.",
+        "schedule": "After import, in Make UI: cron 0 * * * * Europe/Prague (hourly).",
+        "threshold": "Backpressure threshold = 5 (master plan §5). Adjust in route filter conditions[0][0].b if needed."
     }
 }

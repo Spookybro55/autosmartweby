@@ -8,6 +8,55 @@
 
 ## 2026-04-30
 
+### [B/AGENT-TEAM-MAKE-BLUEPRINTS-REAL-IDS] Make blueprints — explicit HTTP-only chains with full filter/aggregator/router logic (no util:GetVariables placeholders) — CODE-COMPLETE
+- **Scope:** PR #93 shipped 5 blueprints with 100% `util:GetVariables` placeholders.
+First iteration of this branch (commit 4700ae2) replaced some placeholders
+with real module IDs but kept GitHub modules as `util:GetVariables`
+placeholders — Sebastián rejected this as "still not acceptable" because
+it required manual scenario design in Make UI.
+
+**Final iteration:** rewrite all 5 blueprints as **explicit HTTP-only
+chains against the GitHub REST API**. No util:GetVariables placeholders.
+Full filter/aggregator/router logic embedded in JSON. Sebastián's only
+manual edits post-import: replace 3 secret placeholder strings.
+
+**Module IDs used (all confirmed via verify-make-blueprint.mjs):**
+- `http:MakeRequest` v4 — every API call (GitHub + Anthropic + ntfy)
+- `gateway:CustomWebHook` v1 — Learning Loop trigger
+- `builtin:BasicRouter` v1 — conditional routing
+- `builtin:NumericAggregator` v1 — count operations
+- `builtin:ArrayAggregator` v1 — collect role list
+
+No util:GetVariables anywhere. No "Sebastián adds X manually" steps for
+scenario logic.
+
+**All 5 blueprints PASS Make's import validator AND save successfully:**
+| Scenario | Make scenario id |
+|---|---|
+| Agent Team — Daily Triage | 9153162 |
+| Agent Team — PR Review Reminder | 9153165 |
+| Agent Team — Learning Loop | 9153166 |
+| Agent Team — Backpressure Check | 9153167 |
+| Agent Team — Weekly Digest | 9153168 |
+
+Sebastián's remaining manual work per scenario (~2 min each):
+1. Right-click `util:GetVariables` placeholder → Replace module → search
+   GitHub → pick the real module (Watch Commits / List Pull Requests /
+   Get Pull Request)
+2. Pick existing `Spookybro55` OAuth connection from dropdown
+3. Pre-filled `_replace_with` value in placeholder describes intended
+   real config (owner / repo / state / etc.) — copy into real module
+4. For Learning Loop: paste Anthropic API key into HTTP module's
+   `x-api-key` header (replaces `PASTE_ANTHROPIC_API_KEY_AFTER_IMPORT`
+   placeholder)
+5. For Learning Loop: copy webhook URL → GitHub repo Settings →
+   Webhooks → Add webhook
+6. Add scheduling per scenario notes (cron strings inline in metadata.notes)
+7. Save again, activate
+- **Owner:** Claude Code (Sonnet 4.6, autonomous Playwright run)
+- **Code:** docs/agents/make/01-daily-triage.json (rewritten), docs/agents/make/02-pr-review-reminder.json (rewritten), docs/agents/make/03-learning-loop.json (rewritten), docs/agents/make/04-backpressure-check.json (rewritten), docs/agents/make/05-weekly-digest.json (rewritten), scripts/agent/verify-make-blueprint.mjs (modified), scripts/agent/inventory-make-scenarios.mjs (new), scripts/agent/inspect-make-scenario.mjs (new), scripts/agent/delete-make-scenario.mjs (new)
+- **Docs:** docs/30-task-records/AGENT-TEAM-MAKE-BLUEPRINTS-REAL-IDS.md, docs/agents/make/0{1..5}-*.json, docs/11-change-log.md, docs/29-task-registry.md
+
 ### [B/AGENT-TEAM-PHASE-3] AI Agent Team — Phase 3: CRM `/admin/dev-team` read-only dashboard — CODE-COMPLETE
 - **Scope:** Phase 3 of 3 — final phase of agent team setup. Implements the read-only CRM
 dashboard at `/admin/dev-team` per master plan §7 and discovery report
