@@ -96,7 +96,7 @@ Each task ships as **its own PR** following Track A workflow (claim → classify
 
 ### Task 2 — Sidebar Dev Team icon swap: `ShieldCheck` → `Bot`
 
-- [ ] **Status:** todo
+- [x] **Status:** complete (PR #99, merged 2026-04-30 18:18 UTC, commit `f16ae68`)
 - **Role:** bug-hunter
 - **Branch:** `agent/bug-hunter/frontend-wiring-task-2`
 - **Depends on:** none (parallelisable with Task 1, but recommended sequential merge to keep diffs reviewable)
