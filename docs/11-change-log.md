@@ -101,6 +101,14 @@ This task **does not** touch `useCurrentUser` itself, the `/api/auth/me` route, 
 - **Code:** `crm-frontend/src/components/layout/sidebar.tsx` (modified)
 - **Docs:** `docs/30-task-records/frontend-wiring-task-1.md`, `docs/agents/RUN-LOG.md`, `docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md`, `docs/11-change-log.md`, `docs/29-task-registry.md`
 
+### [B/frontend-wiring-task-2] Sidebar Dev Team icon swap: `ShieldCheck` → `Bot` — CODE-COMPLETE
+- **Scope:** T2 of plan `agent-team-frontend-wiring-v1` (`docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md`). Replaces the generic admin/security `ShieldCheck` icon on the `Dev Team` sidebar nav item (`crm-frontend/src/components/layout/sidebar.tsx` at `main` HEAD `605a9bc`) with the semantically-precise `Bot` icon — `/admin/dev-team` IS the AI agent team dashboard, so `Bot` is the literal match. Owner had a weak preference for `Bot` per plan Decisions table.
+
+This task **does not** touch any other icon, the `ADMIN_NAV` href, the runtime `isOwner` gating logic, the middleware, or T1's `useCurrentUser` wiring. The change is bounded to two tokens in `sidebar.tsx`: one in the lucide-react import block, one in the `ADMIN_NAV.icon` const.
+- **Owner:** Stream B
+- **Code:** `crm-frontend/src/components/layout/sidebar.tsx` (modified)
+- **Docs:** `docs/30-task-records/frontend-wiring-task-2.md`, `docs/agents/RUN-LOG.md`, `docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md`, `docs/11-change-log.md`, `docs/29-task-registry.md`
+
 ## 2026-04-29
 
 ### [B/AGENT-TEAM-FIX-MAKE-BLUEPRINTS] Rewrite 5 Make blueprints in valid format + Playwright verifier (resolves QFH-0004) — CODE-COMPLETE

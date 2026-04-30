@@ -71,7 +71,7 @@ Each task ships as **its own PR** following Track A workflow (claim → classify
 
 ### Task 1 — Sidebar bottom user section wired to `useCurrentUser`
 
-- [ ] **Status:** todo
+- [x] **Status:** complete (PR #98, merged 2026-04-30 03:03 UTC, commit `605a9bc`)
 - **Role:** bug-hunter
 - **Branch:** `agent/bug-hunter/frontend-wiring-task-1`
 - **Depends on:** none
