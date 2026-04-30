@@ -93,6 +93,14 @@ scenario 03 once Sebastián completes the manual setup per SETUP-CHECKLIST.md).
 - **Code:** `scripts/tests/preview-render-endpoint.test.ts` (modified)
 - **Docs:** `docs/audits/FINDINGS.md`, `docs/30-task-records/DP-001-prod-sheet-id-test-fixture.md`, `docs/agents/QUEUE.md`, `docs/11-change-log.md`, `docs/29-task-registry.md`
 
+### [B/frontend-wiring-task-1] Sidebar bottom user section wired to `useCurrentUser` (avatar + 2-row + loading + orphan fallback) — CODE-COMPLETE
+- **Scope:** T1 of plan `agent-team-frontend-wiring-v1` (`docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md`). Replaces the hardcoded `JN / Jan Novák / Sales Manager` sidebar bottom user section (`crm-frontend/src/components/layout/sidebar.tsx:236-251` at `main` HEAD `eeb657f`) with bindings to the existing `useCurrentUser()` hook. Implements the orphan-session fallback decided in the plan (local-part as name + full email as 2nd row + first 2 chars of local-part as initials). Adds a loading-state placeholder (Loader2 spinner + skeleton stripes) so there's no flash of "JN" before `/api/auth/me` resolves.
+
+This task **does not** touch `useCurrentUser` itself, the `/api/auth/me` route, the existing `isOwner` derivation, or any other sidebar feature. The change is bounded to the bottom user block + a small file-private helper function.
+- **Owner:** Stream B
+- **Code:** `crm-frontend/src/components/layout/sidebar.tsx` (modified)
+- **Docs:** `docs/30-task-records/frontend-wiring-task-1.md`, `docs/agents/RUN-LOG.md`, `docs/agents/plans/ACTIVE/agent-team-frontend-wiring-v1.md`, `docs/11-change-log.md`, `docs/29-task-registry.md`
+
 ## 2026-04-29
 
 ### [B/AGENT-TEAM-FIX-MAKE-BLUEPRINTS] Rewrite 5 Make blueprints in valid format + Playwright verifier (resolves QFH-0004) — CODE-COMPLETE

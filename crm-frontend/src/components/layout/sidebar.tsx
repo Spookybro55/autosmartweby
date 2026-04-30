@@ -15,10 +15,37 @@ import {
   ShieldCheck,
   Sun,
   Moon,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 import { useCurrentUser } from "@/lib/auth/use-current-user";
+import { ASSIGNEE_NAMES } from "@/lib/config";
+
+// Resolve display name + avatar initials for the bottom user section.
+// Known email → ASSIGNEE_NAMES lookup. Orphan email (validated by auth
+// but not in the assignee roster — happens when a former allowed user
+// is removed from the map) → local-part as name + first 2 chars of
+// local-part as initials. The full email is rendered as the second
+// row regardless, so the user can self-diagnose roster drift.
+function deriveUserDisplay(email: string): { name: string; initials: string } {
+  const lower = email.toLowerCase().trim();
+  const known = ASSIGNEE_NAMES[lower];
+  if (known) {
+    const parts = known.split(/\s+/).filter(Boolean);
+    const first = parts[0]?.[0] ?? "";
+    const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? "") : "";
+    return { name: known, initials: (first + last).toUpperCase() };
+  }
+  const local = lower.split("@")[0] ?? lower;
+  if (!local) {
+    return { name: lower, initials: lower.slice(0, 2).toUpperCase() };
+  }
+  return {
+    name: local.charAt(0).toUpperCase() + local.slice(1),
+    initials: local.slice(0, 2).toUpperCase(),
+  };
+}
 
 const navigation = [
   { label: "Přehled", href: "/dashboard", icon: LayoutDashboard },
@@ -97,11 +124,13 @@ function ThemeToggle({ collapsed }: { collapsed: boolean }) {
 export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(true);
-  const { email: currentEmail } = useCurrentUser();
+  const { email: currentEmail, loading: userLoading } = useCurrentUser();
 
   const ownerEmail = process.env.NEXT_PUBLIC_OWNER_EMAIL?.toLowerCase().trim();
   const isOwner = !!ownerEmail && currentEmail?.toLowerCase().trim() === ownerEmail;
   const navItems = isOwner ? [...navigation, ADMIN_NAV] : navigation;
+
+  const userDisplay = currentEmail ? deriveUserDisplay(currentEmail) : null;
 
   return (
     <>
@@ -220,37 +249,60 @@ export function Sidebar() {
           <ThemeToggle collapsed={collapsed} />
         </div>
 
-        {/* User section */}
-        <div
-          className={cn(
-            "border-t border-sidebar-border p-3",
-            collapsed && "lg:px-2"
-          )}
-        >
+        {/* User section — wired to /api/auth/me via useCurrentUser.
+            Hidden entirely when unauthenticated (middleware would have
+            redirected, this is just a safety branch). */}
+        {(userLoading || userDisplay) && (
           <div
             className={cn(
-              "flex items-center gap-3 rounded-xl px-3 py-2.5",
-              collapsed && "lg:justify-center lg:px-0"
+              "border-t border-sidebar-border p-3",
+              collapsed && "lg:px-2"
             )}
           >
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-medium text-secondary-foreground">
-              JN
-            </div>
             <div
               className={cn(
-                "flex flex-col overflow-hidden",
-                collapsed && "lg:hidden"
+                "flex items-center gap-3 rounded-xl px-3 py-2.5",
+                collapsed && "lg:justify-center lg:px-0"
               )}
             >
-              <span className="truncate text-sm font-medium text-sidebar-foreground">
-                Jan Novák
-              </span>
-              <span className="truncate text-xs text-sidebar-foreground/50">
-                Sales Manager
-              </span>
+              {userLoading ? (
+                <>
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground/60">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  </div>
+                  <div
+                    className={cn(
+                      "flex flex-col gap-1.5 overflow-hidden",
+                      collapsed && "lg:hidden"
+                    )}
+                  >
+                    <span className="h-3 w-24 rounded bg-sidebar-accent/40 animate-pulse" />
+                    <span className="h-2.5 w-32 rounded bg-sidebar-accent/30 animate-pulse" />
+                  </div>
+                </>
+              ) : userDisplay ? (
+                <>
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-medium text-secondary-foreground">
+                    {userDisplay.initials}
+                  </div>
+                  <div
+                    className={cn(
+                      "flex flex-col overflow-hidden",
+                      collapsed && "lg:hidden"
+                    )}
+                  >
+                    <span className="truncate text-sm font-medium text-sidebar-foreground">
+                      {userDisplay.name}
+                    </span>
+                    <span className="truncate text-xs text-sidebar-foreground/50">
+                      {currentEmail}
+                    </span>
+                  </div>
+                </>
+              ) : null}
             </div>
           </div>
-        </div>
+        )}
       </aside>
     </>
   );
