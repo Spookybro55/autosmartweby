@@ -5,38 +5,46 @@
             "id": 1,
             "module": "util:GetVariables",
             "version": 1,
-            "metadata": {
-                "designer": {
-                    "x": 0,
-                    "y": 0
-                },
-                "restore": {},
-                "expect": [
-                    {
-                        "name": "variables",
-                        "type": "array",
-                        "label": "Variables (replace this placeholder with GitHub Watch Files trigger)"
-                    }
+            "parameters": {},
+            "mapper": {
+                "variables": [
+                    {"name": "_replace_with", "value": "GitHub → Watch Commits (owner=Spookybro55, repo=autosmartweby, branch=main, limit=10)"}
                 ]
+            },
+            "metadata": {
+                "designer": {"x": 0, "y": 0},
+                "restore": {}
             }
         },
         {
             "id": 2,
-            "module": "util:GetVariables",
-            "version": 1,
+            "module": "http:MakeRequest",
+            "version": 4,
+            "parameters": {
+                "tlsType": "",
+                "proxyKeychain": "",
+                "authenticationType": "noAuth"
+            },
+            "mapper": {
+                "url": "https://ntfy.sh/autosmartweby-agents-123456789",
+                "method": "post",
+                "headers": [
+                    {"name": "Title", "value": "Agent Team — Daily Triage Ready"},
+                    {"name": "Tags", "value": "robot,calendar"},
+                    {"name": "Priority", "value": "default"}
+                ],
+                "contentType": "text/plain",
+                "bodyType": "raw",
+                "data": "FINDINGS.md changed. Run locally: claude → 'vezmi další task z queue'.\n\nQUEUE.md: https://github.com/Spookybro55/autosmartweby/blob/main/docs/agents/QUEUE.md",
+                "shareCookies": false,
+                "parseResponse": true,
+                "allowRedirects": true,
+                "stopOnHttpError": true,
+                "useNumberAsString": false,
+                "useMtls": false
+            },
             "metadata": {
-                "designer": {
-                    "x": 300,
-                    "y": 0
-                },
-                "restore": {},
-                "expect": [
-                    {
-                        "name": "variables",
-                        "type": "array",
-                        "label": "Variables (replace this placeholder with HTTP Make a request → POST https://ntfy.sh/{TOPIC})"
-                    }
-                ]
+                "designer": {"x": 300, "y": 0}
             }
         }
     ],
@@ -55,28 +63,22 @@
             "dlq": false,
             "freshVariables": false
         },
-        "designer": {
-            "orphans": []
-        },
+        "designer": {"orphans": []},
         "zone": "eu2.make.com",
         "notes": [
             {
-                "moduleIds": [
-                    1
-                ],
-                "content": "<p><strong>Module 1 (replace placeholder):</strong> GitHub → Watch files. Owner: Spookybro55, repo: autosmartweby, path: docs/audits/FINDINGS.md, branch: main.</p>",
+                "moduleIds": [1],
+                "content": "<p><strong>Module 1 — REPLACE with GitHub → Watch Commits.</strong> After import: right-click placeholder → Replace module → search 'GitHub' → pick 'Watch Commits'. Connection = existing Spookybro55 OAuth. Owner=Spookybro55, Repo=autosmartweby, Branch=main, Limit=10. <em>(Module ID is util:GetVariables placeholder because Make's real GitHub module IDs are not in our extracted catalog yet — Sebastián replaces in UI.)</em></p>",
                 "isFilterNote": false
             },
             {
-                "moduleIds": [
-                    2
-                ],
-                "content": "<p><strong>Module 2 (replace placeholder):</strong> HTTP → Make a request. URL: https://ntfy.sh/{TODO_SEBASTIAN_TOPIC}. Method: POST. Headers: Title=Agent Team — Daily Triage Ready, Tags=robot,calendar. Body: \"FINDINGS.md updated. Run: claude → vezmi další task z queue.\"</p>",
+                "moduleIds": [2],
+                "content": "<p><strong>Module 2 — HTTP → Make a request</strong> (REAL, no replacement needed). Sends ntfy notification.</p>",
                 "isFilterNote": false
             },
             {
                 "moduleIds": [],
-                "content": "<p><strong>Schedule:</strong> Cron 0 8 * * * (08:00 Europe/Prague). Set in Make UI → scenario settings (NOT in blueprint). Triggers daily.</p><p><strong>Ops/měs:</strong> ~30. Description: notifies Sebastián about daily triage availability.</p>",
+                "content": "<p><strong>Schedule (UI):</strong> cron <code>0 8 * * *</code> Europe/Prague. <strong>Ops/měs:</strong> ~30.</p>",
                 "isFilterNote": false
             }
         ]

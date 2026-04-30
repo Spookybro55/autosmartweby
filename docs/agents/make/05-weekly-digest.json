@@ -5,76 +5,46 @@
             "id": 1,
             "module": "util:GetVariables",
             "version": 1,
-            "metadata": {
-                "designer": {
-                    "x": 0,
-                    "y": 0
-                },
-                "restore": {},
-                "expect": [
-                    {
-                        "name": "variables",
-                        "type": "array",
-                        "label": "Variables (replace with GitHub → List pull requests; state=closed, per_page=100)"
-                    }
+            "parameters": {},
+            "mapper": {
+                "variables": [
+                    {"name": "_replace_with", "value": "GitHub → List Pull Requests (owner=Spookybro55, repo=autosmartweby, state=closed, limit=100)"}
                 ]
+            },
+            "metadata": {
+                "designer": {"x": 0, "y": 0},
+                "restore": {}
             }
         },
         {
             "id": 2,
-            "module": "util:GetVariables",
-            "version": 1,
+            "module": "http:MakeRequest",
+            "version": 4,
+            "parameters": {
+                "tlsType": "",
+                "proxyKeychain": "",
+                "authenticationType": "noAuth"
+            },
+            "mapper": {
+                "url": "https://ntfy.sh/autosmartweby-agents-123456789",
+                "method": "post",
+                "headers": [
+                    {"name": "Title", "value": "Agent Team — Weekly Digest"},
+                    {"name": "Tags", "value": "bar_chart,calendar"},
+                    {"name": "Priority", "value": "default"}
+                ],
+                "contentType": "text/plain",
+                "bodyType": "raw",
+                "data": "Past 7 days summary (configure aggregation in Make UI for per-role count).\n\nReview backlog: https://github.com/Spookybro55/autosmartweby/pulls\nQueue: https://github.com/Spookybro55/autosmartweby/blob/main/docs/agents/QUEUE.md\n\nManual cost: https://console.anthropic.com/settings/usage",
+                "shareCookies": false,
+                "parseResponse": true,
+                "allowRedirects": true,
+                "stopOnHttpError": true,
+                "useNumberAsString": false,
+                "useMtls": false
+            },
             "metadata": {
-                "designer": {
-                    "x": 300,
-                    "y": 0
-                },
-                "restore": {},
-                "expect": [
-                    {
-                        "name": "variables",
-                        "type": "array",
-                        "label": "Filter (replace with flow filter — head.ref starts with agent/, merged=true, merged_at > now-7d)"
-                    }
-                ]
-            }
-        },
-        {
-            "id": 3,
-            "module": "util:GetVariables",
-            "version": 1,
-            "metadata": {
-                "designer": {
-                    "x": 600,
-                    "y": 0
-                },
-                "restore": {},
-                "expect": [
-                    {
-                        "name": "variables",
-                        "type": "array",
-                        "label": "Variables (replace with Tools → Aggregator group by extracted role)"
-                    }
-                ]
-            }
-        },
-        {
-            "id": 4,
-            "module": "util:GetVariables",
-            "version": 1,
-            "metadata": {
-                "designer": {
-                    "x": 900,
-                    "y": 0
-                },
-                "restore": {},
-                "expect": [
-                    {
-                        "name": "variables",
-                        "type": "array",
-                        "label": "Variables (replace with HTTP → POST https://ntfy.sh/{TOPIC} weekly summary)"
-                    }
-                ]
+                "designer": {"x": 300, "y": 0}
             }
         }
     ],
@@ -93,42 +63,22 @@
             "dlq": false,
             "freshVariables": false
         },
-        "designer": {
-            "orphans": []
-        },
+        "designer": {"orphans": []},
         "zone": "eu2.make.com",
         "notes": [
             {
-                "moduleIds": [
-                    1
-                ],
-                "content": "<p><strong>Module 1 (replace placeholder):</strong> GitHub → List pull requests. Owner: Spookybro55, repo: autosmartweby, state: closed, per_page: 100.</p>",
+                "moduleIds": [1],
+                "content": "<p><strong>Module 1 — REPLACE with GitHub → List Pull Requests</strong> (state=closed). Add edge filter <code>head.ref starts with agent/</code> AND <code>merged_at > now - 604800000 ms</code>.</p>",
                 "isFilterNote": false
             },
             {
-                "moduleIds": [
-                    2
-                ],
-                "content": "<p><strong>Module 2 (replace placeholder):</strong> Flow filter — <code>head.ref starts with 'agent/' AND merged_at > now() - 604800000 AND merged == true</code> (past 7 days, agent-merged).</p>",
-                "isFilterNote": true
-            },
-            {
-                "moduleIds": [
-                    3
-                ],
-                "content": "<p><strong>Module 3 (replace placeholder):</strong> Tools → Aggregator. Group by: head.ref. Extract role: <code>match(head.ref; 'agent/([^/]+)/'; 1)</code>. Outputs: count per role.</p>",
-                "isFilterNote": false
-            },
-            {
-                "moduleIds": [
-                    4
-                ],
-                "content": "<p><strong>Module 4 (replace placeholder):</strong> HTTP → Make a request. URL: https://ntfy.sh/{TODO_SEBASTIAN_TOPIC}. Method: POST. Headers: Title=Agent Team — Weekly Digest, Tags=bar_chart,calendar. Body: summary of past week's merged agent PRs by role + new patterns count + manual cost link to https://console.anthropic.com/settings/usage.</p>",
+                "moduleIds": [2],
+                "content": "<p><strong>Module 2 — HTTP → ntfy</strong> (REAL). After import, Sebastián adds <strong>Tools → Aggregator (group_by head.ref)</strong> step BEFORE this HTTP for per-role breakdown.</p>",
                 "isFilterNote": false
             },
             {
                 "moduleIds": [],
-                "content": "<p><strong>Schedule:</strong> Cron 0 9 * * 1 (Monday 09:00 Europe/Prague).</p><p><strong>Ops/měs:</strong> ~4 (4 Mondays).</p><p><strong>Optional extension:</strong> include task records analytics (count of done vs blocked from QUEUE.md / RUN-LOG.md).</p>",
+                "content": "<p><strong>Schedule:</strong> cron <code>0 9 * * 1</code> Monday 09:00 Europe/Prague. <strong>Ops/měs:</strong> ~4.</p>",
                 "isFilterNote": false
             }
         ]

@@ -5,57 +5,46 @@
             "id": 1,
             "module": "util:GetVariables",
             "version": 1,
-            "metadata": {
-                "designer": {
-                    "x": 0,
-                    "y": 0
-                },
-                "restore": {},
-                "expect": [
-                    {
-                        "name": "variables",
-                        "type": "array",
-                        "label": "Variables (replace with GitHub → List pull requests; state=open, per_page=50)"
-                    }
+            "parameters": {},
+            "mapper": {
+                "variables": [
+                    {"name": "_replace_with", "value": "GitHub → List Pull Requests (owner=Spookybro55, repo=autosmartweby, state=open, limit=50)"}
                 ]
+            },
+            "metadata": {
+                "designer": {"x": 0, "y": 0},
+                "restore": {}
             }
         },
         {
             "id": 2,
-            "module": "util:GetVariables",
-            "version": 1,
+            "module": "http:MakeRequest",
+            "version": 4,
+            "parameters": {
+                "tlsType": "",
+                "proxyKeychain": "",
+                "authenticationType": "noAuth"
+            },
+            "mapper": {
+                "url": "https://ntfy.sh/autosmartweby-agents-123456789",
+                "method": "post",
+                "headers": [
+                    {"name": "Title", "value": "Agent PR awaiting review"},
+                    {"name": "Tags", "value": "warning,git"},
+                    {"name": "Priority", "value": "high"}
+                ],
+                "contentType": "text/plain",
+                "bodyType": "raw",
+                "data": "Agent PR open > 24h.\n\nReview: https://github.com/Spookybro55/autosmartweby/pulls?q=is%3Aopen+head%3Aagent%2F",
+                "shareCookies": false,
+                "parseResponse": true,
+                "allowRedirects": true,
+                "stopOnHttpError": true,
+                "useNumberAsString": false,
+                "useMtls": false
+            },
             "metadata": {
-                "designer": {
-                    "x": 300,
-                    "y": 0
-                },
-                "restore": {},
-                "expect": [
-                    {
-                        "name": "variables",
-                        "type": "array",
-                        "label": "Filter (replace with flow filter — head.ref starts with 'agent/' OR 'agent-team/' AND now() - created_at > 86400000)"
-                    }
-                ]
-            }
-        },
-        {
-            "id": 3,
-            "module": "util:GetVariables",
-            "version": 1,
-            "metadata": {
-                "designer": {
-                    "x": 600,
-                    "y": 0
-                },
-                "restore": {},
-                "expect": [
-                    {
-                        "name": "variables",
-                        "type": "array",
-                        "label": "Variables (replace with HTTP → POST https://ntfy.sh/{TOPIC} when count >= 1)"
-                    }
-                ]
+                "designer": {"x": 300, "y": 0}
             }
         }
     ],
@@ -74,35 +63,22 @@
             "dlq": false,
             "freshVariables": false
         },
-        "designer": {
-            "orphans": []
-        },
+        "designer": {"orphans": []},
         "zone": "eu2.make.com",
         "notes": [
             {
-                "moduleIds": [
-                    1
-                ],
-                "content": "<p><strong>Module 1 (replace placeholder):</strong> GitHub → List pull requests. Owner: Spookybro55, repo: autosmartweby, state: open, per_page: 50.</p>",
+                "moduleIds": [1],
+                "content": "<p><strong>Module 1 — REPLACE with GitHub → List Pull Requests.</strong> After import: right-click placeholder → Replace → search 'GitHub' → 'List Pull Requests'. Add edge filter <code>head.ref starts with agent/</code> AND <code>(now - created_at) > 86400000 ms</code>.</p>",
                 "isFilterNote": false
             },
             {
-                "moduleIds": [
-                    2
-                ],
-                "content": "<p><strong>Module 2 (replace placeholder):</strong> Add a flow filter (Make's built-in — no module). Condition: <code>head.ref starts with 'agent/' OR head.ref starts with 'agent-team/' AND (now() - created_at) > 86400000</code> (older than 24h).</p>",
-                "isFilterNote": true
-            },
-            {
-                "moduleIds": [
-                    3
-                ],
-                "content": "<p><strong>Module 3 (replace placeholder):</strong> HTTP → Make a request. URL: https://ntfy.sh/{TODO_SEBASTIAN_TOPIC}. Method: POST. Headers: Title=Agent PRs awaiting review, Tags=warning,git, Priority=high. Body: \"{count} unmerged agent PRs > 24h. https://github.com/Spookybro55/autosmartweby/pulls\"</p>",
+                "moduleIds": [2],
+                "content": "<p><strong>Module 2 — HTTP → ntfy</strong> (REAL).</p>",
                 "isFilterNote": false
             },
             {
                 "moduleIds": [],
-                "content": "<p><strong>Schedule:</strong> Cron 0 9,11,13,15,18,21 * * * (6× daily, Europe/Prague). Set in Make UI → scenario settings.</p><p><strong>Ops/měs:</strong> ~180.</p>",
+                "content": "<p><strong>Schedule:</strong> cron <code>0 9,11,13,15,18,21 * * *</code> Europe/Prague. <strong>Ops/měs:</strong> ~180.</p>",
                 "isFilterNote": false
             }
         ]
